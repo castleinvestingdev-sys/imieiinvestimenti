@@ -154,8 +154,12 @@ export async function POST(request: NextRequest) {
             .single()
 
         if (error) {
-            console.error('Supabase insert error:', error)
-            return NextResponse.json({ success: false, error: 'Database error' }, { status: 500 })
+            console.error('Supabase insert error details:', JSON.stringify(error, null, 2))
+            return NextResponse.json({
+                success: false,
+                error: `Database error: ${error.message || error.code || 'Unknown error'}`,
+                details: error
+            }, { status: 500 })
         }
 
         return NextResponse.json({
