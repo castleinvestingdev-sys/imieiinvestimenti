@@ -99,38 +99,29 @@ export async function POST(request: NextRequest) {
             if (!groqResponse.ok) {
                 const errorText = await groqResponse.text()
                 console.error('Groq API error:', errorText)
-                // return NextResponse.json({ success: false, error: 'AI parsing failed' }, { status: 500 })
-                // Fallback to mock
-            } else {
-                const groqData = await groqResponse.json()
-                const aiResponse = groqData.choices?.[0]?.message?.content || ''
-
-                try {
-                    // Extract JSON from potential markdown code blocks
-                    const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || aiResponse.match(/\{[\s\S]*\}/)
-                    const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : aiResponse
-                    parsed = JSON.parse(jsonStr)
-                } catch (e) {
-                    console.error("JSON Parse error", e)
-                }
+                return NextResponse.json({ success: false, error: 'AI parsing failed: ' + errorText }, { status: 500 })
             }
+
+            const groqData = await groqResponse.json()
+            const aiResponse = groqData.choices?.[0]?.message?.content || ''
+
+            try {
+                // Extract JSON from potential markdown code blocks
+                const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || aiResponse.match(/\{[\s\S]*\}/)
+                const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : aiResponse
+                parsed = JSON.parse(jsonStr)
+            } catch (e) {
+                console.error("JSON Parse error", e)
+                return NextResponse.json({ success: false, error: 'Failed to parse AI response' }, { status: 500 })
+            }
+        } else {
+            return NextResponse.json({ success: false, error: 'Missing GROQ_API_KEY configuration' }, { status: 500 })
         }
 
+        // Removed fallback to mock data as requested
         if (!parsed) {
-            console.log("Using Mock Data because GROQ_API_KEY is missing or failed")
-            // Return mock data for demo
-            parsed = {
-                type: isDossier ? 'DOSSIER' : 'LIQUIDITY',
-                bankName: 'Banca Demo (Simulazione)',
-                dossierNumber: 'DT-12345-TEST',
-                period: { start: '01/01/2024', end: '31/03/2024' },
-                finalPortfolio: [{ isin: 'IT0001234567', name: 'Fondo Azionario Globale', quantity: 100, price: 10, value: 12500 }],
-                transactions: [],
-                initialBalance: isDossier ? undefined : 15000,
-                finalBalance: isDossier ? undefined : 18000,
-            }
+            return NextResponse.json({ success: false, error: 'Parsing failed completely' }, { status: 500 })
         }
-
 
 
         // Save to Supabase
