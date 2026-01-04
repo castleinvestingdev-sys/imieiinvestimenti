@@ -43,7 +43,7 @@ export default function ComeFunzionaPage() {
                     }}>
                         In 3 semplici passaggi, ti diamo il potere di vedere quello che la banca non ti dice. Gratis e in totale anonimato.
                     </p>
-                    <Link href="/upload" style={{
+                    <Link href="/dashboard" style={{
                         backgroundColor: '#00C853',
                         color: 'white',
                         fontWeight: 800,
@@ -212,7 +212,7 @@ export default function ComeFunzionaPage() {
                     <p style={{ fontSize: '1.1rem', opacity: 0.8, maxWidth: '500px', margin: '0 auto 2rem' }}>
                         Non serve registrarsi per iniziare. Carica il tuo primo file adesso.
                     </p>
-                    <Link href="/upload" style={{
+                    <Link href="/dashboard" style={{
                         background: '#fff',
                         color: '#000',
                         fontWeight: 800,
