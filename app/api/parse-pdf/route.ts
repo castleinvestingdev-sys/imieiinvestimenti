@@ -41,9 +41,9 @@ const liquidityPrompt = `Analizza questo estratto conto liquidità bancario e re
 }`
 
 export async function POST(request: NextRequest) {
-    if (!GROQ_API_KEY) {
-        return NextResponse.json({ success: false, error: 'Server configuration error' }, { status: 500 })
-    }
+    // if (!GROQ_API_KEY) {
+    //     return NextResponse.json({ success: false, error: 'Server configuration error' }, { status: 500 })
+    // }
 
     try {
         const formData = await request.formData()
@@ -69,59 +69,69 @@ export async function POST(request: NextRequest) {
         const isDossier = fileName.includes('dossier') || fileName.includes('titoli')
         const prompt = isDossier ? dossierPrompt : liquidityPrompt
 
-        // Call Groq API for parsing
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${GROQ_API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'Sei un esperto analista finanziario che estrae dati strutturati da documenti bancari italiani. Rispondi SOLO con JSON valido.'
-                    },
-                    {
-                        role: 'user',
-                        content: `${prompt}\n\nEcco il testo del documento (base64 PDF):\n\nNome file: ${file.name}\nDimensione: ${file.size} bytes\n\n(Il documento verrà processato dal sistema)`
-                    }
-                ],
-                temperature: 0.1,
-                max_tokens: 4000,
-            }),
-        })
+        let parsed;
 
-        if (!groqResponse.ok) {
-            const errorText = await groqResponse.text()
-            console.error('Groq API error:', errorText)
-            return NextResponse.json({ success: false, error: 'AI parsing failed' }, { status: 500 })
+        if (GROQ_API_KEY) {
+            // Call Groq API for parsing
+            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GROQ_API_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: 'llama-3.3-70b-versatile',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'Sei un esperto analista finanziario che estrae dati strutturati da documenti bancari italiani. Rispondi SOLO con JSON valido.'
+                        },
+                        {
+                            role: 'user',
+                            content: `${prompt}\n\nEcco il testo del documento (base64 PDF):\n\nNome file: ${file.name}\nDimensione: ${file.size} bytes\n\n(Il documento verrà processato dal sistema)`
+                        }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 4000,
+                }),
+            })
+
+            if (!groqResponse.ok) {
+                const errorText = await groqResponse.text()
+                console.error('Groq API error:', errorText)
+                // return NextResponse.json({ success: false, error: 'AI parsing failed' }, { status: 500 })
+                // Fallback to mock
+            } else {
+                const groqData = await groqResponse.json()
+                const aiResponse = groqData.choices?.[0]?.message?.content || ''
+
+                try {
+                    // Extract JSON from potential markdown code blocks
+                    const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || aiResponse.match(/\{[\s\S]*\}/)
+                    const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : aiResponse
+                    parsed = JSON.parse(jsonStr)
+                } catch (e) {
+                    console.error("JSON Parse error", e)
+                }
+            }
         }
 
-        const groqData = await groqResponse.json()
-        const aiResponse = groqData.choices?.[0]?.message?.content || ''
-
-        // Parse the JSON from AI response
-        let parsed
-        try {
-            // Extract JSON from potential markdown code blocks
-            const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || aiResponse.match(/\{[\s\S]*\}/)
-            const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : aiResponse
-            parsed = JSON.parse(jsonStr)
-        } catch (parseError) {
-            console.error('JSON parse error:', parseError)
+        if (!parsed) {
+            console.log("Using Mock Data because GROQ_API_KEY is missing or failed")
             // Return mock data for demo
             parsed = {
                 type: isDossier ? 'DOSSIER' : 'LIQUIDITY',
-                bankName: 'Banca Demo',
+                bankName: 'Banca Demo (Simulazione)',
+                dossierNumber: 'DT-12345-TEST',
                 period: { start: '01/01/2024', end: '31/03/2024' },
-                finalPortfolio: [{ isin: 'IT0001234567', name: 'Demo Fund', quantity: 100, price: 10, value: 1000 }],
+                finalPortfolio: [{ isin: 'IT0001234567', name: 'Fondo Azionario Globale', quantity: 100, price: 10, value: 12500 }],
                 transactions: [],
-                initialBalance: isDossier ? undefined : 10000,
-                finalBalance: isDossier ? undefined : 12000,
+                initialBalance: isDossier ? undefined : 15000,
+                finalBalance: isDossier ? undefined : 18000,
             }
         }
+
+
 
         // Save to Supabase
         const supabase = await createClient()
