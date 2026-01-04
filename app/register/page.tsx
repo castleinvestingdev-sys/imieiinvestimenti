@@ -77,10 +77,10 @@ export default function RegisterPage() {
             minHeight: '100vh',
             display: 'flex',
             backgroundColor: '#FFFFFF',
-            marginTop: '-86px',
+            paddingTop: '86px',
             position: 'relative',
             zIndex: 10,
-        }}>
+        }} className="register-container">
 
             {/* Left Column: Register Form */}
             <div style={{
@@ -91,10 +91,8 @@ export default function RegisterPage() {
                 alignItems: 'center',
                 padding: '2rem',
                 backgroundColor: '#FFFFFF',
-            }}>
+            }} className="register-form-side">
                 <div style={{ width: '100%', maxWidth: '440px', padding: '40px 0' }}>
-
-
 
                     <div style={{ marginBottom: '32px' }}>
                         <h1 style={{
@@ -317,7 +315,7 @@ export default function RegisterPage() {
                 position: 'relative',
                 overflow: 'hidden',
                 borderLeft: '1px solid #E5E7EB'
-            }}>
+            }} className="register-benefits-side">
                 {/* Subtle background pattern */}
                 <div style={{
                     position: 'absolute',
@@ -413,8 +411,16 @@ export default function RegisterPage() {
           box-shadow: 0 0 0 4px rgba(0, 200, 83, 0.1);
         }
         @media (max-width: 1024px) {
-          div:first-child > div:last-child {
+          .register-container {
+             flex-direction: column;
+          }
+          .register-benefits-side {
             display: none !important;
+          }
+          .register-form-side {
+             flex: none;
+             width: 100%;
+             padding-top: 4rem;
           }
         }
       `}</style>
