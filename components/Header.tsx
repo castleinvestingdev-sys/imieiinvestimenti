@@ -47,6 +47,7 @@ export default function Header() {
     padding: '8px 16px',
     borderRadius: '25px',
     transition: 'all 0.2s ease',
+    whiteSpace: 'nowrap',
   }
 
   return (
@@ -61,7 +62,7 @@ export default function Header() {
         transition: 'all 0.3s ease',
       }}>
         <div style={{
-          maxWidth: '950px',
+          maxWidth: '1200px',
           margin: '0 auto',
           background: 'rgba(255, 255, 255, 0.95)',
           backdropFilter: 'blur(20px)',
@@ -101,9 +102,10 @@ export default function Header() {
               background: '#f3f4f6',
               borderRadius: '30px',
             }}>
-              <Link href="/come-funziona" style={navLinkStyle}>Come Funziona</Link>
-              <Link href="/rendimenti" style={navLinkStyle}>Rendimenti</Link>
-              <Link href="/reati" style={navLinkStyle}>Rebates</Link>
+              <Link href="/come-funziona" style={navLinkStyle}>COME FUNZIONA</Link>
+              <Link href="/commissioni" style={navLinkStyle}>LE COMMISSIONI DEL SISTEMA</Link>
+              <Link href="/rendimenti" style={navLinkStyle}>RENDIMENTI DI MERCATO</Link>
+              <Link href="/reati" style={navLinkStyle}>ATTENZIONE AI REBATES</Link>
             </div>
 
             {/* Right Actions */}

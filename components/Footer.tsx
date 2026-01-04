@@ -34,6 +34,11 @@ export default function Footer() {
                                 </Link>
                             </li>
                             <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/commissioni" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Commissioni di Sistema
+                                </Link>
+                            </li>
+                            <li style={{ marginBottom: '0.7rem' }}>
                                 <Link href="/rendimenti" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
                                     Rendimenti di Mercato
                                 </Link>
@@ -105,6 +110,6 @@ export default function Footer() {
           }
         }
       `}</style>
-        </footer>
+        </footer >
     )
 }
