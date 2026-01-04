@@ -104,9 +104,6 @@ export default function RegisterPage() {
                         <p style={{ color: '#4B5563', fontSize: '0.975rem' }}>
                             Crea il tuo account gratuito e scopri la verità sui tuoi investimenti.
                         </p>
-                        <p style={{ fontSize: '0.7rem', color: '#ccc', marginTop: '5px' }}>
-                            Debug URL: {process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Loaded ✅' : 'Missing ❌'}
-                        </p>
                     </div>
 
                     {error && (

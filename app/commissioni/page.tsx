@@ -248,7 +248,7 @@ export default function CommissioniPage() {
                         <div style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '20px', justifyContent: 'flex-end', marginBottom: '24px' }}>
                                 <h2 style={{ fontSize: '1.8rem', fontWeight: 800 }}>ADDEBITI VARI</h2>
-                                <div style={{ width: '40px', height: '40px', backgroundColor: '#EF4444', color: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.2rem' }}>3</div>
+                                <div style={{ width: '40px', height: '40px', backgroundColor: '#EF4444', color: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.2rem' }}>4</div>
                             </div>
                             <p style={{ fontSize: '1.2rem', color: '#4B5563', lineHeight: 1.6, marginBottom: '24px' }}>
                                 La banca addebita sulla liquidità regolarmente altre spese per:
