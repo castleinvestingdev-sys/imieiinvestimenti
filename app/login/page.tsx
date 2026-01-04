@@ -34,10 +34,10 @@ export default function LoginPage() {
       minHeight: '100vh',
       display: 'flex',
       backgroundColor: '#FFFFFF',
-      marginTop: '-86px', // Offset of the header height
+      paddingTop: '86px', // Account for header
       position: 'relative',
       zIndex: 10,
-    }}>
+    }} className="login-container">
 
       {/* Left Column: The Form */}
       <div style={{
@@ -48,10 +48,8 @@ export default function LoginPage() {
         alignItems: 'center',
         padding: '2rem',
         backgroundColor: '#FFFFFF',
-      }}>
+      }} className="login-form-side">
         <div style={{ width: '100%', maxWidth: '400px' }}>
-
-
 
           <div style={{ marginBottom: '32px' }}>
             <h1 style={{
@@ -195,7 +193,7 @@ export default function LoginPage() {
         position: 'relative',
         overflow: 'hidden',
         borderLeft: '1px solid #E5E7EB'
-      }}>
+      }} className="login-image-side">
         {/* Subtle background pattern */}
         <div style={{
           position: 'absolute',
@@ -283,8 +281,16 @@ export default function LoginPage() {
           box-shadow: 0 0 0 4px rgba(0, 200, 83, 0.1);
         }
         @media (max-width: 1024px) {
-          div:first-child > div:last-child {
+          .login-container {
+             flex-direction: column;
+          }
+          .login-image-side {
             display: none !important;
+          }
+          .login-form-side {
+             flex: none;
+             width: 100%;
+             padding-top: 4rem;
           }
         }
       `}</style>
