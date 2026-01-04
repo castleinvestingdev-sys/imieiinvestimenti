@@ -1,59 +1,110 @@
+'use client'
+
 import Link from 'next/link'
 
 export default function Footer() {
     return (
-        <footer className="bg-gray-900 text-white py-16">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
+        <footer style={{ background: '#2d2d2d', color: '#fff', padding: '60px 0 40px 0' }}>
+            <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: '3rem', marginBottom: '3rem' }}>
+
                     {/* Brand */}
                     <div>
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center">
-                                <span className="text-white font-bold text-lg">📊</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.2rem' }}>
+                            <div style={{ width: '40px', height: '40px', background: '#00C853', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ color: '#fff', fontWeight: 900, fontSize: '1.2rem' }}>📊</span>
                             </div>
-                            <span className="font-extrabold text-xl">iMieiRendimenti.it</span>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '-0.5px' }}>iMieiInvestimenti.it</span>
                         </div>
-                        <p className="text-gray-400 text-sm leading-relaxed">
+                        <p style={{ color: '#999', fontSize: '0.95rem', lineHeight: 1.7, maxWidth: '280px' }}>
                             Analisi indipendente dei tuoi investimenti.<br />
                             Trasparenza. Chiarezza. Controllo.
                         </p>
                     </div>
 
-                    {/* Info */}
+                    {/* Informazioni */}
                     <div>
-                        <h4 className="font-bold text-sm uppercase tracking-wider mb-4">Informazioni</h4>
-                        <ul className="space-y-2">
-                            <li><Link href="/come-funziona" className="text-gray-400 hover:text-emerald-400 text-sm transition-colors">Come Funziona</Link></li>
-                            <li><Link href="/rendimenti" className="text-gray-400 hover:text-emerald-400 text-sm transition-colors">Rendimenti di Mercato</Link></li>
-                            <li><Link href="/reati" className="text-gray-400 hover:text-emerald-400 text-sm transition-colors">Attenzione ai Reati</Link></li>
+                        <h4 style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', color: '#fff', marginBottom: '1.2rem', letterSpacing: '1.5px' }}>
+                            Informazioni
+                        </h4>
+                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                            <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/come-funziona" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Come Funziona
+                                </Link>
+                            </li>
+                            <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/rendimenti" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Rendimenti di Mercato
+                                </Link>
+                            </li>
+                            <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/reati" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Attenzione ai Reati
+                                </Link>
+                            </li>
                         </ul>
                     </div>
 
-                    {/* Legal */}
+                    {/* Legale */}
                     <div>
-                        <h4 className="font-bold text-sm uppercase tracking-wider mb-4">Legale</h4>
-                        <ul className="space-y-2">
-                            <li><Link href="/privacy" className="text-gray-400 hover:text-emerald-400 text-sm transition-colors">Privacy Policy</Link></li>
-                            <li><Link href="/terms" className="text-gray-400 hover:text-emerald-400 text-sm transition-colors">Termini e Condizioni</Link></li>
-                            <li><Link href="/cookies" className="text-gray-400 hover:text-emerald-400 text-sm transition-colors">Cookie Policy</Link></li>
+                        <h4 style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', color: '#fff', marginBottom: '1.2rem', letterSpacing: '1.5px' }}>
+                            Legale
+                        </h4>
+                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                            <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/privacy" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Privacy Policy
+                                </Link>
+                            </li>
+                            <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/termini" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Termini e Condizioni
+                                </Link>
+                            </li>
+                            <li style={{ marginBottom: '0.7rem' }}>
+                                <Link href="/cookie" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.95rem' }}>
+                                    Cookie Policy
+                                </Link>
+                            </li>
                         </ul>
                     </div>
 
-                    {/* Contact */}
+                    {/* Contatti */}
                     <div>
-                        <h4 className="font-bold text-sm uppercase tracking-wider mb-4">Contatti</h4>
-                        <ul className="space-y-2 text-gray-400 text-sm">
-                            <li>📧 info@imieirendimenti.it</li>
-                            <li>📞 +39 02 1234 5678</li>
+                        <h4 style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', color: '#fff', marginBottom: '1.2rem', letterSpacing: '1.5px' }}>
+                            Contatti
+                        </h4>
+                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                            <li style={{ marginBottom: '0.7rem', color: '#aaa', fontSize: '0.95rem' }}>
+                                📧 info@imieiinvestimenti.it
+                            </li>
+                            <li style={{ marginBottom: '0.7rem', color: '#aaa', fontSize: '0.95rem' }}>
+                                📞 +39 02 1234 5678
+                            </li>
                         </ul>
                     </div>
                 </div>
 
                 {/* Copyright */}
-                <div className="border-t border-gray-800 pt-8 text-center">
-                    <p className="text-gray-500 text-sm">© 2026 iMieiRendimenti.it - Tutti i diritti riservati</p>
+                <div style={{ borderTop: '1px solid #444', paddingTop: '2rem', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <p style={{ color: '#666', fontSize: '0.85rem', margin: 0 }}>
+                        © 2026 iMieiInvestimenti.it - Tutti i diritti riservati
+                    </p>
                 </div>
             </div>
+
+            <style jsx>{`
+        footer a:hover {
+          color: #00C853 !important;
+        }
+        @media (max-width: 768px) {
+          footer > div > div:first-child {
+            grid-template-columns: 1fr !important;
+            gap: 2rem !important;
+          }
+        }
+      `}</style>
         </footer>
     )
 }

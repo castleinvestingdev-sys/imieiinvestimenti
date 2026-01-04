@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
+import "./legacy.css"
 import Header from "@/components/Header"
 import Footer from "@/components/Footer"
 
@@ -10,13 +11,13 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "iMieiRendimenti.it - I tuoi investimenti rendono davvero?",
+  title: "iMieiInvestimenti.it - I tuoi investimenti rendono davvero?",
   description: "Scopri se i tuoi investimenti rendono davvero. Analisi gratuita e indipendente dei costi bancari nascosti.",
   keywords: "investimenti, rendimenti, commissioni bancarie, consulenza finanziaria, analisi portafoglio",
   openGraph: {
     type: "website",
     url: "https://www.imieiinvestimenti.it/",
-    title: "iMieiRendimenti.it - I tuoi investimenti rendono davvero?",
+    title: "iMieiInvestimenti.it - I tuoi investimenti rendono davvero?",
     description: "Scopri se i tuoi investimenti rendono davvero. Analisi gratuita e indipendente dei costi bancari nascosti.",
   },
 }
