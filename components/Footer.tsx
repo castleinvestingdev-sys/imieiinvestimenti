@@ -22,7 +22,7 @@ export default function Footer() {
                         </p>
                     </div>
 
-                    {/* Informazioni */}
+                    {/* Informazioni  */}
                     <div>
                         <h4 style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', color: '#fff', marginBottom: '1.2rem', letterSpacing: '1.5px' }}>
                             Informazioni
