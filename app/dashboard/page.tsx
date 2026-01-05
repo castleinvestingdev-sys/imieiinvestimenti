@@ -38,6 +38,8 @@ type BankGroup = {
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null)
   const [analyses, setAnalyses] = useState<Analysis[]>([])
+  const [trashedAnalyses, setTrashedAnalyses] = useState<Analysis[]>([])
+  const [showTrash, setShowTrash] = useState(false)
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState('')
@@ -46,19 +48,85 @@ export default function DashboardPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const fetchAnalyses = useCallback(async (userId: string) => {
+    // Fetch active analyses
     const { data, error } = await supabase
       .from('analyses')
       .select('*')
       .eq('user_id', userId)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
 
     if (error) {
       console.error('Error fetching analyses:', error)
       return
     }
-
     setAnalyses(data || [])
+
+    // Fetch trashed analyses
+    const { data: trashedData } = await supabase
+      .from('analyses')
+      .select('*')
+      .eq('user_id', userId)
+      .not('deleted_at', 'is', null)
+      .order('deleted_at', { ascending: false })
+
+    setTrashedAnalyses(trashedData || [])
   }, [supabase])
+
+  const handleDelete = async (analysisId: string) => {
+    if (!user) return
+    const confirmed = window.confirm('Vuoi spostare questo documento nel cestino?')
+    if (!confirmed) return
+
+    const { error } = await supabase
+      .from('analyses')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', analysisId)
+
+    if (error) {
+      console.error('Error deleting:', error)
+      alert('Errore durante l\'eliminazione')
+      return
+    }
+
+    await fetchAnalyses(user.id)
+  }
+
+  const handleRestore = async (analysisId: string) => {
+    if (!user) return
+
+    const { error } = await supabase
+      .from('analyses')
+      .update({ deleted_at: null })
+      .eq('id', analysisId)
+
+    if (error) {
+      console.error('Error restoring:', error)
+      alert('Errore durante il ripristino')
+      return
+    }
+
+    await fetchAnalyses(user.id)
+  }
+
+  const handlePermanentDelete = async (analysisId: string) => {
+    if (!user) return
+    const confirmed = window.confirm('Vuoi eliminare definitivamente questo documento? Questa azione non può essere annullata.')
+    if (!confirmed) return
+
+    const { error } = await supabase
+      .from('analyses')
+      .delete()
+      .eq('id', analysisId)
+
+    if (error) {
+      console.error('Error permanent delete:', error)
+      alert('Errore durante l\'eliminazione definitiva')
+      return
+    }
+
+    await fetchAnalyses(user.id)
+  }
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -239,11 +307,93 @@ export default function DashboardPage() {
       </header>
 
       <section className={styles.mainContent}>
-        <h2 className={styles.sectionTitle}>
-          I tuoi Conti ({bankGroups.length}) e Estratti Conto ({analyses.length})
-        </h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
+            {showTrash ? `Cestino (${trashedAnalyses.length})` : `I tuoi Conti (${bankGroups.length}) e Estratti Conto (${analyses.length})`}
+          </h2>
+          <button
+            onClick={() => setShowTrash(!showTrash)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 20px',
+              borderRadius: '50px',
+              border: showTrash ? '2px solid #10b981' : '1px solid #e2e8f0',
+              background: showTrash ? '#10b981' : 'white',
+              color: showTrash ? 'white' : '#64748b',
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            🗑️ {showTrash ? 'Torna alla Dashboard' : `Cestino${trashedAnalyses.length > 0 ? ` (${trashedAnalyses.length})` : ''}`}
+          </button>
+        </div>
 
-        {bankGroups.length === 0 ? (
+        {showTrash ? (
+          /* TRASH VIEW */
+          trashedAnalyses.length === 0 ? (
+            <div className={styles.dashEmpty}>
+              <h3>🗑️ Il cestino è vuoto</h3>
+              <p>Gli elementi eliminati appariranno qui.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              {trashedAnalyses.map((item) => (
+                <div key={item.id} style={{
+                  background: 'white',
+                  borderRadius: '16px',
+                  padding: '1.25rem',
+                  border: '1px solid #e2e8f0',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '4px' }}>
+                      {item.bank_name} - {item.account_type === 'LIQUIDITY' ? 'Liquidità' : 'Dossier Titoli'}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                      Periodo: {item.period_start ? new Date(item.period_start).toLocaleDateString('it-IT') : 'N/D'} - {item.period_end ? new Date(item.period_end).toLocaleDateString('it-IT') : 'N/D'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => handleRestore(item.id)}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #10b981',
+                        background: 'white',
+                        color: '#10b981',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↩️ Ripristina
+                    </button>
+                    <button
+                      onClick={() => handlePermanentDelete(item.id)}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #ef4444',
+                        background: 'white',
+                        color: '#ef4444',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🗑️ Elimina
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : bankGroups.length === 0 ? (
           <div className={styles.dashEmpty}>
             <h3>Nessun estratto conto caricato</h3>
             <p>Carica il tuo primo PDF per iniziare l&apos;analisi.</p>
@@ -316,6 +466,33 @@ export default function DashboardPage() {
                                             {file.forensic_summary?.performance_pct || 'N/D'}
                                           </div>
                                           <div className={styles.checkBadge}>✓</div>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDelete(file.id);
+                                            }}
+                                            style={{
+                                              position: 'absolute',
+                                              top: '6px',
+                                              left: '6px',
+                                              width: '24px',
+                                              height: '24px',
+                                              borderRadius: '50%',
+                                              border: 'none',
+                                              background: 'rgba(239, 68, 68, 0.1)',
+                                              color: '#ef4444',
+                                              fontSize: '12px',
+                                              cursor: 'pointer',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              opacity: 0,
+                                              transition: 'opacity 0.2s',
+                                            }}
+                                            className="delete-btn"
+                                          >
+                                            ×
+                                          </button>
                                         </div>
                                       ) : (
                                         <>
@@ -397,6 +574,32 @@ export default function DashboardPage() {
                                             €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'standard', minimumFractionDigits: 0 })}
                                           </div>
                                           <div className={styles.checkBadge} style={{ background: '#10b981' }}>✓</div>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDelete(file.id);
+                                            }}
+                                            style={{
+                                              position: 'absolute',
+                                              top: '6px',
+                                              left: '6px',
+                                              width: '24px',
+                                              height: '24px',
+                                              borderRadius: '50%',
+                                              border: 'none',
+                                              background: 'rgba(239, 68, 68, 0.1)',
+                                              color: '#ef4444',
+                                              fontSize: '12px',
+                                              cursor: 'pointer',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              opacity: 0,
+                                              transition: 'opacity 0.2s',
+                                            }}
+                                          >
+                                            ×
+                                          </button>
                                         </div>
                                       ) : (
                                         <>
