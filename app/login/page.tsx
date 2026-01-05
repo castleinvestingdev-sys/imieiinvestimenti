@@ -34,7 +34,7 @@ export default function LoginPage() {
       minHeight: '100vh',
       display: 'flex',
       backgroundColor: '#FFFFFF',
-      paddingTop: '86px', // Account for header
+      // paddingTop removed to allow full bleed
       position: 'relative',
       zIndex: 10,
     }} className="login-container">
@@ -46,7 +46,7 @@ export default function LoginPage() {
         flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: '2rem',
+        padding: '8rem 2rem 2rem', // Increased top padding for header
         backgroundColor: '#FFFFFF',
       }} className="login-form-side">
         <div style={{ width: '100%', maxWidth: '400px' }}>
@@ -189,7 +189,7 @@ export default function LoginPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '4rem',
+        padding: '8rem 4rem 4rem', // Increased top padding for header
         position: 'relative',
         overflow: 'hidden',
         borderLeft: '1px solid #E5E7EB'
@@ -290,7 +290,7 @@ export default function LoginPage() {
           .login-form-side {
              flex: none;
              width: 100%;
-             padding-top: 4rem;
+             padding-top: 6rem !important; /* Adjusted for mobile header */
           }
         }
       `}</style>

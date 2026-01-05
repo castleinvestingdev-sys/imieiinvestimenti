@@ -1,10 +1,8 @@
-'use client'
-
-import Link from 'next/link'
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
+import Link from 'next/link'
 
 export default function Header() {
   const [user, setUser] = useState<User | null>(null)
@@ -12,6 +10,7 @@ export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
+  const pathname = usePathname()
   const supabase = createClient()
 
   useEffect(() => {
@@ -61,6 +60,8 @@ export default function Header() {
     transition: 'all 0.2s ease',
     whiteSpace: 'nowrap',
   }
+
+  const isFullscreenPage = pathname === '/login' || pathname === '/register'
 
   return (
     <>
@@ -125,25 +126,46 @@ export default function Header() {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-            }}>
+            }} key={user ? 'auth-true' : 'auth-false'}>
               {user ? (
                 <>
                   <Link href="/dashboard" style={{
-                    color: '#555',
-                    textDecoration: 'none',
-                    fontWeight: 500,
+                    background: '#00C853',
+                    color: '#fff',
+                    padding: '10px 20px',
+                    borderRadius: '30px',
+                    fontWeight: 600,
                     fontSize: '0.85rem',
-                    padding: '8px 14px',
-                  }}>
+                    textDecoration: 'none',
+                    boxShadow: '0 4px 12px rgba(0, 200, 83, 0.3)',
+                    transition: 'all 0.2s ease',
+                    marginRight: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    height: '40px',
+                    boxSizing: 'border-box'
+                  }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-1px)'
+                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 200, 83, 0.4)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)'
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 200, 83, 0.3)'
+                    }}
+                  >
                     Dashboard
                   </Link>
 
                   <div style={{ position: 'relative' }} ref={menuRef}>
                     <div
-                      onClick={() => setMenuOpen(!menuOpen)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuOpen(!menuOpen)
+                      }}
                       style={{
-                        width: '34px',
-                        height: '34px',
+                        width: '40px',
+                        height: '40px',
                         background: '#00C853',
                         borderRadius: '50%',
                         display: 'flex',
@@ -151,11 +173,12 @@ export default function Header() {
                         justifyContent: 'center',
                         color: 'white',
                         fontWeight: 600,
-                        fontSize: '0.85rem',
+                        fontSize: '1rem',
                         cursor: 'pointer',
                         transition: 'transform 0.2s',
                         transform: menuOpen ? 'scale(1.05)' : 'scale(1)',
-                        boxShadow: '0 2px 8px rgba(0,200,83,0.3)'
+                        boxShadow: '0 2px 8px rgba(0,200,83,0.3)',
+                        userSelect: 'none'
                       }}
                     >
                       {user.email?.charAt(0).toUpperCase() || 'U'}
@@ -164,7 +187,7 @@ export default function Header() {
                     {menuOpen && (
                       <div style={{
                         position: 'absolute',
-                        top: '45px',
+                        top: '50px',
                         right: 0,
                         background: 'white',
                         borderRadius: '16px',
@@ -175,12 +198,25 @@ export default function Header() {
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '4px',
-                        animation: 'fadeIn 0.2s ease-out'
+                        animation: 'fadeIn 0.2s ease-out',
+                        overflow: 'hidden',
+                        zIndex: 1001
                       }}>
-                        <div style={{ padding: '8px 12px', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', borderBottom: '1px solid #f1f5f9', marginBottom: '4px' }}>
+                        <div style={{
+                          padding: '8px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          color: '#94a3b8',
+                          borderBottom: '1px solid #f1f5f9',
+                          marginBottom: '4px',
+                          cursor: 'default'
+                        }}>
                           IMPOSTAZIONI
                         </div>
-                        <button onClick={handleLogout} style={{
+                        <button onClick={(e) => {
+                          e.stopPropagation()
+                          handleLogout()
+                        }} style={{
                           background: 'transparent',
                           border: 'none',
                           textAlign: 'left',
@@ -192,7 +228,8 @@ export default function Header() {
                           fontWeight: 600,
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '8px'
+                          gap: '8px',
+                          width: '100%'
                         }} className="menu-item-hover">
                           Esci
                         </button>
@@ -238,7 +275,7 @@ export default function Header() {
         </div>
       </header>
 
-      <div style={{ height: '86px' }}></div>
+      {!isFullscreenPage && <div style={{ height: '86px' }}></div>}
     </>
   )
 }
