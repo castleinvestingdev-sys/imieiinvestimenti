@@ -73,7 +73,7 @@ export default function RegisterPage() {
     ]
 
     return (
-    return (
+
         <div style={{
             minHeight: '100vh',
             display: 'flex',
