@@ -273,7 +273,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="grid lg:grid-cols-2 gap-8">
+              <div className="space-y-8">
                 {/* --- DOSSIER SECTION --- */}
                 {hasDossier ? (
                   <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 overflow-hidden">
@@ -287,34 +287,50 @@ export default function DashboardPage() {
                         ANALISI RECENTE <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                       </Link>
                     </div>
-                    <div className="p-6 overflow-x-auto">
-                      <div className="flex gap-4 min-w-full pb-2">
+                    <div className="p-6 overflow-x-auto custom-scrollbar">
+                      <div className="flex gap-8 min-w-full pb-4">
                         {years.map(year => (
-                          <div key={year} className="flex-none w-64">
-                            <div className="text-xs font-bold text-slate-400 mb-3">{year}</div>
-                            <div className="grid grid-cols-2 gap-2">
+                          <div key={year} className="flex-none">
+                            <div className="text-sm font-bold text-slate-400 mb-4 sticky left-0">{year}</div>
+                            <div className="flex gap-3">
                               {quarters.map((q, i) => {
                                 const file = findAnalysis(group.dossier!.analyses, year, q);
                                 const isPresent = !!file;
+                                const dates = getQuarterDates(year, q)
                                 return (
                                   <div
                                     key={i}
                                     onClick={() => isPresent && router.push(`/analisi/${file.id}`)}
                                     className={`
-                                                                    relative p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer h-24
+                                                                    relative p-4 rounded-xl border flex flex-col items-center justify-between gap-3 transition-all cursor-pointer w-32 h-40 group
                                                                     ${isPresent
-                                        ? 'bg-emerald-50 border-emerald-100 hover:shadow-md hover:-translate-y-0.5'
+                                        ? 'bg-emerald-50 border-emerald-100 hover:shadow-lg hover:-translate-y-1'
                                         : 'bg-slate-50 border-slate-100 hover:bg-slate-100 opacity-60 hover:opacity-100 border-dashed'}
                                                                 `}
                                   >
-                                    <div className="text-[10px] font-bold uppercase text-slate-400">{q.split(' - ')[1].split('/')[1] === '3' ? 'Q1' : q.split(' - ')[1].split('/')[1] === '6' ? 'Q2' : q.split(' - ')[1].split('/')[1] === '9' ? 'Q3' : 'Q4'}</div>
+                                    <div className="text-[10px] uppercase font-bold text-slate-400 text-center leading-tight">
+                                      {dates.start}
+                                      <br />↓<br />
+                                      {dates.end}
+                                    </div>
+
                                     {isPresent ? (
                                       <>
-                                        <div className="text-sm font-bold text-emerald-700">Presente</div>
-                                        <div className="absolute top-2 right-2 w-2 h-2 bg-emerald-500 rounded-full"></div>
+                                        <div className="text-center">
+                                          <div className="text-[10px] text-slate-500 font-medium">Rendimento</div>
+                                          <div className="text-sm font-bold text-emerald-700">
+                                            {file.forensic_summary?.performance_pct || 'N/D'}
+                                          </div>
+                                        </div>
+                                        <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white text-xs shadow-md">✓</div>
                                       </>
                                     ) : (
-                                      <div className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">MANCA</div>
+                                      <>
+                                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assente</div>
+                                        <button className="w-full py-1 text-[10px] bg-white border border-slate-200 rounded-full font-bold text-slate-600 group-hover:bg-emerald-600 group-hover:text-white group-hover:border-emerald-600 transition-colors">
+                                          CARICA +
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 )
@@ -328,14 +344,13 @@ export default function DashboardPage() {
                 ) : (
                   // Empty State for Dossier
                   <div
-                    className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer opacity-70 hover:opacity-100"
+                    className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer opacity-70 hover:opacity-100 h-40"
                     onClick={() => document.getElementById('file-input')?.click()}
                   >
-                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
+                    <div className="flex items-center gap-3 text-slate-400">
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                      <h3 className="font-bold text-slate-900">Carica Dossier Titoli</h3>
                     </div>
-                    <h3 className="font-bold text-slate-900">Manca Dossier Titoli</h3>
-                    <p className="text-sm text-slate-500 mt-1">Clicca per caricare</p>
                   </div>
                 )}
 
@@ -352,38 +367,52 @@ export default function DashboardPage() {
                         VEDI SALDO <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                       </Link>
                     </div>
-                    <div className="p-6 overflow-x-auto">
-                      <div className="flex gap-4 min-w-full pb-2">
+                    <div className="p-6 overflow-x-auto custom-scrollbar">
+                      <div className="flex gap-8 min-w-full pb-4">
                         {years.map(year => (
-                          <div key={year} className="flex-none w-64">
-                            <div className="text-xs font-bold text-slate-400 mb-3">{year}</div>
-                            <div className="grid grid-cols-2 gap-2">
+                          <div key={year} className="flex-none">
+                            <div className="text-sm font-bold text-slate-400 mb-4 sticky left-0">{year}</div>
+                            <div className="flex gap-3">
                               {quarters.map((q, i) => {
                                 const file = findAnalysis(group.liquidity!.analyses, year, q);
                                 const isPresent = !!file;
+                                const dates = getQuarterDates(year, q)
                                 return (
                                   <div
                                     key={i}
                                     onClick={() => isPresent && router.push(`/analisi/${file.id}`)}
                                     className={`
-                                                                    relative p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer h-24
+                                                                    relative p-4 rounded-xl border flex flex-col items-center justify-between gap-3 transition-all cursor-pointer w-32 h-40 group
                                                                     ${isPresent
-                                        ? 'bg-blue-50 border-blue-100 hover:shadow-md hover:-translate-y-0.5'
+                                        ? 'bg-blue-50 border-blue-100 hover:shadow-lg hover:-translate-y-1'
                                         : 'bg-slate-50 border-slate-100 hover:bg-slate-100 opacity-60 hover:opacity-100 border-dashed'}
                                                                 `}
                                   >
-                                    <div className="text-[10px] font-bold uppercase text-slate-400">{q.split(' - ')[1].split('/')[1] === '3' ? 'Q1' : q.split(' - ')[1].split('/')[1] === '6' ? 'Q2' : q.split(' - ')[1].split('/')[1] === '9' ? 'Q3' : 'Q4'}</div>
+                                    <div className="text-[10px] uppercase font-bold text-slate-400 text-center leading-tight">
+                                      {dates.start}
+                                      <br />↓<br />
+                                      {dates.end}
+                                    </div>
+
                                     {isPresent ? (
                                       <>
-                                        <div className="text-sm font-bold text-blue-700">
-                                          €{file.portfolio_value && file.portfolio_value < 10000
-                                            ? (file.portfolio_value / 1000).toFixed(1) + 'k'
-                                            : (file.portfolio_value / 1000).toFixed(0) + 'k'}
+                                        <div className="text-center">
+                                          <div className="text-[10px] text-slate-500 font-medium">Saldo Medio</div>
+                                          <div className="text-sm font-bold text-blue-700">
+                                            €{file.portfolio_value && file.portfolio_value < 10000
+                                              ? (file.portfolio_value / 1000).toFixed(1) + 'k'
+                                              : (file.portfolio_value / 1000).toFixed(0) + 'k'}
+                                          </div>
                                         </div>
-                                        <div className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full"></div>
+                                        <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs shadow-md">✓</div>
                                       </>
                                     ) : (
-                                      <div className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">MANCA</div>
+                                      <>
+                                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Assente</div>
+                                        <button className="w-full py-1 text-[10px] bg-white border border-slate-200 rounded-full font-bold text-slate-600 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-colors">
+                                          CARICA +
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 )
@@ -397,14 +426,13 @@ export default function DashboardPage() {
                 ) : (
                   // Empty State for Liquidity
                   <div
-                    className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer opacity-70 hover:opacity-100"
+                    className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer opacity-70 hover:opacity-100 h-40"
                     onClick={() => document.getElementById('file-input')?.click()}
                   >
-                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
+                    <div className="flex items-center gap-3 text-slate-400">
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                      <h3 className="font-bold text-slate-900">Carica Conto Liquidità</h3>
                     </div>
-                    <h3 className="font-bold text-slate-900">Manca Conto Corrente</h3>
-                    <p className="text-sm text-slate-500 mt-1">Clicca per caricare</p>
                   </div>
                 )}
 

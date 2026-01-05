@@ -106,10 +106,10 @@ export default async function AnalysisPage({ params }: PageProps) {
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
 
                 {/* KPI Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
 
                     {/* KPI Card 1: Performance */}
-                    <div className="bg-white p-6 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 hover:shadow-lg transition-shadow relative overflow-hidden group">
+                    <div className="bg-white p-6 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 hover:shadow-lg transition-shadow relative overflow-hidden group min-h-[160px] flex flex-col justify-between">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
                         <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4 relative z-10">Performance Netta</h3>
                         <div className="flex items-baseline gap-2 relative z-10">
@@ -123,21 +123,23 @@ export default async function AnalysisPage({ params }: PageProps) {
                     </div>
 
                     {/* KPI Card 2: Costi */}
-                    <div className="bg-white p-6 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 hover:shadow-lg transition-shadow group">
+                    <div className="bg-white p-6 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 hover:shadow-lg transition-shadow group min-h-[160px] flex flex-col justify-between">
                         <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Incidenza Costi (TER)</h3>
-                        <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-black text-amber-500">
-                                {costs.managementFees ? `${costs.managementFees.toFixed(2)}%` : '0.00%'}
-                            </span>
-                        </div>
-                        <div className="w-full bg-slate-100 rounded-full h-1.5 mt-4 overflow-hidden">
-                            <div className="bg-amber-500 h-1.5 rounded-full" style={{ width: `${Math.min((costs.managementFees || 0) * 20, 100)}%` }}></div>
+                        <div>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-3xl font-black text-amber-500">
+                                    {costs.managementFees ? `${costs.managementFees.toFixed(2)}%` : '0.00%'}
+                                </span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 mt-4 overflow-hidden">
+                                <div className="bg-amber-500 h-1.5 rounded-full" style={{ width: `${Math.min((costs.managementFees || 0) * 20, 100)}%` }}></div>
+                            </div>
                         </div>
                         <div className="mt-2 text-xs text-slate-400 text-right">Target &lt; 1.0%</div>
                     </div>
 
                     {/* KPI Card 3: Dividendi */}
-                    <div className="bg-white p-6 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 hover:shadow-lg transition-shadow">
+                    <div className="bg-white p-6 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 hover:shadow-lg transition-shadow min-h-[160px] flex flex-col justify-between">
                         <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Flussi di Cassa</h3>
                         <div className="flex items-baseline gap-2">
                             <span className="text-3xl font-black text-slate-700">
@@ -150,7 +152,7 @@ export default async function AnalysisPage({ params }: PageProps) {
                     </div>
 
                     {/* KPI Card 4: Rating */}
-                    <div className="bg-slate-900 p-6 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.15)] text-white relative overflow-hidden">
+                    <div className="bg-slate-900 p-6 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.15)] text-white relative overflow-hidden min-h-[160px] flex flex-col justify-between">
                         <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-black z-0"></div>
                         <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4 relative z-10">Rating Implicito</h3>
                         <div className="flex items-center justify-between relative z-10">
