@@ -418,6 +418,77 @@ export default function DashboardPage() {
                         hasDossier ? 'Solo Dossier Titoli' : 'Solo Conto Liquidità'}
                     </div>
                   </div>
+
+                  {/* Three dots menu */}
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const menu = e.currentTarget.nextElementSibling as HTMLElement;
+                        menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '8px',
+                        borderRadius: '8px',
+                        fontSize: '1.25rem',
+                        color: '#64748b',
+                      }}
+                    >
+                      ⋮
+                    </button>
+                    <div
+                      style={{
+                        display: 'none',
+                        position: 'absolute',
+                        right: 0,
+                        top: '100%',
+                        background: 'white',
+                        borderRadius: '12px',
+                        boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+                        border: '1px solid #e2e8f0',
+                        padding: '8px',
+                        minWidth: '180px',
+                        zIndex: 100,
+                      }}
+                    >
+                      <button
+                        onClick={async () => {
+                          const allIds = [
+                            ...(group.dossier?.analyses.map(a => a.id) || []),
+                            ...(group.liquidity?.analyses.map(a => a.id) || [])
+                          ];
+                          if (allIds.length === 0) return;
+                          const confirmed = window.confirm(`Vuoi eliminare tutti i ${allIds.length} documenti di ${group.bankName}?`);
+                          if (!confirmed) return;
+                          for (const id of allIds) {
+                            await handleDelete(id);
+                          }
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: 'transparent',
+                          color: '#ef4444',
+                          fontWeight: 600,
+                          fontSize: '0.9rem',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#fef2f2'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        🗑️ Elimina sezione
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div className={styles.accountsContainer}>
