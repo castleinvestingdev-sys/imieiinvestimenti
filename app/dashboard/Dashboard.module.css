@@ -86,9 +86,9 @@
 }
 
 .dashDropzone:hover {
-  background: white;
+  background: rgba(16, 185, 129, 0.03);
   border-color: #10b981;
-  box-shadow: 0 10px 30px -10px rgba(16, 185, 129, 0.2);
+  box-shadow: 0 10px 40px -10px rgba(16, 185, 129, 0.15);
   transform: translateY(-2px);
 }
 
@@ -328,7 +328,22 @@
 }
 
 .timelineGrid::-webkit-scrollbar {
-  display: none;
+  height: 6px;
+}
+
+.timelineGrid::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 10px;
+}
+
+.timelineGrid::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+  transition: all 0.2s;
+}
+
+.timelineGrid::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .yearBlock {

@@ -24,10 +24,12 @@ interface Analysis {
   }
 }
 
+type AccountGroup = { identifier: string; analyses: Analysis[] };
+
 type BankGroup = {
   bankName: string;
-  dossier?: { identifier: string; analyses: Analysis[] };
-  liquidity?: { identifier: string; analyses: Analysis[] };
+  dossiers: AccountGroup[];
+  liquidityAccounts: AccountGroup[];
 }
 
 export default function DashboardPage() {
@@ -44,7 +46,6 @@ export default function DashboardPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const fetchAnalyses = useCallback(async (userId: string) => {
-    // Fetch active analyses
     const { data, error } = await supabase
       .from('analyses')
       .select('*')
@@ -58,7 +59,6 @@ export default function DashboardPage() {
     }
     setAnalyses(data || [])
 
-    // Fetch trashed analyses
     const { data: trashedData } = await supabase
       .from('analyses')
       .select('*')
@@ -148,7 +148,6 @@ export default function DashboardPage() {
     setUploadProgress('Analisi in corso...')
     setUploadPercent(5)
 
-    // Simulazione progresso
     const progressInterval = setInterval(() => {
       setUploadPercent(prev => {
         if (prev >= 90) {
@@ -238,16 +237,22 @@ export default function DashboardPage() {
 
   const bankGroupsMap = analyses.reduce((acc, a) => {
     const bank = normalizeBank(a.bank_name)
-    const type = a.account_type === 'LIQUIDITY' ? 'liquidity' : 'dossier'
+    const accNum = a.benchmark_comparison || 'N/D'
+    const isLiquidity = a.account_type === 'LIQUIDITY'
 
-    if (!acc[bank]) acc[bank] = { bankName: bank }
-    if (!acc[bank][type]) {
-      acc[bank][type] = { identifier: a.benchmark_comparison || 'N/D', analyses: [] }
+    if (!acc[bank]) {
+      acc[bank] = { bankName: bank, dossiers: [], liquidityAccounts: [] }
     }
-    acc[bank][type]!.analyses.push(a)
-    if (a.benchmark_comparison && a.benchmark_comparison !== 'N/D') {
-      acc[bank][type]!.identifier = a.benchmark_comparison
+
+    const groupList = isLiquidity ? acc[bank].liquidityAccounts : acc[bank].dossiers
+    let account = groupList.find(g => g.identifier === accNum)
+
+    if (!account) {
+      account = { identifier: accNum, analyses: [] }
+      groupList.push(account)
     }
+
+    account.analyses.push(a)
     return acc
   }, {} as Record<string, BankGroup>)
 
@@ -282,9 +287,8 @@ export default function DashboardPage() {
     const endMonth = qIndex * 3
     const startMonth = endMonth - 2
     const endDate = new Date(year, endMonth, 0)
-    const startDate = new Date(year, startMonth - 1, 1)
-    const prevQEnd = new Date(year, startMonth - 1, 0)
     const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const prevQEnd = new Date(year, startMonth - 1, 0)
     return {
       start: fmt(prevQEnd),
       end: fmt(endDate)
@@ -295,7 +299,6 @@ export default function DashboardPage() {
     <main className={styles.dashWrapper}>
       <div className={styles.heroBackground} />
 
-      {/* HEADER SECTION */}
       <header className={styles.dashHero}>
         <div className={styles.dashHeroInner}>
           <div className={styles.dashWelcome}>
@@ -434,9 +437,6 @@ export default function DashboardPage() {
           </div>
         ) : (
           bankGroups.map((group, idx) => {
-            const hasDossier = !!group.dossier;
-            const hasLiquidity = !!group.liquidity;
-
             return (
               <div key={idx} className={styles.bankGroupBlock}>
                 <div className={styles.bankHeader}>
@@ -446,48 +446,36 @@ export default function DashboardPage() {
                   <div className={styles.bankInfo}>
                     <h3 className={styles.bankName}>{group.bankName}</h3>
                     <div className={styles.bankSubtitle}>
-                      {hasDossier && hasLiquidity ? 'Dossier Titoli + Conto Liquidità' :
-                        hasDossier ? 'Solo Dossier Titoli' : 'Solo Conto Liquidità'}
+                      {group.dossiers.length} Dossier Titoli | {group.liquidityAccounts.length} Conti Correnti
                     </div>
                   </div>
                 </div>
 
                 <div className={styles.accountsContainer}>
-                  {hasDossier && (
-                    <div className={styles.accountSection}>
+                  {/* Multiple Dossiers per Bank */}
+                  {group.dossiers.map((dossier, dIdx) => (
+                    <div key={`dossier-${dIdx}`} className={styles.accountSection}>
                       <div className={styles.accountHeader}>
                         <div className={styles.accountTitleInfo}>
                           <span className={styles.accBadge}>Dossier Titoli</span>
                           <div className={styles.accDetailsText}>
-                            Codice Dossier: <strong>{group.dossier?.identifier}</strong><br />
+                            Codice Dossier: <strong>{dossier.identifier}</strong><br />
                             Rendicontazione: <strong>Trimestrale</strong>
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                          <Link href={`/analisi/${dossier.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI COMPLETA <span>→</span>
                           </Link>
                           <button
                             onClick={async () => {
-                              const ids = group.dossier?.analyses.map(a => a.id) || [];
-                              if (ids.length === 0) return;
-                              const confirmed = window.confirm('Vuoi eliminare il Dossier Titoli e tutti i suoi documenti?');
-                              if (!confirmed) return;
-                              for (const id of ids) await handleDelete(id);
+                              if (!window.confirm(`Vuoi spostare nel cestino il Dossier ${dossier.identifier}?`)) return;
+                              for (const a of dossier.analyses) await handleDelete(a.id);
                             }}
                             className={styles.deleteSectionBtn}
-                            style={{
-                              background: 'rgba(239, 68, 68, 0.1)',
-                              border: '1px solid #fecaca',
-                              borderRadius: '8px',
-                              padding: '8px 12px',
-                              color: '#ef4444',
-                              fontWeight: 600,
-                              fontSize: '0.8rem',
-                              cursor: 'pointer',
-                            }}
+                            style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
                           >
-                            🗑️ Elimina
+                            🗑️
                           </button>
                         </div>
                       </div>
@@ -498,74 +486,33 @@ export default function DashboardPage() {
                           {years.map(year => {
                             const visibleQuarters = quarters.filter(q => {
                               const qIndex = parseInt(q.replace('Q', ''))
-                              const endMonth = qIndex * 3
-                              const quarterEndDate = new Date(year, endMonth, 0)
+                              const quarterEndDate = new Date(year, qIndex * 3, 0)
                               return quarterEndDate <= new Date()
                             })
-
                             if (visibleQuarters.length === 0) return null
-
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
                                 <div className={styles.quartersRow}>
                                   {visibleQuarters.map(q => {
-                                    const file = findAnalysis(group.dossier!.analyses, year, q);
+                                    const file = findAnalysis(dossier.analyses, year, q);
                                     const isPresent = !!file;
                                     const dates = getQuarterDates(year, q);
-
                                     return (
                                       <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
-
-                                        <div className={styles.tileDates}>
-                                          {dates.start}<br />
-                                          <span className={styles.arrowIconSmall}>↓</span>
-                                          {dates.end}
-                                        </div>
-
+                                        <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Rendimento</span>
-                                            <div className={styles.valueDataLarge}>
-                                              {file.forensic_summary?.performance_pct || 'N/D'}
-                                            </div>
+                                            <div className={styles.valueDataLarge}>{file.forensic_summary?.performance_pct || 'N/D'}</div>
                                             <div className={styles.checkBadge}>✓</div>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDelete(file.id);
-                                              }}
-                                              style={{
-                                                position: 'absolute',
-                                                top: '6px',
-                                                left: '6px',
-                                                width: '22px',
-                                                height: '22px',
-                                                borderRadius: '50%',
-                                                border: 'none',
-                                                background: 'rgba(239, 68, 68, 0.15)',
-                                                color: '#ef4444',
-                                                fontSize: '14px',
-                                                fontWeight: 'bold',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                              }}
-                                              title="Elimina documento"
-                                            >
-                                              ×
-                                            </button>
                                           </div>
                                         ) : (
-                                          <div className={styles.uploadCircleBtn} onClick={(e) => {
-                                            e.stopPropagation();
-                                            document.getElementById('file-input')?.click();
-                                          }}>+</div>
+                                          <div className={styles.uploadCircleBtn} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
                                         )}
                                       </div>
-                                    );
+                                    )
                                   })}
                                 </div>
                               </div>
@@ -575,21 +522,33 @@ export default function DashboardPage() {
                         <div className={styles.scrollIndicator + ' ' + styles.rightIndicator} onClick={() => scrollTimeline('right')}>→</div>
                       </div>
                     </div>
-                  )}
+                  ))}
 
-                  {hasLiquidity && (
-                    <div className={styles.accountSection}>
+                  {/* Multiple Liquidity Accounts per Bank */}
+                  {group.liquidityAccounts.map((liquidity, lIdx) => (
+                    <div key={`liquidity-${lIdx}`} className={styles.accountSection}>
                       <div className={styles.accountHeader}>
                         <div className={styles.accountTitleInfo}>
-                          <span className={`${styles.accBadge}`} style={{ background: 'rgba(16, 185, 129, 0.08)', color: '#10b981' }}>LIQUIDITÀ</span>
+                          <span className={styles.accBadge} style={{ background: 'rgba(59,130,246,0.08)', color: '#3b82f6' }}>LIQUIDITÀ</span>
                           <div className={styles.accDetailsText}>
-                            Conto corrente: <strong>{group.liquidity?.identifier}</strong><br />
+                            Conto corrente: <strong>{liquidity.identifier}</strong><br />
                             Rendicontazione: <strong>Trimestrale</strong>
                           </div>
                         </div>
-                        <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                          VEDI ANALISI COMPLETA <span>→</span>
-                        </Link>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <Link href={`/analisi/${liquidity.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                            VEDI ANALISI COMPLETA <span>→</span>
+                          </Link>
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Vuoi spostare nel cestino il Conto ${liquidity.identifier}?`)) return;
+                              for (const a of liquidity.analyses) await handleDelete(a.id);
+                            }}
+                            style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
 
                       <div className={styles.timelineNavigation}>
@@ -597,71 +556,30 @@ export default function DashboardPage() {
                           {years.map(year => {
                             const visibleQuarters = quarters.filter(q => {
                               const qIndex = parseInt(q.replace('Q', ''))
-                              const endMonth = qIndex * 3
-                              const quarterEndDate = new Date(year, endMonth, 0)
+                              const quarterEndDate = new Date(year, qIndex * 3, 0)
                               return quarterEndDate <= new Date()
                             })
-
                             if (visibleQuarters.length === 0) return null
-
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
                                 <div className={styles.quartersRow}>
                                   {visibleQuarters.map(q => {
-                                    const file = findAnalysis(group.liquidity!.analyses, year, q);
+                                    const file = findAnalysis(liquidity.analyses, year, q);
                                     const isPresent = !!file;
                                     const dates = getQuarterDates(year, q);
-
                                     return (
                                       <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
-
-                                        <div className={styles.tileDates}>
-                                          {dates.start}<br />
-                                          <span className={styles.arrowIconSmall}>↓</span>
-                                          {dates.end}
-                                        </div>
-
+                                        <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Saldo</span>
-                                            <div className={styles.valueDataLarge}>
-                                              €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'standard', minimumFractionDigits: 0 })}
-                                            </div>
-                                            <div className={styles.checkBadge} style={{ background: '#10b981' }}>✓</div>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDelete(file.id);
-                                              }}
-                                              style={{
-                                                position: 'absolute',
-                                                top: '6px',
-                                                left: '6px',
-                                                width: '22px',
-                                                height: '22px',
-                                                borderRadius: '50%',
-                                                border: 'none',
-                                                background: 'rgba(239, 68, 68, 0.15)',
-                                                color: '#ef4444',
-                                                fontSize: '14px',
-                                                fontWeight: 'bold',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                              }}
-                                              title="Elimina documento"
-                                            >
-                                              ×
-                                            </button>
+                                            <div className={styles.valueDataLarge}>€{(file.portfolio_value || 0).toLocaleString('it-IT')}</div>
+                                            <div className={styles.checkBadge} style={{ background: '#3b82f6' }}>✓</div>
                                           </div>
                                         ) : (
-                                          <div className={styles.uploadCircleBtn} onClick={(e) => {
-                                            e.stopPropagation();
-                                            document.getElementById('file-input')?.click();
-                                          }}>+</div>
+                                          <div className={styles.uploadCircleBtn} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
                                         )}
                                       </div>
                                     )
@@ -673,7 +591,7 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
             )
