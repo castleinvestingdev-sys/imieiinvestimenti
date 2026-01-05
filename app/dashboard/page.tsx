@@ -319,6 +319,19 @@ export default function DashboardPage() {
     return { start: fmt(new Date(year, startMonth - 1, 0)), end: fmt(endDate) }
   }
 
+  const renderVal = (val: any, isCurrency = false) => {
+    if (val === 'non trovato' || val === null || val === undefined) {
+      return <span className={styles.missingValue}>non trovato</span>
+    }
+    if (val === 'da calcolare') {
+      return <span className={styles.calcValue}>da calcolare</span>
+    }
+    const displayVal = isCurrency && typeof val === 'number'
+      ? `€${val.toLocaleString('it-IT')}`
+      : val;
+    return <span className={styles.foundValue}>{displayVal}</span>
+  }
+
   return (
     <main className={styles.dashWrapper}>
       <div className={styles.heroBackground} />
@@ -648,9 +661,9 @@ export default function DashboardPage() {
             </div>
             <div className={styles.modalBody}>
               <div className={styles.infoGrid}>
-                <div className={styles.infoItem}><strong>Banca</strong> {inspectorData.bank_name}</div>
-                <div className={styles.infoItem}><strong>Account</strong> {inspectorData.benchmark_comparison}</div>
-                <div className={styles.infoItem}><strong>Settlement</strong> {inspectorData.costs_breakdown?.settlementAccount || 'non trovato'}</div>
+                <div className={styles.infoItem}><strong>Banca</strong> {renderVal(inspectorData.bank_name)}</div>
+                <div className={styles.infoItem}><strong>Account</strong> {renderVal(inspectorData.benchmark_comparison)}</div>
+                <div className={styles.infoItem}><strong>Settlement</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
               </div>
 
               <div className={styles.inspectorSection}>
@@ -659,7 +672,12 @@ export default function DashboardPage() {
                   <thead><tr><th>ISIN</th><th>Ticker</th><th>Quantità</th><th>Valore</th></tr></thead>
                   <tbody>
                     {inspectorData.holdings?.map((h: any, i: number) => (
-                      <tr key={i}><td>{h.isin}</td><td>{h.ticker}</td><td>{h.quantity}</td><td>€{h.marketValue}</td></tr>
+                      <tr key={i}>
+                        <td>{renderVal(h.isin)}</td>
+                        <td>{renderVal(h.ticker)}</td>
+                        <td>{renderVal(h.quantity)}</td>
+                        <td>{renderVal(h.marketValue, true)}</td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -671,7 +689,13 @@ export default function DashboardPage() {
                   <thead><tr><th>Data</th><th>Tipo</th><th>ISIN</th><th>Quantità</th><th>Valore</th></tr></thead>
                   <tbody>
                     {inspectorData.transactions?.map((t: any, i: number) => (
-                      <tr key={i}><td>{t.date}</td><td>{t.type}</td><td>{t.isin}</td><td>{t.quantity}</td><td>€{t.exchangeValue}</td></tr>
+                      <tr key={i}>
+                        <td>{renderVal(t.date)}</td>
+                        <td>{renderVal(t.type)}</td>
+                        <td>{renderVal(t.isin)}</td>
+                        <td>{renderVal(t.quantity)}</td>
+                        <td>{renderVal(t.exchangeValue, true)}</td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
