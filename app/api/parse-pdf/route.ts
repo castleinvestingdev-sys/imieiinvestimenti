@@ -135,7 +135,10 @@ Restituisci SOLO il JSON, senza alcun commento o formattazione markdown esterna.
             holdings: parsed.finalPortfolio || [],
             transactions: parsed.movements || [],
             dividends: parsed.dividends || [],
-            costs_breakdown: parsed.summary || {},
+            costs_breakdown: {
+                ...(parsed.summary || {}),
+                settlementAccount: parsed.info?.settlementAccount || null
+            },
             benchmark_comparison: parsed.info?.accountNumber || 'N/D',
         }
 

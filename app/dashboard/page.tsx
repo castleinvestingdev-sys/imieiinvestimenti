@@ -19,6 +19,7 @@ interface Analysis {
   quarter?: string
   dossierNumber?: string
   benchmark_comparison: string
+  costs_breakdown?: any
   forensic_summary?: {
     performance_pct?: string
   }
@@ -232,37 +233,56 @@ export default function DashboardPage() {
     )
   }
 
-  // 1. Group by Account Number (identifier) first
-  const accountGroupsMap = analyses.reduce((acc, a) => {
+  // 1. Identify all unique accounts and their connections
+  const accountMetaMap = analyses.reduce((acc, a) => {
     const accNum = a.benchmark_comparison || 'N/D'
-    const isLiquidity = a.account_type === 'LIQUIDITY'
     const bank = a.bank_name?.trim() || 'Banca Sconosciuta'
+    const settlementAcc = a.costs_breakdown?.settlementAccount
 
     if (!acc[accNum]) {
       acc[accNum] = {
-        identifier: accNum,
-        bankName: bank, // Take the first bank name encountered
-        analyses: [],
-        accountType: a.account_type
+        bankName: bank,
+        connections: new Set<string>(),
+        type: a.account_type
       }
     }
-
-    acc[accNum].analyses.push(a)
+    if (settlementAcc) {
+      acc[accNum].connections.add(settlementAcc)
+    }
     return acc
-  }, {} as Record<string, { identifier: string; bankName: string; analyses: Analysis[]; accountType: string }>)
+  }, {} as Record<string, { bankName: string; connections: Set<string>; type: string }>)
 
-  // 2. Group Account Groups by Bank Name
-  const bankGroupsMap = Object.values(accountGroupsMap).reduce((acc, account) => {
-    const bank = account.bankName
-    if (!acc[bank]) {
-      acc[bank] = { bankName: bank, dossiers: [], liquidityAccounts: [] }
+  // 2. Resolve Bank Names: accounts linked together share the same section
+  const bankNormalizationMap: Record<string, string> = {}
+  Object.keys(accountMetaMap).forEach(accNum => {
+    const meta = accountMetaMap[accNum]
+    if (!bankNormalizationMap[accNum]) {
+      bankNormalizationMap[accNum] = meta.bankName
+    }
+    meta.connections.forEach(conn => {
+      // Map the connected account to the dossier's bank name to unify sections
+      bankNormalizationMap[conn] = meta.bankName
+    })
+  })
+
+  // 3. Perform final grouping with normalized bank names
+  const bankGroupsMap = analyses.reduce((acc, a) => {
+    const accNum = a.benchmark_comparison || 'N/D'
+    const bankIdentifier = bankNormalizationMap[accNum] || a.bank_name?.trim() || 'Banca Sconosciuta'
+    const isLiquidity = a.account_type === 'LIQUIDITY'
+
+    if (!acc[bankIdentifier]) {
+      acc[bankIdentifier] = { bankName: bankIdentifier, dossiers: [], liquidityAccounts: [] }
     }
 
-    if (account.accountType === 'LIQUIDITY') {
-      acc[bank].liquidityAccounts.push({ identifier: account.identifier, analyses: account.analyses })
-    } else {
-      acc[bank].dossiers.push({ identifier: account.identifier, analyses: account.analyses })
+    const targetList = isLiquidity ? acc[bankIdentifier].liquidityAccounts : acc[bankIdentifier].dossiers
+    let group = targetList.find(g => g.identifier === accNum)
+    if (!group) {
+      group = { identifier: accNum, analyses: [] }
+      targetList.push(group)
     }
+    group.analyses.push(a)
+
     return acc
   }, {} as Record<string, BankGroup>)
 
