@@ -546,21 +546,22 @@ export default function DashboardPage() {
                                               position: 'absolute',
                                               top: '6px',
                                               left: '6px',
-                                              width: '24px',
-                                              height: '24px',
+                                              width: '22px',
+                                              height: '22px',
                                               borderRadius: '50%',
                                               border: 'none',
-                                              background: 'rgba(239, 68, 68, 0.1)',
+                                              background: 'rgba(239, 68, 68, 0.15)',
                                               color: '#ef4444',
-                                              fontSize: '12px',
+                                              fontSize: '14px',
+                                              fontWeight: 'bold',
                                               cursor: 'pointer',
                                               display: 'flex',
                                               alignItems: 'center',
                                               justifyContent: 'center',
-                                              opacity: 0,
-                                              transition: 'opacity 0.2s',
                                             }}
-                                            className="delete-btn"
+                                            title="Elimina documento"
+                                            onMouseEnter={(e) => e.currentTarget.style.background = '#ef4444'}
+                                            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
                                           >
                                             ×
                                           </button>
@@ -654,20 +655,22 @@ export default function DashboardPage() {
                                               position: 'absolute',
                                               top: '6px',
                                               left: '6px',
-                                              width: '24px',
-                                              height: '24px',
+                                              width: '22px',
+                                              height: '22px',
                                               borderRadius: '50%',
                                               border: 'none',
-                                              background: 'rgba(239, 68, 68, 0.1)',
+                                              background: 'rgba(239, 68, 68, 0.15)',
                                               color: '#ef4444',
-                                              fontSize: '12px',
+                                              fontSize: '14px',
+                                              fontWeight: 'bold',
                                               cursor: 'pointer',
                                               display: 'flex',
                                               alignItems: 'center',
                                               justifyContent: 'center',
-                                              opacity: 0,
-                                              transition: 'opacity 0.2s',
                                             }}
+                                            title="Elimina documento"
+                                            onMouseEnter={(e) => e.currentTarget.style.background = '#ef4444'}
+                                            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
                                           >
                                             ×
                                           </button>
