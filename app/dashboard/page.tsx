@@ -16,15 +16,10 @@ interface Analysis {
   portfolio_value: number
   year?: number
   quarter?: string
-  dossierNumber?: string // Add new fields for display logic
+  dossierNumber?: string
   benchmark_comparison: string
   forensic_summary?: {
     performance_pct?: string
-  }
-  info?: {
-    bankName?: string
-    holder?: string
-    periodEnd?: string
   }
 }
 
@@ -79,7 +74,7 @@ export default function DashboardPage() {
     }
 
     setUploading(true)
-    setUploadProgress('Estrazione testo...')
+    setUploadProgress('Analisi in corso...')
 
     try {
       const formData = new FormData()
@@ -94,7 +89,7 @@ export default function DashboardPage() {
       const result = await response.json()
 
       if (result.success) {
-        setUploadProgress('✓ Elaborato con successo!')
+        setUploadProgress('✓ Documento Analizzato')
         await fetchAnalyses(user.id)
         setTimeout(() => {
           setUploading(false)
@@ -109,7 +104,7 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Upload error:', error)
-      setUploadProgress('Errore durante il caricamento')
+      setUploadProgress('Errore di connessione')
       setTimeout(() => {
         setUploading(false)
         setUploadProgress('')
@@ -132,38 +127,7 @@ export default function DashboardPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="dash-loading">
-        <div className="dash-loading-spinner"></div>
-        <p>Caricamento dashboard...</p>
-        <style jsx>{`
-          .dash-loading {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 60vh;
-            gap: 1.5rem;
-          }
-          .dash-loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid #e2e8f0;
-            border-top-color: #00C853;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    )
-  }
-
-  // --- LOGIC: Group by Bank -> Group by Type ---
-  // Helper to normalize bank names for grouping (simple version)
+  // --- Grouping Logic ---
   const normalizeBank = (name: string) => name?.trim() || 'Banca Sconosciuta'
 
   const bankGroupsMap = analyses.reduce((acc, a) => {
@@ -171,467 +135,186 @@ export default function DashboardPage() {
     const type = a.account_type === 'LIQUIDITY' ? 'liquidity' : 'dossier'
 
     if (!acc[bank]) acc[bank] = { bankName: bank }
-
     if (!acc[bank][type]) {
       acc[bank][type] = { identifier: a.benchmark_comparison || 'N/D', analyses: [] }
     }
-
-    // Add to collection
     acc[bank][type]!.analyses.push(a)
-    // Update identifier if we find a better one (e.g. from a newer file)
     if (a.benchmark_comparison && a.benchmark_comparison !== 'N/D') {
       acc[bank][type]!.identifier = a.benchmark_comparison
     }
-
     return acc
   }, {} as Record<string, BankGroup>)
 
   const bankGroups = Object.values(bankGroupsMap)
 
-  // Calculate years based on analyses or default to current year scope
-  let minYear = new Date().getFullYear() - 1
-  let maxYear = new Date().getFullYear()
+  // Determine global stats for header
+  const totalPortfolioValue = analyses.reduce((acc, curr) => {
+    // Logic to avoid double counting: take latest value per account
+    return acc // Simplified for now
+  }, 0)
 
-  if (analyses.length > 0) {
-    // Adjust range based on data
-    // ... (simplified for now to fixed year range for UI consistency)
-    minYear = 2023
-    maxYear = 2025 // Show future/current
+
+  // --- Helper for Quarters ---
+  const years = [2023, 2024, 2025]
+  const quarters = ['1/1 - 31/3', '1/4 - 30/6', '1/7 - 30/9', '1/10 - 31/12']
+
+  const getQuarterDates = (year: number, quarterStr: string) => {
+    const [start, end] = quarterStr.split(' - ')
+    return { start: `${start}/${year}`, end: `${end}/${year}` }
   }
 
-  const years = [2023, 2024, 2025]
-  const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
-
-  // Helper specific for finding by Period
-  const findAnalysis = (entries: Analysis[], year: number, q: string) => {
-    return entries.find(a => {
-      // Using logic from before
-      if (a.period_end) {
-        const date = new Date(a.period_end)
-        const aYear = date.getFullYear()
-        const aMonth = date.getMonth() + 1
-        const qIndex = parseInt(q.replace('Q', ''))
-        const targetMonth = qIndex * 3
-        return aYear === year && (aMonth >= targetMonth - 2 && aMonth <= targetMonth)
-      }
+  // Simple date matcher
+  const findAnalysis = (list: Analysis[], year: number, q: string) => {
+    return list.find(a => {
+      if (!a.period_end) return false
+      const date = new Date(a.period_end)
+      const y = date.getFullYear()
+      if (y !== year) return false
+      const m = date.getMonth() + 1 // 1-12
+      if (q.includes('31/3') && m <= 3) return true
+      if (q.includes('30/6') && m > 3 && m <= 6) return true
+      if (q.includes('30/9') && m > 6 && m <= 9) return true
+      if (q.includes('31/12') && m > 9) return true
       return false
     })
   }
 
-  // --- UI HELPERS ---
-  const getQuarterDates = (year: number, q: string) => {
-    const qIndex = parseInt(q.replace('Q', ''))
-    const endMonth = qIndex * 3
-    const startMonth = endMonth - 2
-    // End of Quarter
-    const endDate = new Date(year, endMonth - 1 + 1, 0) // last day
-    const startDate = new Date(year, startMonth - 1, 1)
-
-    // Previous quarter end (for start date display logic from screenshot)
-    // Screenshot shows: "31.12.2022" -> Arrow -> "31.03.2023" for Q1 2023
-    const prevQEnd = new Date(year, startMonth - 1, 0)
-
-    const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-
-    return {
-      start: fmt(prevQEnd), // "31.12.2022"
-      end: fmt(endDate)     // "31.03.2023"
-    }
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
+          <p className="text-slate-500 font-medium animate-pulse">Caricamento...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <>
-      <style jsx>{`
-        .dash-wrapper {
-          min-height: 100vh;
-          background: #F3F4F6; /* Light grey bg */
-          padding-bottom: 4rem;
-        }
-        .dash-hero {
-          background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%);
-          padding: 3rem 0;
-          border-bottom: 1px solid #E5E7EB;
-        }
-        .dash-hero-inner {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 0 2rem;
-        }
-        .dash-welcome h1 {
-          font-size: 2.2rem;
-          font-weight: 800;
-          color: #111827;
-          margin-bottom: 0.5rem;
-          letter-spacing: -0.02em;
-        }
-        .dash-welcome p a {
-          color: #00C853;
-          font-weight: 600;
-          text-decoration: underline;
-        }
-        .dash-section-title {
-          font-size: 1.8rem;
-          font-weight: 800;
-          color: #111827;
-          margin-bottom: 2rem;
-          margin-top: 3rem;
-          display: flex;
-          align-items: center;
-          gap: 0.8rem;
-        }
-        .dash-group-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 2rem;
-        }
-        
-        /* Bank Card Group */
-        .bank-group-block {
-            background: #FFFFFF;
-            border-radius: 20px;
-            padding: 2.5rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        
-        .account-row {
-            margin-bottom: 3rem;
-        }
-        .account-row:last-child {
-            margin-bottom: 0;
-        }
-        
-        .account-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-            margin-bottom: 1.5rem;
-        }
-        .account-title {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .acc-type-badge {
-            font-size: 0.9rem;
-            font-weight: 900;
-            text-transform: uppercase;
-            color: #111827;
-            letter-spacing: 0.5px;
-        }
-        .acc-details {
-            font-size: 0.95rem;
-            color: #4B5563;
-        }
-        .acc-details strong {
-            color: #111827;
-            font-weight: 700;
-        }
-        
-        .btn-see-analysis {
-            background: #F3F4F6;
-            color: #1F2937;
-            font-size: 0.8rem;
-            font-weight: 700;
-            padding: 0.6rem 1.2rem;
-            border-radius: 99px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            text-transform: uppercase;
-            text-decoration: none;
-            transition: background 0.2s;
-        }
-        .btn-see-analysis:hover {
-            background: #E5E7EB;
-        }
+    <div className="min-h-screen bg-slate-50 pb-20">
 
-        /* Grid */
-        .timeline-grid {
-            display: flex;
-            gap: 3rem; /* Spacing between years */
-            overflow-x: auto;
-            padding-bottom: 10px;
-        }
-        .year-block {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        .year-label {
-            font-size: 1rem;
-            font-weight: 700;
-            color: #111827;
-        }
-        .quarters {
-            display: flex;
-            gap: 0.8rem;
-        }
-
-        /* Tile Styling */
-        .tile {
-            width: 110px;
-            height: 140px;
-            border-radius: 12px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.8rem 0.5rem;
-            position: relative;
-            transition: transform 0.2s;
-        }
-        .tile:hover {
-            transform: translateY(-2px);
-        }
-        
-        /* Present State */
-        .tile.present {
-            background: #DCFCE7; /* Light Green */
-        }
-        .tile.present .dates {
-            font-size: 0.7rem;
-            font-weight: 700;
-            color: #166534;
-            text-align: center;
-            line-height: 1.3;
-        }
-        .tile.present .arrow-icon {
-            font-size: 1rem;
-            color: #16A34A;
-        }
-        .tile.present .value-label {
-            font-size: 0.65rem;
-            color: #16A34A;
-            opacity: 0.8;
-            font-weight: 500;
-            font-style: italic;
-        }
-        .tile.present .value-data {
-            font-size: 0.9rem;
-            font-weight: 800;
-            color: #15803D; /* Green text */
-        }
-        .tile.present .check-icon {
-            position: absolute;
-            bottom: 6px;
-            right: 6px;
-            width: 20px;
-            height: 20px;
-            background: #22C55E;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        /* Absent State */
-        .tile.absent {
-            background: #F9FAFB;
-            border: 1px solid #E5E7EB;
-        }
-        .tile.absent .dates {
-             font-size: 0.7rem;
-            font-weight: 600;
-            color: #6B7280;
-            text-align: center;
-            line-height: 1.3;
-        }
-        .tile.absent .arrow-icon {
-             font-size: 1rem;
-             color: #9CA3AF;
-        }
-        .tile.absent .status-text {
-            color: #EF4444; /* Red for ASSENTE per screenshot */
-            font-weight: 800;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-        }
-        .tile.absent .upload-btn {
-            background: #E5E7EB;
-            color: #6B7280;
-            border: none;
-            border-radius: 12px;
-            padding: 4px 12px;
-            font-size: 0.65rem;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .tile.absent .upload-btn:hover {
-            background: #D1D5DB;
-        }
-        
-        /* Dropzone Override */
-        .dash-dropzone {
-          height: 90px;
-          background: linear-gradient(90deg, #ECFDF5 0%, #D1FAE5 100%);
-          border: 2px dashed #10B981;
-          border-radius: 99px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 2rem;
-          cursor: pointer;
-          margin-top: 1rem;
-        }
-        .dash-drop-icon-sm {
-           background: #10B981;
-           border-radius: 50%;
-           width: 40px;
-           height: 40px;
-           display: flex;
-           align-items: center;
-           justify-content: center;
-           color: white;
-           font-weight: bold;
-        }
-
-        .missing-account-alert {
-            margin-top: 1rem;
-            background: #FFFBEB;
-            border: 1px solid #FCD34D;
-            border-radius: 12px;
-            padding: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-        .alert-text {
-            font-size: 0.9rem;
-            color: #92400E;
-            font-weight: 500;
-        }
-        .alert-btn {
-            background: #F59E0B;
-            color: white;
-            font-weight: 700;
-            font-size: 0.85rem;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-        }
-      `}</style>
-
-      <div className="dash-wrapper">
-        {/* HERO UPLOAD SECTION */}
-        <section className="dash-hero">
-          <div className="dash-hero-inner">
-            <div className="dash-welcome">
-              <h1>Carica i PDF &quot;Estratto Conto&quot; del Dossier Titoli e Conto corrente</h1>
-              <p style={{ color: '#6B7280' }}>
-                Non li trovi? Puoi scaricarli dall&apos;<a href="#">Homebanking</a>, la banca è tenuta a darteli per legge. Li trovi nella sezione documenti.
-              </p>
+      {/* Premium Header */}
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Il tuo Caveau Digitale</h1>
+              <p className="text-slate-500 mt-2">Gestisci, analizza e monitora tutti i tuoi investimenti bancari in un unico posto sicuro.</p>
             </div>
-
-            <div
-              className="dash-dropzone"
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              onClick={() => document.getElementById('file-input')?.click()}
-            >
-              <div className="dash-drop-icon-sm">
-                ↑
+            <div className="flex gap-4">
+              <div
+                className="group relative overflow-hidden bg-slate-900 hover:bg-emerald-600 transition-colors text-white px-6 py-3 rounded-full font-bold shadow-lg shadow-slate-900/20 cursor-pointer flex items-center gap-3"
+                onClick={() => document.getElementById('file-input')?.click()}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                <span>Carica Nuovo PDF</span>
+                {uploading && (
+                  <div className="absolute inset-0 bg-emerald-600 flex items-center justify-center">
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                  </div>
+                )}
               </div>
-              <span style={{ fontWeight: 800, fontSize: '1.2rem', color: '#064E3B' }}>DRAG & DROP</span>
-              <span style={{ color: '#6EE7B7', fontWeight: 600 }}>oppure</span>
-              <button style={{
-                background: '#1F2937', color: 'white', fontWeight: 700, padding: '0.6rem 1.5rem', borderRadius: '50px', border: 'none', cursor: 'pointer'
-              }}>CARICA DA PC</button>
               <input type="file" id="file-input" hidden accept=".pdf" onChange={handleFileSelect} />
             </div>
-
-            {uploading && (
-              <div className="dash-status">
-                <span style={{ color: uploadProgress.includes('✓') ? '#059669' : '#D97706', fontWeight: 700 }}>{uploadProgress}</span>
-              </div>
-            )}
-            {/* Display generic error if db insert failed (from previous steps) */}
-            {analyses.length === 0 && !uploading && uploadProgress.includes('Errore') && (
-              <div style={{ color: 'red', marginTop: '10px', fontSize: '0.9rem' }}>{uploadProgress}</div>
-            )}
           </div>
-        </section>
+        </div>
+      </header>
 
-        <div className="dash-group-container">
-          <h2 className="dash-section-title">
-            I tuoi Conti ({bankGroups.length}) e Estratti Conto ({analyses.length})
-          </h2>
+      {uploading && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex items-center gap-3 text-emerald-800">
+            <svg className="w-5 h-5 animate-spin text-emerald-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <span className="font-semibold">{uploadProgress}</span>
+          </div>
+        </div>
+      )}
 
-          {bankGroups.length === 0 ? (
-            <div className="dash-empty">
-              <h3>Nessun estratto conto caricato</h3>
-              <p>Carica il tuo primo PDF per iniziare.</p>
+      {!uploading && analyses.length === 0 && (
+        <div className="max-w-2xl mx-auto mt-12 px-4">
+          <div
+            className="border-2 border-dashed border-slate-300 rounded-3xl p-12 text-center hover:border-emerald-500 hover:bg-emerald-50/50 transition-all cursor-pointer group"
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => document.getElementById('file-input')?.click()}
+          >
+            <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:bg-emerald-100 transition-colors">
+              <svg className="w-10 h-10 text-slate-400 group-hover:text-emerald-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
             </div>
-          ) : (
-            bankGroups.map((group, idx) => {
-              const hasDossier = !!group.dossier;
-              const hasLiquidity = !!group.liquidity;
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Trascina qui il tuo primo estratto conto</h3>
+            <p className="text-slate-500 mb-6">Supportiamo solo PDF originali bancari.<br />Li trovi nel tuo home banking sotto &quot;Estratti Conto&quot;.</p>
+            <button className="bg-white border border-slate-200 text-slate-700 font-bold py-2 px-6 rounded-full hover:bg-slate-50 transition-colors shadow-sm">
+              Seleziona File dal PC
+            </button>
+          </div>
+        </div>
+      )}
 
-              return (
-                <div key={idx} className="bank-group-block">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 space-y-12">
+        {bankGroups.map((group, idx) => {
+          const hasDossier = !!group.dossier;
+          const hasLiquidity = !!group.liquidity;
 
-                  {/* --- 1. DOSSIER ROW --- */}
-                  {hasDossier && (
-                    <div className="account-row">
-                      <div className="account-header">
-                        <div className="account-title">
-                          <span className="acc-type-badge">TITOLI</span>
-                          <div className="acc-details">
-                            Banca: <strong>{group.bankName}</strong><br />
-                            Dossier Titoli: {group.dossier?.identifier}<br />
-                            Rendicontazione: Trimestrale
-                          </div>
-                        </div>
-                        {/* Only link to first analysis for now */}
-                        <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className="btn-see-analysis">
-                          VEDI ANALISI COMPLETA →
-                        </Link>
+          return (
+            <div key={idx} className="space-y-6">
+              <div className="flex items-center gap-3 pb-4 border-b border-slate-200">
+                <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg">
+                  {group.bankName.charAt(0)}
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900">{group.bankName}</h2>
+                {hasDossier && !hasLiquidity && (
+                  <span className="ml-auto bg-amber-50 text-amber-700 border border-amber-100 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2">
+                    ⚠️ Manca Conto Liquidità
+                  </span>
+                )}
+                {hasLiquidity && !hasDossier && (
+                  <span className="ml-auto bg-amber-50 text-amber-700 border border-amber-100 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2">
+                    ⚠️ Manca Dossier Titoli
+                  </span>
+                )}
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-8">
+                {/* --- DOSSIER SECTION --- */}
+                {hasDossier ? (
+                  <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 overflow-hidden">
+                    <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50/[0.3]">
+                      <div>
+                        <div className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">Investimenti</div>
+                        <h3 className="text-lg font-bold text-slate-900">Dossier Titoli</h3>
+                        <p className="text-sm text-slate-500 font-mono mt-1">{group.dossier?.identifier}</p>
                       </div>
-
-                      {/* GRID */}
-                      <div className="timeline-grid">
+                      <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1">
+                        ANALISI RECENTE <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      </Link>
+                    </div>
+                    <div className="p-6 overflow-x-auto">
+                      <div className="flex gap-4 min-w-full pb-2">
                         {years.map(year => (
-                          <div key={year} className="year-block">
-                            <div className="year-label">{year}</div>
-                            <div className="quarters">
-                              {quarters.map(q => {
+                          <div key={year} className="flex-none w-64">
+                            <div className="text-xs font-bold text-slate-400 mb-3">{year}</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {quarters.map((q, i) => {
                                 const file = findAnalysis(group.dossier!.analyses, year, q);
                                 const isPresent = !!file;
-                                const dates = getQuarterDates(year, q);
-
                                 return (
-                                  <div key={q} className={`tile ${isPresent ? 'present' : 'absent'}`}
-                                    onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
-
-                                    <div className="dates">
-                                      {dates.start}<br />
-                                      <span className="arrow-icon">↓</span><br />
-                                      {dates.end}
-                                    </div>
-
+                                  <div
+                                    key={i}
+                                    onClick={() => isPresent && router.push(`/analisi/${file.id}`)}
+                                    className={`
+                                                                    relative p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer h-24
+                                                                    ${isPresent
+                                        ? 'bg-emerald-50 border-emerald-100 hover:shadow-md hover:-translate-y-0.5'
+                                        : 'bg-slate-50 border-slate-100 hover:bg-slate-100 opacity-60 hover:opacity-100 border-dashed'}
+                                                                `}
+                                  >
+                                    <div className="text-[10px] font-bold uppercase text-slate-400">{q.split(' - ')[1].split('/')[1] === '3' ? 'Q1' : q.split(' - ')[1].split('/')[1] === '6' ? 'Q2' : q.split(' - ')[1].split('/')[1] === '9' ? 'Q3' : 'Q4'}</div>
                                     {isPresent ? (
                                       <>
-                                        <div style={{ textAlign: 'center' }}>
-                                          <span className="value-label">Rendimento:</span>
-                                          <div className="value-data" style={{ color: '#EAB308' }}>
-                                            Data Mock
-                                            {/* In reality use forensic_summary or calculated yield */}
-                                          </div>
-                                        </div>
-                                        <div className="check-icon">✓</div>
+                                        <div className="text-sm font-bold text-emerald-700">Presente</div>
+                                        <div className="absolute top-2 right-2 w-2 h-2 bg-emerald-500 rounded-full"></div>
                                       </>
                                     ) : (
-                                      <>
-                                        <div className="status-text">ASSENTE</div>
-                                        <button className="upload-btn" onClick={(e) => {
-                                          e.stopPropagation();
-                                          document.getElementById('file-input')?.click();
-                                        }}>Carica +</button>
-                                      </>
+                                      <div className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">MANCA</div>
                                     )}
                                   </div>
                                 )
@@ -641,77 +324,66 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </div>
-                  )}
-
-                  {/* --- CROSS-CHECK ALERT: MISSING DOSSIER --- */}
-                  {hasLiquidity && !hasDossier && (
-                    <div className="missing-account-alert">
-                      <div className="alert-text">
-                        Hai caricato la Liquidità per <strong>{group.bankName}</strong>, ma manca il <strong>Dossier Titoli</strong>.
-                      </div>
-                      <button className="alert-btn" onClick={() => document.getElementById('file-input')?.click()}>
-                        Carica Dossier
-                      </button>
+                  </div>
+                ) : (
+                  // Empty State for Dossier
+                  <div
+                    className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer opacity-70 hover:opacity-100"
+                    onClick={() => document.getElementById('file-input')?.click()}
+                  >
+                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
                     </div>
-                  )}
+                    <h3 className="font-bold text-slate-900">Manca Dossier Titoli</h3>
+                    <p className="text-sm text-slate-500 mt-1">Clicca per caricare</p>
+                  </div>
+                )}
 
-
-                  {/* --- 2. LIQUIDITY ROW --- */}
-                  {hasLiquidity && (
-                    <div className="account-row" style={{ marginTop: hasDossier ? '3rem' : '0' }}>
-                      <div className="account-header">
-                        <div className="account-title">
-                          <span className="acc-type-badge">LIQUIDITÀ</span>
-                          <div className="acc-details">
-                            Banca: <strong>{group.bankName}</strong><br />
-                            Conto corrente: {group.liquidity?.identifier}<br />
-                            Rendicontazione: Trimestrale
-                          </div>
-                        </div>
-                        <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className="btn-see-analysis">
-                          VEDI ANALISI COMPLETA →
-                        </Link>
+                {/* --- LIQUIDITY SECTION --- */}
+                {hasLiquidity ? (
+                  <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.04)] border border-slate-100 overflow-hidden">
+                    <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50/[0.3]">
+                      <div>
+                        <div className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Liquidità</div>
+                        <h3 className="text-lg font-bold text-slate-900">Conto Corrente</h3>
+                        <p className="text-sm text-slate-500 font-mono mt-1">{group.liquidity?.identifier}</p>
                       </div>
-
-                      {/* GRID (Identical logic, different styling if needed, but keeping consistent) */}
-                      <div className="timeline-grid">
+                      <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1">
+                        VEDI SALDO <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      </Link>
+                    </div>
+                    <div className="p-6 overflow-x-auto">
+                      <div className="flex gap-4 min-w-full pb-2">
                         {years.map(year => (
-                          <div key={year} className="year-block">
-                            <div className="year-label">{year}</div>
-                            <div className="quarters">
-                              {quarters.map(q => {
+                          <div key={year} className="flex-none w-64">
+                            <div className="text-xs font-bold text-slate-400 mb-3">{year}</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {quarters.map((q, i) => {
                                 const file = findAnalysis(group.liquidity!.analyses, year, q);
                                 const isPresent = !!file;
-                                const dates = getQuarterDates(year, q);
-
                                 return (
-                                  <div key={q} className={`tile ${isPresent ? 'present' : 'absent'}`}
-                                    onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
-
-                                    <div className="dates">
-                                      {dates.start}<br />
-                                      <span className="arrow-icon">↓</span><br />
-                                      {dates.end}
-                                    </div>
-
+                                  <div
+                                    key={i}
+                                    onClick={() => isPresent && router.push(`/analisi/${file.id}`)}
+                                    className={`
+                                                                    relative p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all cursor-pointer h-24
+                                                                    ${isPresent
+                                        ? 'bg-blue-50 border-blue-100 hover:shadow-md hover:-translate-y-0.5'
+                                        : 'bg-slate-50 border-slate-100 hover:bg-slate-100 opacity-60 hover:opacity-100 border-dashed'}
+                                                                `}
+                                  >
+                                    <div className="text-[10px] font-bold uppercase text-slate-400">{q.split(' - ')[1].split('/')[1] === '3' ? 'Q1' : q.split(' - ')[1].split('/')[1] === '6' ? 'Q2' : q.split(' - ')[1].split('/')[1] === '9' ? 'Q3' : 'Q4'}</div>
                                     {isPresent ? (
                                       <>
-                                        <div style={{ textAlign: 'center' }}>
-                                          <span className="value-label">Saldo:</span>
-                                          <div className="value-data">
-                                            €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'compact' })}
-                                          </div>
+                                        <div className="text-sm font-bold text-blue-700">
+                                          €{file.portfolio_value && file.portfolio_value < 10000
+                                            ? (file.portfolio_value / 1000).toFixed(1) + 'k'
+                                            : (file.portfolio_value / 1000).toFixed(0) + 'k'}
                                         </div>
-                                        <div className="check-icon">✓</div>
+                                        <div className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full"></div>
                                       </>
                                     ) : (
-                                      <>
-                                        <div className="status-text">ASSENTE</div>
-                                        <button className="upload-btn" onClick={(e) => {
-                                          e.stopPropagation();
-                                          document.getElementById('file-input')?.click();
-                                        }}>Carica +</button>
-                                      </>
+                                      <div className="text-[10px] bg-slate-200 text-slate-500 px-2 py-1 rounded font-bold">MANCA</div>
                                     )}
                                   </div>
                                 )
@@ -721,26 +393,26 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </div>
-                  )}
-
-                  {/* --- CROSS-CHECK ALERT: MISSING LIQUIDITY --- */}
-                  {hasDossier && !hasLiquidity && (
-                    <div className="missing-account-alert" style={{ marginTop: '2rem' }}>
-                      <div className="alert-text">
-                        Hai caricato il Dossier per <strong>{group.bankName}</strong>. Di solito c&apos;è sempre un <strong>Conto Corrente</strong> associato per la liquidità.
-                      </div>
-                      <button className="alert-btn" onClick={() => document.getElementById('file-input')?.click()}>
-                        Carica Liquidità
-                      </button>
+                  </div>
+                ) : (
+                  // Empty State for Liquidity
+                  <div
+                    className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer opacity-70 hover:opacity-100"
+                    onClick={() => document.getElementById('file-input')?.click()}
+                  >
+                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     </div>
-                  )}
+                    <h3 className="font-bold text-slate-900">Manca Conto Corrente</h3>
+                    <p className="text-sm text-slate-500 mt-1">Clicca per caricare</p>
+                  </div>
+                )}
 
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-    </>
+              </div>
+            </div>
+          )
+        })}
+      </main>
+    </div>
   )
 }
