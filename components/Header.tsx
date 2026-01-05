@@ -126,44 +126,42 @@ export default function Header() {
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
+              gap: '12px',
             }} key={user ? 'auth-true' : 'auth-false'}>
               {user ? (
                 <>
                   <Link href="/dashboard" style={{
-                    background: '#00C853',
+                    background: 'linear-gradient(135deg, #00C853 0%, #009624 100%)',
                     color: '#fff',
-                    padding: '8px 20px',
-                    borderRadius: '30px',
-                    fontWeight: 700,
-                    fontSize: '0.75rem',
+                    padding: '0 24px',
+                    borderRadius: '50px',
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
                     textDecoration: 'none',
-                    boxShadow: '0 4px 12px rgba(0, 200, 83, 0.3)',
-                    transition: 'all 0.2s ease',
-                    marginRight: '8px',
+                    boxShadow: '0 4px 15px rgba(0, 200, 83, 0.3)',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    height: '42px',
-                    boxSizing: 'border-box',
-                    letterSpacing: '0.5px'
+                    height: '44px',
+                    border: '1px solid rgba(255,255,255,0.1)',
                   }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-1px)'
-                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 200, 83, 0.4)'
+                      e.currentTarget.style.transform = 'translateY(-2px)'
+                      e.currentTarget.style.boxShadow = '0 8px 25px rgba(0, 200, 83, 0.4)'
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.transform = 'translateY(0)'
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 200, 83, 0.3)'
+                      e.currentTarget.style.boxShadow = '0 4px 15px rgba(0, 200, 83, 0.3)'
                     }}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect width="7" height="9" x="3" y="3" rx="1" />
                       <rect width="7" height="5" x="14" y="3" rx="1" />
                       <rect width="7" height="9" x="14" y="12" rx="1" />
                       <rect width="7" height="5" x="3" y="16" rx="1" />
                     </svg>
-                    DASHBOARD
+                    Dashboard
                   </Link>
 
                   <div style={{ position: 'relative' }} ref={menuRef}>
@@ -173,22 +171,29 @@ export default function Header() {
                         setMenuOpen(!menuOpen)
                       }}
                       style={{
-                        width: '42px',
-                        height: '42px',
-                        background: '#00C853',
+                        width: '44px',
+                        height: '44px',
+                        background: '#ffffff',
+                        border: '2px solid #00C853',
                         borderRadius: '50%',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: 'white',
-                        fontWeight: 600,
-                        fontSize: '1rem',
+                        color: '#00C853',
+                        fontWeight: 700,
+                        fontSize: '1.1rem',
                         cursor: 'pointer',
-                        transition: 'transform 0.2s',
-                        transform: menuOpen ? 'scale(1.05)' : 'scale(1)',
-                        boxShadow: '0 2px 8px rgba(0,200,83,0.3)',
-                        border: '2px solid #fff',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
                         userSelect: 'none'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.05)'
+                        e.currentTarget.style.boxShadow = '0 4px 15px rgba(0, 200, 83, 0.2)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)'
+                        e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.05)'
                       }}
                     >
                       {user.email?.charAt(0).toUpperCase() || 'U'}
@@ -197,30 +202,34 @@ export default function Header() {
                     {menuOpen && (
                       <div style={{
                         position: 'absolute',
-                        top: '54px',
+                        top: '58px',
                         right: 0,
                         background: 'white',
                         borderRadius: '16px',
                         padding: '8px',
-                        width: '200px',
-                        boxShadow: '0 10px 40px rgba(0,0,0,0.12)',
-                        border: '1px solid rgba(0,0,0,0.05)',
+                        width: '220px',
+                        boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+                        border: '1px solid rgba(0,0,0,0.08)',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '2px',
+                        gap: '4px',
                         animation: 'fadeIn 0.2s ease-out',
                         overflow: 'hidden',
                         zIndex: 1001
                       }}>
                         <div style={{
-                          padding: '8px 12px',
-                          fontSize: '0.7rem',
+                          padding: '12px 16px',
+                          fontSize: '0.75rem',
                           fontWeight: 700,
-                          color: '#94a3b8',
+                          color: '#64748b',
+                          letterSpacing: '0.5px',
+                          borderBottom: '1px solid #f1f5f9',
                           marginBottom: '4px',
-                          cursor: 'default',
-                          letterSpacing: '0.5px'
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
                         }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#00C853' }}></span>
                           ACCOUNT
                         </div>
                         <button onClick={(e) => {
@@ -230,22 +239,22 @@ export default function Header() {
                           background: 'transparent',
                           border: 'none',
                           textAlign: 'left',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
+                          padding: '12px 16px',
+                          borderRadius: '12px',
                           cursor: 'pointer',
-                          fontSize: '0.9rem',
+                          fontSize: '0.95rem',
                           color: '#ef4444',
                           fontWeight: 600,
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '10px',
+                          gap: '12px',
                           width: '100%',
                           transition: 'background 0.2s'
                         }}
                           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
                           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                             <polyline points="16 17 21 12 16 7" />
                             <line x1="21" x2="9" y1="12" y2="12" />
@@ -265,53 +274,44 @@ export default function Header() {
               ) : (
                 <>
                   <Link href="/login" style={{
-                    color: '#1a1a1a',
+                    color: '#333',
                     textDecoration: 'none',
                     fontWeight: 600,
-                    fontSize: '0.8rem',
-                    padding: '8px 18px',
-                    borderRadius: '30px',
-                    border: '1px solid #e5e7eb',
-                    transition: 'all 0.2s',
-                    background: 'white'
+                    fontSize: '0.9rem',
+                    padding: '10px 20px',
+                    transition: 'color 0.2s',
                   }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#d1d5db'
-                      e.currentTarget.style.background = '#f9fafb'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#e5e7eb'
-                      e.currentTarget.style.background = 'white'
-                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = '#00C853'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = '#333'}
                   >
-                    ACCEDI
+                    Accedi
                   </Link>
                   <Link href="/dashboard" style={{
-                    background: '#00C853',
+                    background: 'linear-gradient(135deg, #00C853 0%, #009624 100%)',
                     color: '#fff',
-                    padding: '8px 20px',
-                    borderRadius: '30px',
-                    fontWeight: 700,
-                    fontSize: '0.75rem',
+                    padding: '0 28px',
+                    borderRadius: '50px',
+                    fontWeight: 600,
+                    fontSize: '0.95rem',
                     textDecoration: 'none',
-                    boxShadow: '0 4px 12px rgba(0, 200, 83, 0.3)',
+                    boxShadow: '0 4px 15px rgba(0, 200, 83, 0.3)',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
-                    height: '42px',
-                    boxSizing: 'border-box',
-                    letterSpacing: '0.5px'
+                    gap: '8px',
+                    height: '48px',
+                    border: '1px solid rgba(255,255,255,0.1)',
                   }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-1px)'
-                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 200, 83, 0.4)'
+                      e.currentTarget.style.transform = 'translateY(-2px)'
+                      e.currentTarget.style.boxShadow = '0 8px 25px rgba(0, 200, 83, 0.4)'
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.transform = 'translateY(0)'
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 200, 83, 0.3)'
+                      e.currentTarget.style.boxShadow = '0 4px 15px rgba(0, 200, 83, 0.3)'
                     }}>
-                    PROVALO ORA
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    Provalo ora
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 12h14" />
                       <path d="m12 5 7 7-7 7" />
                     </svg>
