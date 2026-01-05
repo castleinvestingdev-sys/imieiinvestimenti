@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
+import styles from './Dashboard.module.css'
 
 interface Analysis {
   id: string
@@ -16,7 +17,7 @@ interface Analysis {
   portfolio_value: number
   year?: number
   quarter?: string
-  dossierNumber?: string // Add new fields for display logic
+  dossierNumber?: string
   benchmark_comparison: string
   forensic_summary?: {
     performance_pct?: string
@@ -42,6 +43,7 @@ export default function DashboardPage() {
   const [uploadProgress, setUploadProgress] = useState('')
   const router = useRouter()
   const supabase = createClient()
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -132,38 +134,23 @@ export default function DashboardPage() {
     }
   }
 
+  const scrollTimeline = (direction: 'left' | 'right') => {
+    if (scrollRef.current) {
+      const { scrollLeft, clientWidth } = scrollRef.current
+      const scrollTo = direction === 'left' ? scrollLeft - 300 : scrollLeft + 300
+      scrollRef.current.scrollTo({ left: scrollTo, behavior: 'smooth' })
+    }
+  }
+
   if (loading) {
     return (
-      <div className="dash-loading">
-        <div className="dash-loading-spinner"></div>
+      <div className={styles.dashLoading}>
+        <div className={styles.dashLoadingSpinner}></div>
         <p>Caricamento dashboard...</p>
-        <style jsx>{`
-          .dash-loading {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 60vh;
-            gap: 1.5rem;
-          }
-          .dash-loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid #e2e8f0;
-            border-top-color: #00C853;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-          }
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
       </div>
     )
   }
 
-  // --- LOGIC: Group by Bank -> Group by Type ---
-  // Helper to normalize bank names for grouping (simple version)
   const normalizeBank = (name: string) => name?.trim() || 'Banca Sconosciuta'
 
   const bankGroupsMap = analyses.reduce((acc, a) => {
@@ -171,41 +158,22 @@ export default function DashboardPage() {
     const type = a.account_type === 'LIQUIDITY' ? 'liquidity' : 'dossier'
 
     if (!acc[bank]) acc[bank] = { bankName: bank }
-
     if (!acc[bank][type]) {
       acc[bank][type] = { identifier: a.benchmark_comparison || 'N/D', analyses: [] }
     }
-
-    // Add to collection
     acc[bank][type]!.analyses.push(a)
-    // Update identifier if we find a better one (e.g. from a newer file)
     if (a.benchmark_comparison && a.benchmark_comparison !== 'N/D') {
       acc[bank][type]!.identifier = a.benchmark_comparison
     }
-
     return acc
   }, {} as Record<string, BankGroup>)
 
   const bankGroups = Object.values(bankGroupsMap)
-
-  // Calculate years based on analyses or default to current year scope
-  let minYear = new Date().getFullYear() - 1
-  let maxYear = new Date().getFullYear()
-
-  if (analyses.length > 0) {
-    // Adjust range based on data
-    // ... (simplified for now to fixed year range for UI consistency)
-    minYear = 2023
-    maxYear = 2025 // Show future/current
-  }
-
   const years = [2023, 2024, 2025]
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  // Helper specific for finding by Period
   const findAnalysis = (entries: Analysis[], year: number, q: string) => {
     return entries.find(a => {
-      // Using logic from before
       if (a.period_end) {
         const date = new Date(a.period_end)
         const aYear = date.getFullYear()
@@ -218,419 +186,130 @@ export default function DashboardPage() {
     })
   }
 
-  // --- UI HELPERS ---
   const getQuarterDates = (year: number, q: string) => {
     const qIndex = parseInt(q.replace('Q', ''))
     const endMonth = qIndex * 3
     const startMonth = endMonth - 2
-    // End of Quarter
-    const endDate = new Date(year, endMonth - 1 + 1, 0) // last day
+    const endDate = new Date(year, endMonth, 0)
     const startDate = new Date(year, startMonth - 1, 1)
-
-    // Previous quarter end (for start date display logic from screenshot)
-    // Screenshot shows: "31.12.2022" -> Arrow -> "31.03.2023" for Q1 2023
     const prevQEnd = new Date(year, startMonth - 1, 0)
-
     const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-
     return {
-      start: fmt(prevQEnd), // "31.12.2022"
-      end: fmt(endDate)     // "31.03.2023"
+      start: fmt(prevQEnd),
+      end: fmt(endDate)
     }
   }
 
   return (
-    <>
-      <style jsx>{`
-        .dash-wrapper {
-          min-height: 100vh;
-          background: #F3F4F6; /* Light grey bg */
-          padding-bottom: 4rem;
-        }
-        .dash-hero {
-          background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%);
-          padding: 3rem 0;
-          border-bottom: 1px solid #E5E7EB;
-        }
-        .dash-hero-inner {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 0 2rem;
-        }
-        .dash-welcome h1 {
-          font-size: 2.2rem;
-          font-weight: 800;
-          color: #111827;
-          margin-bottom: 0.5rem;
-          letter-spacing: -0.02em;
-        }
-        .dash-welcome p a {
-          color: #00C853;
-          font-weight: 600;
-          text-decoration: underline;
-        }
-        .dash-section-title {
-          font-size: 1.8rem;
-          font-weight: 800;
-          color: #111827;
-          margin-bottom: 2rem;
-          margin-top: 3rem;
-          display: flex;
-          align-items: center;
-          gap: 0.8rem;
-        }
-        .dash-group-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 2rem;
-        }
-        
-        /* Bank Card Group */
-        .bank-group-block {
-            background: #FFFFFF;
-            border-radius: 20px;
-            padding: 2.5rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        
-        .account-row {
-            margin-bottom: 3rem;
-        }
-        .account-row:last-child {
-            margin-bottom: 0;
-        }
-        
-        .account-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-            margin-bottom: 1.5rem;
-        }
-        .account-title {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .acc-type-badge {
-            font-size: 0.9rem;
-            font-weight: 900;
-            text-transform: uppercase;
-            color: #111827;
-            letter-spacing: 0.5px;
-        }
-        .acc-details {
-            font-size: 0.95rem;
-            color: #4B5563;
-        }
-        .acc-details strong {
-            color: #111827;
-            font-weight: 700;
-        }
-        
-        .btn-see-analysis {
-            background: #F3F4F6;
-            color: #1F2937;
-            font-size: 0.8rem;
-            font-weight: 700;
-            padding: 0.6rem 1.2rem;
-            border-radius: 99px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            text-transform: uppercase;
-            text-decoration: none;
-            transition: background 0.2s;
-        }
-        .btn-see-analysis:hover {
-            background: #E5E7EB;
-        }
+    <main className={styles.dashWrapper}>
+      <div className={styles.heroBackground} />
 
-        /* Grid */
-        .timeline-grid {
-            display: flex;
-            gap: 3rem; /* Spacing between years */
-            overflow-x: auto;
-            padding-bottom: 10px;
-        }
-        .year-block {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        .year-label {
-            font-size: 1rem;
-            font-weight: 700;
-            color: #111827;
-        }
-        .quarters {
-            display: flex;
-            gap: 0.8rem;
-        }
-
-        /* Tile Styling */
-        .tile {
-            width: 110px;
-            height: 140px;
-            border-radius: 12px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.8rem 0.5rem;
-            position: relative;
-            transition: transform 0.2s;
-        }
-        .tile:hover {
-            transform: translateY(-2px);
-        }
-        
-        /* Present State */
-        .tile.present {
-            background: #DCFCE7; /* Light Green */
-        }
-        .tile.present .dates {
-            font-size: 0.7rem;
-            font-weight: 700;
-            color: #166534;
-            text-align: center;
-            line-height: 1.3;
-        }
-        .tile.present .arrow-icon {
-            font-size: 1rem;
-            color: #16A34A;
-        }
-        .tile.present .value-label {
-            font-size: 0.65rem;
-            color: #16A34A;
-            opacity: 0.8;
-            font-weight: 500;
-            font-style: italic;
-        }
-        .tile.present .value-data {
-            font-size: 0.9rem;
-            font-weight: 800;
-            color: #15803D; /* Green text */
-        }
-        .tile.present .check-icon {
-            position: absolute;
-            bottom: 6px;
-            right: 6px;
-            width: 20px;
-            height: 20px;
-            background: #22C55E;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        /* Absent State */
-        .tile.absent {
-            background: #F9FAFB;
-            border: 1px solid #E5E7EB;
-        }
-        .tile.absent .dates {
-             font-size: 0.7rem;
-            font-weight: 600;
-            color: #6B7280;
-            text-align: center;
-            line-height: 1.3;
-        }
-        .tile.absent .arrow-icon {
-             font-size: 1rem;
-             color: #9CA3AF;
-        }
-        .tile.absent .status-text {
-            color: #EF4444; /* Red for ASSENTE per screenshot */
-            font-weight: 800;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-        }
-        .tile.absent .upload-btn {
-            background: #E5E7EB;
-            color: #6B7280;
-            border: none;
-            border-radius: 12px;
-            padding: 4px 12px;
-            font-size: 0.65rem;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .tile.absent .upload-btn:hover {
-            background: #D1D5DB;
-        }
-        
-        /* Dropzone Override */
-        .dash-dropzone {
-          height: 90px;
-          background: linear-gradient(90deg, #ECFDF5 0%, #D1FAE5 100%);
-          border: 2px dashed #10B981;
-          border-radius: 99px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 2rem;
-          cursor: pointer;
-          margin-top: 1rem;
-        }
-        .dash-drop-icon-sm {
-           background: #10B981;
-           border-radius: 50%;
-           width: 40px;
-           height: 40px;
-           display: flex;
-           align-items: center;
-           justify-content: center;
-           color: white;
-           font-weight: bold;
-        }
-
-        .missing-account-alert {
-            margin-top: 1rem;
-            background: #FFFBEB;
-            border: 1px solid #FCD34D;
-            border-radius: 12px;
-            padding: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-        .alert-text {
-            font-size: 0.9rem;
-            color: #92400E;
-            font-weight: 500;
-        }
-        .alert-btn {
-            background: #F59E0B;
-            color: white;
-            font-weight: 700;
-            font-size: 0.85rem;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-        }
-      `}</style>
-
-      <div className="dash-wrapper">
-        {/* HERO UPLOAD SECTION */}
-        <section className="dash-hero">
-          <div className="dash-hero-inner">
-            <div className="dash-welcome">
-              <h1>Carica i PDF &quot;Estratto Conto&quot; del Dossier Titoli e Conto corrente</h1>
-              <p style={{ color: '#6B7280' }}>
-                Non li trovi? Puoi scaricarli dall&apos;<a href="#">Homebanking</a>, la banca è tenuta a darteli per legge. Li trovi nella sezione documenti.
-              </p>
-            </div>
-
-            <div
-              className="dash-dropzone"
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              onClick={() => document.getElementById('file-input')?.click()}
-            >
-              <div className="dash-drop-icon-sm">
-                ↑
-              </div>
-              <span style={{ fontWeight: 800, fontSize: '1.2rem', color: '#064E3B' }}>DRAG & DROP</span>
-              <span style={{ color: '#6EE7B7', fontWeight: 600 }}>oppure</span>
-              <button style={{
-                background: '#1F2937', color: 'white', fontWeight: 700, padding: '0.6rem 1.5rem', borderRadius: '50px', border: 'none', cursor: 'pointer'
-              }}>CARICA DA PC</button>
-              <input type="file" id="file-input" hidden accept=".pdf" onChange={handleFileSelect} />
-            </div>
-
-            {uploading && (
-              <div className="dash-status">
-                <span style={{ color: uploadProgress.includes('✓') ? '#059669' : '#D97706', fontWeight: 700 }}>{uploadProgress}</span>
-              </div>
-            )}
-            {/* Display generic error if db insert failed (from previous steps) */}
-            {analyses.length === 0 && !uploading && uploadProgress.includes('Errore') && (
-              <div style={{ color: 'red', marginTop: '10px', fontSize: '0.9rem' }}>{uploadProgress}</div>
-            )}
+      {/* HEADER SECTION */}
+      <header className={styles.dashHero}>
+        <div className={styles.dashHeroInner}>
+          <div className={styles.dashWelcome}>
+            <h1>I Tuoi Investimenti Semplificati</h1>
+            <p>
+              Carica i PDF &quot;Estratto Conto&quot; per analizzare il tuo portafoglio.
+              Se non li trovi, cercali nell&apos;<a href="#">Homebanking</a> nella sezione documenti.
+            </p>
           </div>
-        </section>
 
-        <div className="dash-group-container">
-          <h2 className="dash-section-title">
-            I tuoi Conti ({bankGroups.length}) e Estratti Conto ({analyses.length})
-          </h2>
+          <div
+            className={styles.dashDropzone}
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => document.getElementById('file-input')?.click()}
+          >
+            <div className={styles.dashDropIconSm}>↑</div>
+            <span className={styles.dropLabel}>TRASCINA I DOCUMENTI QUI</span>
+            <span className={styles.dropSeparator}>oppure</span>
+            <button className={styles.uploadBtnMain}>SFOGLIA I FILE</button>
+            <input type="file" id="file-input" hidden accept=".pdf" onChange={handleFileSelect} />
+          </div>
 
-          {bankGroups.length === 0 ? (
-            <div className="dash-empty">
-              <h3>Nessun estratto conto caricato</h3>
-              <p>Carica il tuo primo PDF per iniziare.</p>
+          {uploading && (
+            <div className={styles.dashStatus}>
+              <span style={{ color: uploadProgress.includes('✓') ? '#10b981' : '#f59e0b', fontWeight: 800 }}>
+                {uploadProgress}
+              </span>
             </div>
-          ) : (
-            bankGroups.map((group, idx) => {
-              const hasDossier = !!group.dossier;
-              const hasLiquidity = !!group.liquidity;
+          )}
+        </div>
+      </header>
 
-              return (
-                <div key={idx} className="bank-group-block">
+      <section className={styles.mainContent}>
+        <h2 className={styles.sectionTitle}>
+          I tuoi Conti ({bankGroups.length}) e Estratti Conto ({analyses.length})
+        </h2>
 
-                  {/* --- 1. DOSSIER ROW --- */}
-                  {hasDossier && (
-                    <div className="account-row">
-                      <div className="account-header">
-                        <div className="account-title">
-                          <span className="acc-type-badge">TITOLI</span>
-                          <div className="acc-details">
-                            Banca: <strong>{group.bankName}</strong><br />
-                            Dossier Titoli: {group.dossier?.identifier}<br />
-                            Rendicontazione: Trimestrale
-                          </div>
+        {bankGroups.length === 0 ? (
+          <div className={styles.dashEmpty}>
+            <h3>Nessun estratto conto caricato</h3>
+            <p>Carica il tuo primo PDF per iniziare l&apos;analisi.</p>
+          </div>
+        ) : (
+          bankGroups.map((group, idx) => {
+            const hasDossier = !!group.dossier;
+            const hasLiquidity = !!group.liquidity;
+
+            return (
+              <div key={idx} className={styles.bankGroupBlock}>
+
+                {/* DOSSIER SECTION */}
+                {hasDossier && (
+                  <div className={styles.accountRow}>
+                    <div className={styles.accountHeader}>
+                      <div className={styles.accountTitleInfo}>
+                        <span className={styles.accBadge}>Dossier Titoli</span>
+                        <div className={styles.accDetailsText}>
+                          Banca: <strong>{group.bankName}</strong><br />
+                          Codice Dossier: <strong>{group.dossier?.identifier}</strong><br />
+                          Rendicontazione: <strong>Trimestrale</strong>
                         </div>
-                        {/* Only link to first analysis for now */}
-                        <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className="btn-see-analysis">
-                          VEDI ANALISI COMPLETA →
-                        </Link>
                       </div>
+                      <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                        VEDI ANALISI COMPLETA <span>→</span>
+                      </Link>
+                    </div>
 
-                      {/* GRID */}
-                      <div className="timeline-grid">
+                    <div className={styles.timelineNavigation}>
+                      <div className={styles.scrollIndicator + ' ' + styles.leftIndicator} onClick={() => scrollTimeline('left')}>←</div>
+                      <div className={styles.timelineGrid} ref={scrollRef}>
                         {years.map(year => (
-                          <div key={year} className="year-block">
-                            <div className="year-label">{year}</div>
-                            <div className="quarters">
+                          <div key={year} className={styles.yearBlock}>
+                            <div className={styles.yearLabelPremium}>{year}</div>
+                            <div className={styles.quartersRow}>
                               {quarters.map(q => {
                                 const file = findAnalysis(group.dossier!.analyses, year, q);
                                 const isPresent = !!file;
                                 const dates = getQuarterDates(year, q);
 
                                 return (
-                                  <div key={q} className={`tile ${isPresent ? 'present' : 'absent'}`}
+                                  <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                     onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
 
-                                    <div className="dates">
+                                    <div className={styles.tileDates}>
                                       {dates.start}<br />
-                                      <span className="arrow-icon">↓</span><br />
+                                      <span className={styles.arrowIconSmall}>↓</span>
                                       {dates.end}
                                     </div>
 
                                     {isPresent ? (
-                                      <>
-                                        <div style={{ textAlign: 'center' }}>
-                                          <span className="value-label">Rendimento:</span>
-                                          <div className="value-data" style={{ color: '#EAB308' }}>
-                                            Data Mock
-                                            {/* In reality use forensic_summary or calculated yield */}
-                                          </div>
+                                      <div className={styles.valueContainer}>
+                                        <span className={styles.valueLabelSmall}>Rendimento</span>
+                                        <div className={styles.valueDataLarge}>
+                                          {file.forensic_summary?.performance_pct || 'N/D'}
                                         </div>
-                                        <div className="check-icon">✓</div>
-                                      </>
+                                        <div className={styles.checkBadge}>✓</div>
+                                      </div>
                                     ) : (
                                       <>
-                                        <div className="status-text">ASSENTE</div>
-                                        <button className="upload-btn" onClick={(e) => {
+                                        <div className={styles.statusIndicator}>ASSENTE</div>
+                                        <div className={styles.uploadCircleBtn} onClick={(e) => {
                                           e.stopPropagation();
                                           document.getElementById('file-input')?.click();
-                                        }}>Carica +</button>
+                                        }}>+</div>
                                       </>
                                     )}
                                   </div>
@@ -640,77 +319,79 @@ export default function DashboardPage() {
                           </div>
                         ))}
                       </div>
+                      <div className={styles.scrollIndicator + ' ' + styles.rightIndicator} onClick={() => scrollTimeline('right')}>→</div>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* --- CROSS-CHECK ALERT: MISSING DOSSIER --- */}
-                  {hasLiquidity && !hasDossier && (
-                    <div className="missing-account-alert">
-                      <div className="alert-text">
+                {/* ALERT BLOCK */}
+                {hasLiquidity && !hasDossier && (
+                  <div className={styles.warningBanner}>
+                    <div className={styles.warnContent}>
+                      <div className={styles.warnIcon}>⚠️</div>
+                      <div className={styles.warnText}>
                         Hai caricato la Liquidità per <strong>{group.bankName}</strong>, ma manca il <strong>Dossier Titoli</strong>.
                       </div>
-                      <button className="alert-btn" onClick={() => document.getElementById('file-input')?.click()}>
-                        Carica Dossier
-                      </button>
                     </div>
-                  )}
+                    <button className={styles.warnBtn} onClick={() => document.getElementById('file-input')?.click()}>
+                      Carica Dossier
+                    </button>
+                  </div>
+                )}
 
-
-                  {/* --- 2. LIQUIDITY ROW --- */}
-                  {hasLiquidity && (
-                    <div className="account-row" style={{ marginTop: hasDossier ? '3rem' : '0' }}>
-                      <div className="account-header">
-                        <div className="account-title">
-                          <span className="acc-type-badge">LIQUIDITÀ</span>
-                          <div className="acc-details">
-                            Banca: <strong>{group.bankName}</strong><br />
-                            Conto corrente: {group.liquidity?.identifier}<br />
-                            Rendicontazione: Trimestrale
-                          </div>
+                {/* LIQUIDITY SECTION */}
+                {hasLiquidity && (
+                  <div className={styles.accountRow} style={{ marginTop: hasDossier ? '4rem' : '0' }}>
+                    <div className={styles.accountHeader}>
+                      <div className={styles.accountTitleInfo}>
+                        <span className={`${styles.accBadge}`} style={{ background: 'rgba(16, 185, 129, 0.08)', color: '#10b981' }}>LIQUIDITÀ</span>
+                        <div className={styles.accDetailsText}>
+                          Banca: <strong>{group.bankName}</strong><br />
+                          Conto corrente: <strong>{group.liquidity?.identifier}</strong><br />
+                          Rendicontazione: <strong>Trimestrale</strong>
                         </div>
-                        <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className="btn-see-analysis">
-                          VEDI ANALISI COMPLETA →
-                        </Link>
                       </div>
+                      <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                        VEDI ANALISI COMPLETA <span>→</span>
+                      </Link>
+                    </div>
 
-                      {/* GRID (Identical logic, different styling if needed, but keeping consistent) */}
-                      <div className="timeline-grid">
+                    <div className={styles.timelineNavigation}>
+                      <div className={styles.timelineGrid}>
                         {years.map(year => (
-                          <div key={year} className="year-block">
-                            <div className="year-label">{year}</div>
-                            <div className="quarters">
+                          <div key={year} className={styles.yearBlock}>
+                            <div className={styles.yearLabelPremium}>{year}</div>
+                            <div className={styles.quartersRow}>
                               {quarters.map(q => {
                                 const file = findAnalysis(group.liquidity!.analyses, year, q);
                                 const isPresent = !!file;
                                 const dates = getQuarterDates(year, q);
 
                                 return (
-                                  <div key={q} className={`tile ${isPresent ? 'present' : 'absent'}`}
+                                  <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                     onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
 
-                                    <div className="dates">
+                                    <div className={styles.tileDates}>
                                       {dates.start}<br />
-                                      <span className="arrow-icon">↓</span><br />
+                                      <span className={styles.arrowIconSmall}>↓</span>
                                       {dates.end}
                                     </div>
 
                                     {isPresent ? (
-                                      <>
-                                        <div style={{ textAlign: 'center' }}>
-                                          <span className="value-label">Saldo:</span>
-                                          <div className="value-data">
-                                            €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'compact' })}
-                                          </div>
+                                      <div className={styles.valueContainer}>
+                                        <span className={styles.valueLabelSmall}>Saldo</span>
+                                        <div className={styles.valueDataLarge}>
+                                          €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'standard', minimumFractionDigits: 0 })}
                                         </div>
-                                        <div className="check-icon">✓</div>
-                                      </>
+                                        <div className={styles.checkBadge} style={{ background: '#10b981' }}>✓</div>
+                                      </div>
                                     ) : (
                                       <>
-                                        <div className="status-text">ASSENTE</div>
-                                        <button className="upload-btn" onClick={(e) => {
+                                        <div className={styles.statusIndicator}>ASSENTE</div>
+                                        <div className={styles.uploadCircleBtn} onClick={(e) => {
                                           e.stopPropagation();
                                           document.getElementById('file-input')?.click();
-                                        }}>Carica +</button>
+                                        }}>+</div>
                                       </>
                                     )}
                                   </div>
@@ -721,26 +402,29 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* --- CROSS-CHECK ALERT: MISSING LIQUIDITY --- */}
-                  {hasDossier && !hasLiquidity && (
-                    <div className="missing-account-alert" style={{ marginTop: '2rem' }}>
-                      <div className="alert-text">
+                {/* CROSS-CHECK ALERT: MISSING LIQUIDITY */}
+                {hasDossier && !hasLiquidity && (
+                  <div className={styles.warningBanner} style={{ marginTop: '2rem' }}>
+                    <div className={styles.warnContent}>
+                      <div className={styles.warnIcon}>⚠️</div>
+                      <div className={styles.warnText}>
                         Hai caricato il Dossier per <strong>{group.bankName}</strong>. Di solito c&apos;è sempre un <strong>Conto Corrente</strong> associato per la liquidità.
                       </div>
-                      <button className="alert-btn" onClick={() => document.getElementById('file-input')?.click()}>
-                        Carica Liquidità
-                      </button>
                     </div>
-                  )}
+                    <button className={styles.warnBtn} onClick={() => document.getElementById('file-input')?.click()}>
+                      Carica Liquidità
+                    </button>
+                  </div>
+                )}
 
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-    </>
+              </div>
+            )
+          })
+        )}
+      </section>
+    </main>
   )
 }
