@@ -20,6 +20,9 @@ interface Analysis {
   dossierNumber?: string
   benchmark_comparison: string
   costs_breakdown?: any
+  holdings?: any[]
+  transactions?: any[]
+  dividends?: any[]
   forensic_summary?: {
     performance_pct?: string
   }
@@ -234,7 +237,7 @@ export default function DashboardPage() {
     )
   }
 
-  // 1. Identify unique accounts and connections with normalization
+  // 1. Identify connections
   const accountMetaMap = analyses.reduce((acc, a) => {
     const rawAccNum = a.benchmark_comparison || 'N/D'
     const accNum = rawAccNum.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
@@ -242,29 +245,20 @@ export default function DashboardPage() {
     const settlementAcc = (a.costs_breakdown?.settlementAccount as string)?.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
 
     if (!acc[accNum]) {
-      acc[accNum] = {
-        bankName: bank,
-        connections: new Set<string>(),
-        type: a.account_type,
-        originalId: rawAccNum
-      }
+      acc[accNum] = { bankName: bank, connections: new Set<string>() }
     }
-    if (settlementAcc) {
-      acc[accNum].connections.add(settlementAcc)
-    }
+    if (settlementAcc) acc[accNum].connections.add(settlementAcc)
     return acc
-  }, {} as Record<string, { bankName: string; connections: Set<string>; type: string; originalId: string }>)
+  }, {} as Record<string, { bankName: string; connections: Set<string> }>)
 
-  // Fuzzy linking: if a dossier mentions an IBAN that contains or is contained in an account number
+  // Fuzzy linking
   const normalizedKeys = Object.keys(accountMetaMap)
   normalizedKeys.forEach(accNum => {
     const meta = accountMetaMap[accNum]
     meta.connections.forEach(conn => {
       if (!accountMetaMap[conn]) {
         const match = normalizedKeys.find(k => k.length > 5 && (conn.includes(k) || k.includes(conn)))
-        if (match && match !== accNum) {
-          meta.connections.add(match)
-        }
+        if (match && match !== accNum) meta.connections.add(match)
       }
     })
   })
@@ -272,13 +266,8 @@ export default function DashboardPage() {
   // 2. Resolve Bank Names
   const bankNormalizationMap: Record<string, string> = {}
   normalizedKeys.forEach(accNum => {
-    const meta = accountMetaMap[accNum]
-    if (!bankNormalizationMap[accNum]) {
-      bankNormalizationMap[accNum] = meta.bankName
-    }
-    meta.connections.forEach(conn => {
-      bankNormalizationMap[conn] = meta.bankName
-    })
+    if (!bankNormalizationMap[accNum]) bankNormalizationMap[accNum] = accountMetaMap[accNum].bankName
+    accountMetaMap[accNum].connections.forEach(conn => { bankNormalizationMap[conn] = bankNormalizationMap[accNum] })
   })
 
   // 3. Final Grouping
@@ -288,10 +277,7 @@ export default function DashboardPage() {
     const bankIdentifier = bankNormalizationMap[accNum] || a.bank_name?.trim() || 'Banca Sconosciuta'
     const isLiquidity = a.account_type === 'LIQUIDITY'
 
-    if (!acc[bankIdentifier]) {
-      acc[bankIdentifier] = { bankName: bankIdentifier, dossiers: [], liquidityAccounts: [] }
-    }
-
+    if (!acc[bankIdentifier]) acc[bankIdentifier] = { bankName: bankIdentifier, dossiers: [], liquidityAccounts: [] }
     const targetList = isLiquidity ? acc[bankIdentifier].liquidityAccounts : acc[bankIdentifier].dossiers
     let group = targetList.find(g => g.identifier === rawAccNum)
     if (!group) {
@@ -299,7 +285,6 @@ export default function DashboardPage() {
       targetList.push(group)
     }
     group.analyses.push(a)
-
     return acc
   }, {} as Record<string, BankGroup>)
 
@@ -309,9 +294,7 @@ export default function DashboardPage() {
   const minYear = allYears.length > 0 ? Math.min(...allYears) : new Date().getFullYear() - 1
   const currentYear = new Date().getFullYear()
   const years: number[] = []
-  for (let y = minYear; y <= currentYear; y++) {
-    years.push(y)
-  }
+  for (let y = minYear; y <= currentYear; y++) years.push(y)
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
@@ -319,11 +302,9 @@ export default function DashboardPage() {
     return entries.find(a => {
       if (a.period_end) {
         const date = new Date(a.period_end)
-        const aYear = date.getFullYear()
-        const aMonth = date.getMonth() + 1
         const qIndex = parseInt(q.replace('Q', ''))
         const targetMonth = qIndex * 3
-        return aYear === year && (aMonth >= targetMonth - 2 && aMonth <= targetMonth)
+        return date.getFullYear() === year && (date.getMonth() + 1 >= targetMonth - 2 && date.getMonth() + 1 <= targetMonth)
       }
       return false
     })
@@ -335,11 +316,7 @@ export default function DashboardPage() {
     const startMonth = endMonth - 2
     const endDate = new Date(year, endMonth, 0)
     const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const prevQEnd = new Date(year, startMonth - 1, 0)
-    return {
-      start: fmt(prevQEnd),
-      end: fmt(endDate)
-    }
+    return { start: fmt(new Date(year, startMonth - 1, 0)), end: fmt(endDate) }
   }
 
   return (
@@ -511,21 +488,6 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <button
-                            onClick={() => setInspectorData(dossier.analyses[0])}
-                            style={{
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              border: '1px solid #64748b',
-                              background: 'transparent',
-                              color: '#64748b',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            🔍 DATI PDF
-                          </button>
                           <Link href={`/analisi/${dossier.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI <span>→</span>
                           </Link>
@@ -572,7 +534,9 @@ export default function DashboardPage() {
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Rendimento</span>
                                             <div className={styles.valueDataLarge}>{file.forensic_summary?.performance_pct || 'N/D'}</div>
-                                            <div className={styles.checkBadge}>✓</div>
+                                            <div className={styles.tileActions}>
+                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(file); }}>🔍 DATA</button>
+                                            </div>
                                           </div>
                                         ) : (
                                           <div className={styles.uploadCircleBtn} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
@@ -606,21 +570,6 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <button
-                            onClick={() => setInspectorData(liquidity.analyses[0])}
-                            style={{
-                              padding: '8px 12px',
-                              borderRadius: '8px',
-                              border: '1px solid #64748b',
-                              background: 'transparent',
-                              color: '#64748b',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            🔍 DATI PDF
-                          </button>
                           <Link href={`/analisi/${liquidity.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI <span>→</span>
                           </Link>
@@ -661,7 +610,9 @@ export default function DashboardPage() {
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Saldo</span>
                                             <div className={styles.valueDataLarge}>€{(file.portfolio_value || 0).toLocaleString('it-IT')}</div>
-                                            <div className={styles.checkBadge} style={{ background: '#3b82f6' }}>✓</div>
+                                            <div className={styles.tileActions}>
+                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(file); }}>🔍 DATA</button>
+                                            </div>
                                           </div>
                                         ) : (
                                           <div className={styles.uploadCircleBtn} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
@@ -689,24 +640,43 @@ export default function DashboardPage() {
         <div className={styles.modalOverlay} onClick={() => setInspectorData(null)}>
           <div className={styles.modalContent} onClick={e => e.stopPropagation()}>
             <div className={styles.modalHeader}>
-              <h3>Informazioni Estratte dal PDF</h3>
+              <div>
+                <h3>Dati Estratti: {inspectorData.bank_name}</h3>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>Periodo: {new Date(inspectorData.period_start).toLocaleDateString()} - {new Date(inspectorData.period_end).toLocaleDateString()}</p>
+              </div>
               <button className={styles.closeBtn} onClick={() => setInspectorData(null)}>×</button>
             </div>
             <div className={styles.modalBody}>
               <div className={styles.infoGrid}>
-                <div className={styles.infoItem}>
-                  <strong>Banca:</strong> {inspectorData.bank_name}
-                </div>
-                <div className={styles.infoItem}>
-                  <strong>Tipo:</strong> {inspectorData.account_type}
-                </div>
-                <div className={styles.infoItem}>
-                  <strong>Codice/IBAN:</strong> {inspectorData.benchmark_comparison}
-                </div>
-                <div className={styles.infoItem}>
-                  <strong>Conto Collegato:</strong> {inspectorData.costs_breakdown?.settlementAccount || 'Nessuno'}
-                </div>
+                <div className={styles.infoItem}><strong>Banca</strong> {inspectorData.bank_name}</div>
+                <div className={styles.infoItem}><strong>Account</strong> {inspectorData.benchmark_comparison}</div>
+                <div className={styles.infoItem}><strong>Settlement</strong> {inspectorData.costs_breakdown?.settlementAccount || 'non trovato'}</div>
               </div>
+
+              <div className={styles.inspectorSection}>
+                <h4>Portafoglio Finale</h4>
+                <table className={styles.inspectorTable}>
+                  <thead><tr><th>ISIN</th><th>Ticker</th><th>Quantità</th><th>Valore</th></tr></thead>
+                  <tbody>
+                    {inspectorData.holdings?.map((h: any, i: number) => (
+                      <tr key={i}><td>{h.isin}</td><td>{h.ticker}</td><td>{h.quantity}</td><td>€{h.marketValue}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className={styles.inspectorSection}>
+                <h4>Movimenti del Periodo</h4>
+                <table className={styles.inspectorTable}>
+                  <thead><tr><th>Data</th><th>Tipo</th><th>ISIN</th><th>Quantità</th><th>Valore</th></tr></thead>
+                  <tbody>
+                    {inspectorData.transactions?.map((t: any, i: number) => (
+                      <tr key={i}><td>{t.date}</td><td>{t.type}</td><td>{t.isin}</td><td>{t.quantity}</td><td>€{t.exchangeValue}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
               <pre className={styles.rawJson}>
                 {JSON.stringify(inspectorData.costs_breakdown, null, 2)}
               </pre>

@@ -754,3 +754,67 @@
   overflow-x: auto;
   line-height: 1.5;
 }
+
+/* Inspector Per-Document & Tables */
+.tileActions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+}
+
+.tileInpectBtn {
+  background: white;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tileInpectBtn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.inspectorSection {
+  margin-bottom: 32px;
+}
+
+.inspectorSection h4 {
+  font-size: 1rem;
+  color: #0f172a;
+  margin-bottom: 16px;
+  font-weight: 700;
+  border-left: 4px solid #10b981;
+  padding-left: 12px;
+}
+
+.inspectorTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+}
+
+.inspectorTable th {
+  text-align: left;
+  padding: 12px;
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.inspectorTable td {
+  padding: 12px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+
+.inspectorTable tr:last-child td {
+  border-bottom: none;
+}

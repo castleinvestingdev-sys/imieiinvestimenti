@@ -25,11 +25,12 @@ export async function POST(request: NextRequest) {
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari e dossier titoli.
 Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un formato JSON rigoroso.
 
-### REGOLE FONDAMENTALI (ZERO-HALLUCINATION):
-1. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN, Ticker e nomi dei titoli esattamente come appaiono. Non cercare di correggerli o indovinarli.
-2. **DATI CERTI**: Se un dato non è chiaramente leggibile o presente, usa null. NON inventare mai numeri o date.
-3. **ISIN**: Cerca codici di 12 caratteri (es. IE00B4L5Y983, IT0001234567). Se trovi un ISIN, associalo sempre al titolo corretto.
-4. **VALUTA**: Tutti gli importi estratti devono essere trattati come Euro (€), a meno che non sia esplicitamente indicata un'altra valuta.
+### REGOLE FONDAMENTALI:
+1. **STRINGHE SPECIFICHE**: 
+   - Se un dato non è presente o non è trovabile, usa ESATTAMENTE la stringa "non trovato". Non usare null o N/D.
+   - Per il campo 'quantity' nel 'initialPortfolio', usa sempre la stringa "da calcolare".
+2. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN, Ticker e nomi dei titoli esattamente come appaiono.
+3. **ISIN**: Cerca codici di 12 caratteri (es. IE00B4L5Y983).
 
 ### STRUTTURA JSON RICHIESTA:
 {
@@ -40,19 +41,25 @@ Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un
     "periodEnd": "GG/MM/AAAA",
     "accountNumber": "Numero Conto/Dossier",
     "holder": "Intestatario",
-    "settlementAccount": "IBAN Conto Corrente associato (se presente)"
+    "settlementAccount": "IBAN Conto Corrente associato"
   },
-  "finalPortfolio": [
-    { "isin": "ISIN", "ticker": "Ticker", "name": "Nome Titolo", "quantity": 0, "marketValue": 0 }
+  "initialPortfolio": [
+    { "isin": "string", "ticker": "string", "quantity": "da calcolare" }
   ],
   "movements": [
-    { "date": "GG/MM/AAAA", "type": "ACQUISTO/VENDITA", "isin": "ISIN", "ticker": "Ticker", "quantity": 0, "exchangeValue": 0 }
+    { "date": "GG/MM/AAAA", "type": "ACQUISTO/VENDITA", "isin": "string", "ticker": "string", "quantity": 0, "exchangeValue": 0 }
+  ],
+  "finalPortfolio": [
+    { "isin": "string", "ticker": "string", "quantity": 0, "marketValue": 0 }
   ],
   "dividends": [
-    { "date": "GG/MM/AAAA", "isin": "ISIN", "ticker": "Ticker", "grossAmount": 0, "tax": 0, "netAmount": 0 }
+    { "date": "GG/MM/AAAA", "isin": "string", "ticker": "string", "grossAmount": 0, "tax": 0, "netAmount": 0 }
   ],
   "coupons": [
-    { "date": "GG/MM/AAAA", "isin": "ISIN", "ticker": "Ticker", "grossAmount": 0, "tax": 0, "netAmount": 0 }
+    { "date": "GG/MM/AAAA", "isin": "string", "ticker": "string", "grossAmount": 0, "tax": 0, "netAmount": 0 }
+  ],
+  "titles": [
+    { "isin": "string", "ticker": "string", "name": "Nome Titolo" }
   ],
   "summary": {
     "liquidity": 0,
