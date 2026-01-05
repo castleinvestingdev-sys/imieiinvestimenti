@@ -1,46 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-// @ts-expect-error pdf-parse doesn't have types
-import pdfParse from 'pdf-parse'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY
-
-// Prompts for AI parsing
-const dossierPrompt = `Analizza questo estratto conto dossier titoli bancario e restituisci SOLO un JSON valido con questa struttura:
-{
-  "type": "DOSSIER",
-  "bankName": "Nome della banca",
-  "dossierNumber": "Numero dossier",
-  "holder": "Nome intestatario",
-  "settlementAccount": "IBAN conto regolamento",
-  "period": {
-    "start": "GG/MM/AAAA",
-    "end": "GG/MM/AAAA"
-  },
-  "initialPortfolio": [{ "isin": "ISIN", "name": "Nome", "quantity": 0, "price": 0, "value": 0 }],
-  "finalPortfolio": [{ "isin": "ISIN", "name": "Nome", "quantity": 0, "price": 0, "value": 0 }],
-  "transactions": [{ "date": "GG/MM/AAAA", "type": "ACQUISTO/VENDITA", "isin": "ISIN", "name": "Nome", "quantity": 0, "unitPrice": 0, "grossAmount": 0, "fees": 0, "netAmount": 0 }],
-  "cashFlows": [{ "date": "GG/MM/AAAA", "type": "DIVIDENDO/CEDOLA", "description": "Descrizione", "grossAmount": 0, "tax": 0, "netAmount": 0 }],
-  "costs": { "managementFees": 0, "performanceFees": 0, "transactionCosts": 0, "advisoryFees": 0 }
-}
-
-CRITICO: Estrai SOLO dati presenti nel testo. NON inventare valori mancanti.`
-
-const liquidityPrompt = `Analizza questo estratto conto liquidità bancario e restituisci SOLO un JSON valido con questa struttura:
-{
-  "type": "LIQUIDITY",
-  "bankName": "Nome della banca",
-  "accountId": "IBAN/Numero conto",
-  "holder": "Nome intestatario",
-  "period": {
-    "start": "GG/MM/AAAA",
-    "end": "GG/MM/AAAA"
-  },
-  "initialBalance": 0,
-  "finalBalance": 0,
-  "movements": [{ "date": "GG/MM/AAAA", "description": "Descrizione", "amount": 0, "balance": 0 }],
-  "summary": { "total_deposits": 0, "total_withdrawals": 0, "stamp_duty_total": 0 }
-}`
+const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
 
 export async function POST(request: NextRequest) {
     try {
@@ -49,108 +11,132 @@ export async function POST(request: NextRequest) {
         const userId = formData.get('userId') as string
 
         if (!file || !userId) {
-            return NextResponse.json({ success: false, error: 'Missing file or userId' }, { status: 400 })
+            return NextResponse.json({ success: false, error: 'File o UserId mancante' }, { status: 400 })
         }
 
-        // Extract text from PDF using pdf-parse
-        const arrayBuffer = await file.arrayBuffer()
-        const buffer = Buffer.from(arrayBuffer)
-
-        let extractedText = ''
-        try {
-            const pdfData = await pdfParse(buffer)
-            extractedText = pdfData.text || ''
-            console.log('Extracted PDF text length:', extractedText.length)
-        } catch (pdfError) {
-            console.error('PDF parse error:', pdfError)
-            return NextResponse.json({ success: false, error: 'Failed to parse PDF' }, { status: 400 })
+        if (!GEMINI_API_KEY) {
+            return NextResponse.json({ success: false, error: 'Configurazione API Google mancante' }, { status: 500 })
         }
 
-        if (!extractedText || extractedText.length < 50) {
-            return NextResponse.json({ success: false, error: 'Could not extract text from PDF. Is it a scanned document?' }, { status: 400 })
-        }
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+        const fileBuffer = await file.arrayBuffer()
+        const base64Data = Buffer.from(fileBuffer).toString('base64')
 
-        // Determine document type from content
-        const textLower = extractedText.toLowerCase()
-        const isDossier = textLower.includes('dossier titoli') || textLower.includes('estratto conto titoli')
-        const prompt = isDossier ? dossierPrompt : liquidityPrompt
+        const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari e dossier titoli.
+Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un formato JSON rigoroso.
 
-        let parsed;
+### REGOLE FONDAMENTALI (ZERO-HALLUCINATION):
+1. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN, Ticker e nomi dei titoli esattamente come appaiono. Non cercare di correggerli o indovinarli.
+2. **DATI CERTI**: Se un dato non è chiaramente leggibile o presente, usa null. NON inventare mai numeri o date.
+3. **ISIN**: Cerca codici di 12 caratteri (es. IE00B4L5Y983, IT0001234567). Se trovi un ISIN, associalo sempre al titolo corretto.
+4. **VALUTA**: Tutti gli importi estratti devono essere trattati come Euro (€), a meno che non sia esplicitamente indicata un'altra valuta.
 
-        if (GROQ_API_KEY) {
-            // Call Groq API for parsing
-            const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${GROQ_API_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: 'openai/gpt-oss-120b',
-                    messages: [
-                        {
-                            role: 'system',
-                            content: 'Sei un esperto analista finanziario che estrae dati strutturati da documenti bancari italiani. Rispondi SOLO con JSON valido.'
-                        },
-                        {
-                            role: 'user',
-                            content: `${prompt}\n\nEcco il testo estratto dal documento:\n\n${extractedText.substring(0, 15000)}`
-                        }
-                    ],
-                    temperature: 0.1,
-                    max_tokens: 4000,
-                }),
-            })
+### STRUTTURA JSON RICHIESTA:
+{
+  "type": "DOSSIER" | "LIQUIDITY",
+  "info": {
+    "bankName": "Nome Banca",
+    "periodStart": "GG/MM/AAAA",
+    "periodEnd": "GG/MM/AAAA",
+    "accountNumber": "Numero Conto/Dossier",
+    "holder": "Intestatario",
+    "settlementAccount": "IBAN Conto Corrente associato (se presente)"
+  },
+  "finalPortfolio": [
+    { "isin": "ISIN", "ticker": "Ticker", "name": "Nome Titolo", "quantity": 0, "marketValue": 0 }
+  ],
+  "movements": [
+    { "date": "GG/MM/AAAA", "type": "ACQUISTO/VENDITA", "isin": "ISIN", "ticker": "Ticker", "quantity": 0, "exchangeValue": 0 }
+  ],
+  "dividends": [
+    { "date": "GG/MM/AAAA", "isin": "ISIN", "ticker": "Ticker", "grossAmount": 0, "tax": 0, "netAmount": 0 }
+  ],
+  "coupons": [
+    { "date": "GG/MM/AAAA", "isin": "ISIN", "ticker": "Ticker", "grossAmount": 0, "tax": 0, "netAmount": 0 }
+  ],
+  "summary": {
+    "liquidity": 0,
+    "totalInvested": 0
+  }
+}
 
-            if (!groqResponse.ok) {
-                const errorText = await groqResponse.text()
-                console.error('Groq API error:', errorText)
-                return NextResponse.json({ success: false, error: 'AI parsing failed: ' + errorText }, { status: 500 })
-            }
+Restituisci SOLO il JSON, senza alcun commento o formattazione markdown esterna.`
 
-            const groqData = await groqResponse.json()
-            const aiResponse = groqData.choices?.[0]?.message?.content || ''
+        // Modelli da provare in ordine di priorità
+        const models = ['gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-pro-latest']
+        let resText = ''
+        let success = false
+        let lastError = ''
 
+        for (const modelName of models) {
             try {
-                // Extract JSON from potential markdown code blocks
-                const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/) || aiResponse.match(/\{[\s\S]*\}/)
-                const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : aiResponse
-                parsed = JSON.parse(jsonStr)
-            } catch (e) {
-                console.error("JSON Parse error", e)
-                return NextResponse.json({ success: false, error: 'Failed to parse AI response' }, { status: 500 })
+                console.log(`Provando modello Gemini: ${modelName}`)
+                const model = genAI.getGenerativeModel({
+                    model: modelName,
+                    generationConfig: {
+                        temperature: 0,
+                        topP: 1,
+                        topK: 1,
+                        maxOutputTokens: 8192,
+                    }
+                })
+
+                const result = await model.generateContent([
+                    systemPrompt,
+                    {
+                        inlineData: {
+                            data: base64Data,
+                            mimeType: 'application/pdf'
+                        }
+                    }
+                ])
+
+                const response = await result.response
+                resText = response.text()
+
+                if (resText && resText.length > 10) {
+                    success = true
+                    break
+                }
+            } catch (err: any) {
+                console.error(`Errore con modello ${modelName}:`, err.message)
+                lastError = err.message
+                continue
             }
-        } else {
-            return NextResponse.json({ success: false, error: 'Missing GROQ_API_KEY configuration' }, { status: 500 })
         }
 
-        // Removed fallback to mock data as requested
-        if (!parsed) {
-            return NextResponse.json({ success: false, error: 'Parsing failed completely' }, { status: 500 })
+        if (!success) {
+            return NextResponse.json({ success: false, error: 'Gemini AI failed: ' + lastError }, { status: 500 })
         }
 
+        // Pulizia JSON
+        const jsonMatch = resText.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) {
+            return NextResponse.json({ success: false, error: 'Risposta AI non valida' }, { status: 500 })
+        }
 
-        // Save to Supabase
+        const parsed = JSON.parse(jsonMatch[0])
+        const isDossier = parsed.type === 'DOSSIER'
+
+        // Salvataggio su Supabase
         const supabase = await createClient()
 
         const analysisData = {
             document_id: crypto.randomUUID(),
             user_id: userId,
-            bank_name: parsed.bankName || 'Banca N/D',
-            period_start: parseDate(parsed.period?.start),
-            period_end: parseDate(parsed.period?.end),
-            account_type: parsed.type || (isDossier ? 'DOSSIER' : 'LIQUIDITY'),
+            bank_name: parsed.info?.bankName || 'Banca N/D',
+            period_start: parseDate(parsed.info?.periodStart),
+            period_end: parseDate(parsed.info?.periodEnd),
+            account_type: parsed.type,
             portfolio_value: isDossier
-                ? (parsed.finalPortfolio?.reduce((sum: number, h: { value?: number }) => sum + (h.value || 0), 0) || 0)
-                : (parsed.finalBalance || 0),
-            initial_value: isDossier
-                ? (parsed.initialPortfolio?.reduce((sum: number, h: { value?: number }) => sum + (h.value || 0), 0) || 0)
-                : (parsed.initialBalance || 0),
+                ? (parsed.finalPortfolio?.reduce((acc: number, item: any) => acc + (item.marketValue || 0), 0) || 0)
+                : (parsed.summary?.liquidity || 0),
+            initial_value: 0,
             holdings: parsed.finalPortfolio || [],
-            transactions: parsed.transactions || [],
-            dividends: parsed.cashFlows || [],
-            costs_breakdown: parsed.costs || {},
-            benchmark_comparison: parsed.dossierNumber || 'N/D',
+            transactions: parsed.movements || [],
+            dividends: parsed.dividends || [],
+            costs_breakdown: parsed.summary || {},
+            benchmark_comparison: parsed.info?.accountNumber || 'N/D',
         }
 
         const { data, error } = await supabase
@@ -160,12 +146,8 @@ export async function POST(request: NextRequest) {
             .single()
 
         if (error) {
-            console.error('Supabase insert error details:', JSON.stringify(error, null, 2))
-            return NextResponse.json({
-                success: false,
-                error: `Database error: ${error.message || error.code || 'Unknown error'}`,
-                details: error
-            }, { status: 500 })
+            console.error('Errore Database:', error)
+            return NextResponse.json({ success: false, error: 'Errore salvataggio database' }, { status: 500 })
         }
 
         return NextResponse.json({
@@ -175,18 +157,20 @@ export async function POST(request: NextRequest) {
             status: 'ready'
         })
 
-    } catch (error) {
-        console.error('Parse PDF error:', error)
-        return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 })
+    } catch (error: any) {
+        console.error('Errore Parse PDF:', error)
+        return NextResponse.json({ success: false, error: error.message || 'Errore interno del server' }, { status: 500 })
     }
 }
 
 function parseDate(dateStr: string | undefined): string | null {
     if (!dateStr) return null
-    // Handle DD/MM/YYYY format
+    // Formato atteso: GG/MM/AAAA -> YYYY-MM-DD
     const parts = dateStr.split('/')
     if (parts.length === 3) {
         return `${parts[2]}-${parts[1]}-${parts[0]}`
     }
-    return dateStr
+    // Già in formato ISO?
+    if (dateStr.includes('-')) return dateStr
+    return null
 }
