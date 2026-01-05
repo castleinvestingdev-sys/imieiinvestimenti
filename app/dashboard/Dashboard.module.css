@@ -389,6 +389,11 @@
   z-index: 2;
 }
 
+.tilePremium.present:hover .delete-btn,
+.tilePremium:hover button {
+  opacity: 1 !important;
+}
+
 .tilePremium.absent {
   background: #fcfdfe;
   border: 1px dashed #e2e8f0;

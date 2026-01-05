@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+// @ts-expect-error pdf-parse doesn't have types
+import pdfParse from 'pdf-parse'
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY
 
@@ -41,10 +43,6 @@ const liquidityPrompt = `Analizza questo estratto conto liquidità bancario e re
 }`
 
 export async function POST(request: NextRequest) {
-    // if (!GROQ_API_KEY) {
-    //     return NextResponse.json({ success: false, error: 'Server configuration error' }, { status: 500 })
-    // }
-
     try {
         const formData = await request.formData()
         const file = formData.get('file') as File
@@ -54,19 +52,27 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: false, error: 'Missing file or userId' }, { status: 400 })
         }
 
-        // Convert PDF to text using pdf-parse-like approach
+        // Extract text from PDF using pdf-parse
         const arrayBuffer = await file.arrayBuffer()
-        const base64 = Buffer.from(arrayBuffer).toString('base64')
+        const buffer = Buffer.from(arrayBuffer)
 
-        // For now, we'll extract text using a simpler approach
-        // In production, you'd use pdf-parse or similar
-        // Here we'll send raw text to Groq for demo
         let extractedText = ''
+        try {
+            const pdfData = await pdfParse(buffer)
+            extractedText = pdfData.text || ''
+            console.log('Extracted PDF text length:', extractedText.length)
+        } catch (pdfError) {
+            console.error('PDF parse error:', pdfError)
+            return NextResponse.json({ success: false, error: 'Failed to parse PDF' }, { status: 400 })
+        }
 
-        // Check if it's a text-based PDF or scanned
-        // For now, we'll use the file name to determine type
-        const fileName = file.name.toLowerCase()
-        const isDossier = fileName.includes('dossier') || fileName.includes('titoli')
+        if (!extractedText || extractedText.length < 50) {
+            return NextResponse.json({ success: false, error: 'Could not extract text from PDF. Is it a scanned document?' }, { status: 400 })
+        }
+
+        // Determine document type from content
+        const textLower = extractedText.toLowerCase()
+        const isDossier = textLower.includes('dossier titoli') || textLower.includes('estratto conto titoli')
         const prompt = isDossier ? dossierPrompt : liquidityPrompt
 
         let parsed;
@@ -88,7 +94,7 @@ export async function POST(request: NextRequest) {
                         },
                         {
                             role: 'user',
-                            content: `${prompt}\n\nEcco il testo del documento (base64 PDF):\n\nNome file: ${file.name}\nDimensione: ${file.size} bytes\n\n(Il documento verrà processato dal sistema)`
+                            content: `${prompt}\n\nEcco il testo estratto dal documento:\n\n${extractedText.substring(0, 15000)}`
                         }
                     ],
                     temperature: 0.1,
