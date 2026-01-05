@@ -43,7 +43,6 @@ export default function DashboardPage() {
   const [uploadProgress, setUploadProgress] = useState('')
   const router = useRouter()
   const supabase = createClient()
-  const scrollRef = useRef<HTMLDivElement>(null)
 
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -216,11 +215,11 @@ export default function DashboardPage() {
     }
   }
 
-  const scrollTimeline = (direction: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const { scrollLeft } = scrollRef.current
+  const scrollTimeline = (direction: 'left' | 'right', element: HTMLDivElement | null) => {
+    if (element) {
+      const { scrollLeft } = element
       const scrollTo = direction === 'left' ? scrollLeft - 300 : scrollLeft + 300
-      scrollRef.current.scrollTo({ left: scrollTo, behavior: 'smooth' })
+      element.scrollTo({ left: scrollTo, behavior: 'smooth' })
     }
   }
 
@@ -233,26 +232,37 @@ export default function DashboardPage() {
     )
   }
 
-  const normalizeBank = (name: string) => name?.trim() || 'Banca Sconosciuta'
-
-  const bankGroupsMap = analyses.reduce((acc, a) => {
-    const bank = normalizeBank(a.bank_name)
+  // 1. Group by Account Number (identifier) first
+  const accountGroupsMap = analyses.reduce((acc, a) => {
     const accNum = a.benchmark_comparison || 'N/D'
     const isLiquidity = a.account_type === 'LIQUIDITY'
+    const bank = a.bank_name?.trim() || 'Banca Sconosciuta'
 
+    if (!acc[accNum]) {
+      acc[accNum] = {
+        identifier: accNum,
+        bankName: bank, // Take the first bank name encountered
+        analyses: [],
+        accountType: a.account_type
+      }
+    }
+
+    acc[accNum].analyses.push(a)
+    return acc
+  }, {} as Record<string, { identifier: string; bankName: string; analyses: Analysis[]; accountType: string }>)
+
+  // 2. Group Account Groups by Bank Name
+  const bankGroupsMap = Object.values(accountGroupsMap).reduce((acc, account) => {
+    const bank = account.bankName
     if (!acc[bank]) {
       acc[bank] = { bankName: bank, dossiers: [], liquidityAccounts: [] }
     }
 
-    const groupList = isLiquidity ? acc[bank].liquidityAccounts : acc[bank].dossiers
-    let account = groupList.find(g => g.identifier === accNum)
-
-    if (!account) {
-      account = { identifier: accNum, analyses: [] }
-      groupList.push(account)
+    if (account.accountType === 'LIQUIDITY') {
+      acc[bank].liquidityAccounts.push({ identifier: account.identifier, analyses: account.analyses })
+    } else {
+      acc[bank].dossiers.push({ identifier: account.identifier, analyses: account.analyses })
     }
-
-    account.analyses.push(a)
     return acc
   }, {} as Record<string, BankGroup>)
 
@@ -481,8 +491,12 @@ export default function DashboardPage() {
                       </div>
 
                       <div className={styles.timelineNavigation}>
-                        <div className={styles.scrollIndicator + ' ' + styles.leftIndicator} onClick={() => scrollTimeline('left')}>←</div>
-                        <div className={styles.timelineGrid} ref={scrollRef}>
+                        <div className={styles.scrollIndicator + ' ' + styles.leftIndicator}
+                          onClick={(e) => {
+                            const grid = e.currentTarget.nextElementSibling as HTMLDivElement;
+                            scrollTimeline('left', grid);
+                          }}>←</div>
+                        <div className={styles.timelineGrid}>
                           {years.map(year => {
                             const visibleQuarters = quarters.filter(q => {
                               const qIndex = parseInt(q.replace('Q', ''))
@@ -519,7 +533,11 @@ export default function DashboardPage() {
                             )
                           })}
                         </div>
-                        <div className={styles.scrollIndicator + ' ' + styles.rightIndicator} onClick={() => scrollTimeline('right')}>→</div>
+                        <div className={styles.scrollIndicator + ' ' + styles.rightIndicator}
+                          onClick={(e) => {
+                            const grid = e.currentTarget.previousElementSibling as HTMLDivElement;
+                            scrollTimeline('right', grid);
+                          }}>→</div>
                       </div>
                     </div>
                   ))}

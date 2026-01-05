@@ -323,8 +323,9 @@
   overflow-x: auto;
   padding: 1.5rem 0.5rem;
   scroll-behavior: smooth;
-  scrollbar-width: none;
-  /* Hide for clean look */
+  scrollbar-width: auto;
+  padding: 1.5rem 0.5rem 2.5rem;
+  /* Space for scrollbar */
 }
 
 .timelineGrid::-webkit-scrollbar {
