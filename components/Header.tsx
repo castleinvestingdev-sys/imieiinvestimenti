@@ -56,7 +56,7 @@ export default function Header() {
     textDecoration: 'none',
     fontWeight: 500,
     fontSize: '0.85rem',
-    padding: '8px 16px',
+    padding: '8px 12px',
     borderRadius: '25px',
     transition: 'all 0.2s ease',
     whiteSpace: 'nowrap',
@@ -116,10 +116,10 @@ export default function Header() {
               background: '#f3f4f6',
               borderRadius: '30px',
             }}>
-              <Link href="/come-funziona" style={navLinkStyle}>COME FUNZIONA</Link>
-              <Link href="/commissioni" style={navLinkStyle}>LE COMMISSIONI DEL SISTEMA</Link>
-              <Link href="/rendimenti" style={navLinkStyle}>RENDIMENTI DI MERCATO</Link>
-              <Link href="/reati" style={navLinkStyle}>ATTENZIONE AI REBATES</Link>
+              <Link href="/come-funziona" style={navLinkStyle}>Come funziona</Link>
+              <Link href="/commissioni" style={navLinkStyle}>Le commissioni del sistema</Link>
+              <Link href="/rendimenti" style={navLinkStyle}>Rendimenti di mercato</Link>
+              <Link href="/reati" style={navLinkStyle}>Attenzione ai rebates</Link>
             </div>
 
             {/* Right Actions */}
@@ -145,6 +145,7 @@ export default function Header() {
                     gap: '8px',
                     height: '44px',
                     border: '1px solid rgba(255,255,255,0.1)',
+                    whiteSpace: 'nowrap',
                   }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.transform = 'translateY(-2px)'
@@ -280,6 +281,7 @@ export default function Header() {
                     fontSize: '0.9rem',
                     padding: '10px 20px',
                     transition: 'color 0.2s',
+                    whiteSpace: 'nowrap',
                   }}
                     onMouseEnter={(e) => e.currentTarget.style.color = '#00C853'}
                     onMouseLeave={(e) => e.currentTarget.style.color = '#333'}
@@ -289,18 +291,19 @@ export default function Header() {
                   <Link href="/dashboard" style={{
                     background: 'linear-gradient(135deg, #00C853 0%, #009624 100%)',
                     color: '#fff',
-                    padding: '0 28px',
+                    padding: '0 24px',
                     borderRadius: '50px',
                     fontWeight: 600,
-                    fontSize: '0.95rem',
+                    fontSize: '0.9rem',
                     textDecoration: 'none',
                     boxShadow: '0 4px 15px rgba(0, 200, 83, 0.3)',
                     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    height: '48px',
+                    height: '44px',
                     border: '1px solid rgba(255,255,255,0.1)',
+                    whiteSpace: 'nowrap',
                   }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.transform = 'translateY(-2px)'
