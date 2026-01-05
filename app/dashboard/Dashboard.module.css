@@ -15,7 +15,7 @@
   right: 0;
   height: 400px;
   background: radial-gradient(circle at top right, rgba(16, 185, 129, 0.05), transparent),
-              radial-gradient(circle at top left, rgba(59, 130, 246, 0.05), transparent);
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.05), transparent);
   pointer-events: none;
   z-index: 0;
 }
@@ -23,9 +23,9 @@
 .dashHero {
   position: relative;
   background: white;
-  padding: 2.5rem 0 2rem;
+  padding: 1rem 0 1.5rem;
   border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 4px 20px -5px rgba(0,0,0,0.02);
+  box-shadow: 0 4px 20px -5px rgba(0, 0, 0, 0.02);
   z-index: 1;
 }
 
@@ -240,7 +240,7 @@
   text-decoration: none;
   transition: all 0.2s;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
 }
 
 .btnAnalysisPremium:hover {
@@ -261,7 +261,8 @@
   overflow-x: auto;
   padding: 1.5rem 0.5rem;
   scroll-behavior: smooth;
-  scrollbar-width: none; /* Hide for clean look */
+  scrollbar-width: none;
+  /* Hide for clean look */
 }
 
 .timelineGrid::-webkit-scrollbar {
@@ -512,7 +513,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
   cursor: pointer;
   z-index: 10;
   color: #64748b;
@@ -522,16 +523,39 @@
 .scrollIndicator:hover {
   color: #0f172a;
   border-color: #cbd5e1;
-  box-shadow: 0 6px 15px rgba(0,0,0,0.08);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
 }
 
-.leftIndicator { left: -20px; }
-.rightIndicator { right: -20px; }
+.leftIndicator {
+  left: -20px;
+}
+
+.rightIndicator {
+  right: -20px;
+}
 
 @media (max-width: 768px) {
-  .dashWelcome h1 { font-size: 2rem; }
-  .bankGroupBlock { padding: 1.5rem; border-radius: 20px; }
-  .accountHeader { flex-direction: column; align-items: flex-start; gap: 1.5rem; }
-  .warningBanner { flex-direction: column; text-align: center; }
-  .warnContent { flex-direction: column; }
+  .dashWelcome h1 {
+    font-size: 2rem;
+  }
+
+  .bankGroupBlock {
+    padding: 1.5rem;
+    border-radius: 20px;
+  }
+
+  .accountHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.5rem;
+  }
+
+  .warningBanner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .warnContent {
+    flex-direction: column;
+  }
 }
