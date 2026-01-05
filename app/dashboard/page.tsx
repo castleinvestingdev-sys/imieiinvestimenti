@@ -42,6 +42,7 @@ export default function DashboardPage() {
   const [uploadPercent, setUploadPercent] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState('')
+  const [inspectorData, setInspectorData] = useState<Analysis | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
@@ -233,41 +234,57 @@ export default function DashboardPage() {
     )
   }
 
-  // 1. Identify all unique accounts and their connections
+  // 1. Identify unique accounts and connections with normalization
   const accountMetaMap = analyses.reduce((acc, a) => {
-    const accNum = a.benchmark_comparison || 'N/D'
+    const rawAccNum = a.benchmark_comparison || 'N/D'
+    const accNum = rawAccNum.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
     const bank = a.bank_name?.trim() || 'Banca Sconosciuta'
-    const settlementAcc = a.costs_breakdown?.settlementAccount
+    const settlementAcc = (a.costs_breakdown?.settlementAccount as string)?.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
 
     if (!acc[accNum]) {
       acc[accNum] = {
         bankName: bank,
         connections: new Set<string>(),
-        type: a.account_type
+        type: a.account_type,
+        originalId: rawAccNum
       }
     }
     if (settlementAcc) {
       acc[accNum].connections.add(settlementAcc)
     }
     return acc
-  }, {} as Record<string, { bankName: string; connections: Set<string>; type: string }>)
+  }, {} as Record<string, { bankName: string; connections: Set<string>; type: string; originalId: string }>)
 
-  // 2. Resolve Bank Names: accounts linked together share the same section
+  // Fuzzy linking: if a dossier mentions an IBAN that contains or is contained in an account number
+  const normalizedKeys = Object.keys(accountMetaMap)
+  normalizedKeys.forEach(accNum => {
+    const meta = accountMetaMap[accNum]
+    meta.connections.forEach(conn => {
+      if (!accountMetaMap[conn]) {
+        const match = normalizedKeys.find(k => k.length > 5 && (conn.includes(k) || k.includes(conn)))
+        if (match && match !== accNum) {
+          meta.connections.add(match)
+        }
+      }
+    })
+  })
+
+  // 2. Resolve Bank Names
   const bankNormalizationMap: Record<string, string> = {}
-  Object.keys(accountMetaMap).forEach(accNum => {
+  normalizedKeys.forEach(accNum => {
     const meta = accountMetaMap[accNum]
     if (!bankNormalizationMap[accNum]) {
       bankNormalizationMap[accNum] = meta.bankName
     }
     meta.connections.forEach(conn => {
-      // Map the connected account to the dossier's bank name to unify sections
       bankNormalizationMap[conn] = meta.bankName
     })
   })
 
-  // 3. Perform final grouping with normalized bank names
+  // 3. Final Grouping
   const bankGroupsMap = analyses.reduce((acc, a) => {
-    const accNum = a.benchmark_comparison || 'N/D'
+    const rawAccNum = a.benchmark_comparison || 'N/D'
+    const accNum = rawAccNum.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
     const bankIdentifier = bankNormalizationMap[accNum] || a.bank_name?.trim() || 'Banca Sconosciuta'
     const isLiquidity = a.account_type === 'LIQUIDITY'
 
@@ -276,9 +293,9 @@ export default function DashboardPage() {
     }
 
     const targetList = isLiquidity ? acc[bankIdentifier].liquidityAccounts : acc[bankIdentifier].dossiers
-    let group = targetList.find(g => g.identifier === accNum)
+    let group = targetList.find(g => g.identifier === rawAccNum)
     if (!group) {
-      group = { identifier: accNum, analyses: [] }
+      group = { identifier: rawAccNum, analyses: [] }
       targetList.push(group)
     }
     group.analyses.push(a)
@@ -494,8 +511,23 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <button
+                            onClick={() => setInspectorData(dossier.analyses[0])}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid #64748b',
+                              background: 'transparent',
+                              color: '#64748b',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🔍 DATI PDF
+                          </button>
                           <Link href={`/analisi/${dossier.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                            VEDI ANALISI COMPLETA <span>→</span>
+                            VEDI ANALISI <span>→</span>
                           </Link>
                           <button
                             onClick={async () => {
@@ -574,8 +606,23 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <button
+                            onClick={() => setInspectorData(liquidity.analyses[0])}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid #64748b',
+                              background: 'transparent',
+                              color: '#64748b',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🔍 DATI PDF
+                          </button>
                           <Link href={`/analisi/${liquidity.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                            VEDI ANALISI COMPLETA <span>→</span>
+                            VEDI ANALISI <span>→</span>
                           </Link>
                           <button
                             onClick={async () => {
@@ -636,6 +683,37 @@ export default function DashboardPage() {
           })
         )}
       </section>
+
+      {/* Inspector Modal */}
+      {inspectorData && (
+        <div className={styles.modalOverlay} onClick={() => setInspectorData(null)}>
+          <div className={styles.modalContent} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3>Informazioni Estratte dal PDF</h3>
+              <button className={styles.closeBtn} onClick={() => setInspectorData(null)}>×</button>
+            </div>
+            <div className={styles.modalBody}>
+              <div className={styles.infoGrid}>
+                <div className={styles.infoItem}>
+                  <strong>Banca:</strong> {inspectorData.bank_name}
+                </div>
+                <div className={styles.infoItem}>
+                  <strong>Tipo:</strong> {inspectorData.account_type}
+                </div>
+                <div className={styles.infoItem}>
+                  <strong>Codice/IBAN:</strong> {inspectorData.benchmark_comparison}
+                </div>
+                <div className={styles.infoItem}>
+                  <strong>Conto Collegato:</strong> {inspectorData.costs_breakdown?.settlementAccount || 'Nessuno'}
+                </div>
+              </div>
+              <pre className={styles.rawJson}>
+                {JSON.stringify(inspectorData.costs_breakdown, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
