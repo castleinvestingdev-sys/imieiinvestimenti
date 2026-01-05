@@ -22,7 +22,7 @@
     --color-text-light: #9AA0A6;
     /* Light Grey */
     --color-bg-white: #FFFFFF;
-    --color-bg-light: #F8F9FA;
+    --color-bg-light: #FFFFFF;
     /* Light Grey Background */
     --color-bg-dark: #202124;
     /* Dark Grey Footer */
@@ -261,7 +261,7 @@ button {
 .split-section {
     padding: 4rem 0;
     /* Reduced whitespace */
-    background-color: #f5f5f7;
+    background-color: #ffffff;
     /* Default background matches body */
 }
 
@@ -898,12 +898,12 @@ p {
 
 /* OVERRIDES FOR PIXEL PERFECTION */
 body {
-    background-color: #f5f5f7 !important;
+    background-color: #ffffff !important;
 }
 
 /* Hero Section Updates */
 .hero-section {
-    padding-top: 100px !important;
+    padding-top: 140px !important;
     padding-bottom: 80px !important;
     position: relative;
     min-height: auto;

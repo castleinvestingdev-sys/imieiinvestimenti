@@ -113,7 +113,7 @@ export default function Header() {
               alignItems: 'center',
               gap: '2px',
               padding: '5px 6px',
-              background: '#f3f4f6',
+              background: 'transparent',
               borderRadius: '30px',
             }}>
               <Link href="/come-funziona" style={navLinkStyle}>Come funziona</Link>
@@ -326,8 +326,6 @@ export default function Header() {
           </nav>
         </div>
       </header>
-
-      {!isFullscreenPage && <div style={{ height: '86px' }}></div>}
     </>
   )
 }

@@ -143,12 +143,12 @@ export default function HomePage() {
       </section>
 
       {/* Comparison Section */}
-      <section className="comparison-section" style={{ background: 'linear-gradient(180deg, #f8f9fa 0%, #fff 100%)', padding: '50px 0' }}>
+      <section className="comparison-section" style={{ background: '#fff', padding: '50px 0' }}>
         <div className="container">
           <div className="comparison-container" style={{ display: 'flex', gap: '2rem', alignItems: 'stretch' }}>
 
             {/* Left Column: LE BANCHE */}
-            <div style={{ flex: 1, background: 'linear-gradient(180deg, #fff 0%, #fafafa 100%)', borderRadius: '16px', padding: '1.8rem', boxShadow: '0 6px 25px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', transition: 'all 0.3s ease' }}>
+            <div style={{ flex: 1, background: '#fff', borderRadius: '16px', padding: '1.8rem', boxShadow: '0 6px 25px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', transition: 'all 0.3s ease' }}>
               <h3 style={{ fontFamily: 'Inter, sans-serif', fontSize: '1.4rem', fontWeight: 800, color: '#1a1a1a', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>LE BANCHE TI DANNO</h3>
 
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -252,7 +252,7 @@ export default function HomePage() {
       </section>
 
       {/* Final CTA Section */}
-      <section style={{ background: 'linear-gradient(180deg, #f8f9fa 0%, #fff 100%)', padding: '80px 0', textAlign: 'center' }}>
+      <section style={{ background: '#fff', padding: '80px 0', textAlign: 'center' }}>
         <div className="container">
           <h2 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#1a1a1a', marginBottom: '1.5rem' }}>I tuoi soldi meritano chiarezza.</h2>
 
