@@ -256,170 +256,184 @@ export default function DashboardPage() {
             return (
               <div key={idx} className={styles.bankGroupBlock}>
 
-                {/* DOSSIER SECTION */}
-                {hasDossier && (
-                  <div className={styles.accountRow}>
-                    <div className={styles.accountHeader}>
-                      <div className={styles.accountTitleInfo}>
-                        <span className={styles.accBadge}>Dossier Titoli</span>
-                        <div className={styles.accDetailsText}>
-                          Banca: <strong>{group.bankName}</strong><br />
-                          Codice Dossier: <strong>{group.dossier?.identifier}</strong><br />
-                          Rendicontazione: <strong>Trimestrale</strong>
+                {/* BANK HEADER - Shows the bank name prominently */}
+                <div className={styles.bankHeader}>
+                  <div className={styles.bankLogo}>
+                    {group.bankName.charAt(0).toUpperCase()}
+                  </div>
+                  <div className={styles.bankInfo}>
+                    <h3 className={styles.bankName}>{group.bankName}</h3>
+                    <div className={styles.bankSubtitle}>
+                      {hasDossier && hasLiquidity ? 'Dossier Titoli + Conto Liquidità' :
+                        hasDossier ? 'Solo Dossier Titoli' : 'Solo Conto Liquidità'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.accountsContainer}>
+                  {/* DOSSIER SECTION */}
+                  {hasDossier && (
+                    <div className={styles.accountSection}>
+                      <div className={styles.accountHeader}>
+                        <div className={styles.accountTitleInfo}>
+                          <span className={styles.accBadge}>Dossier Titoli</span>
+                          <div className={styles.accDetailsText}>
+                            Codice Dossier: <strong>{group.dossier?.identifier}</strong><br />
+                            Rendicontazione: <strong>Trimestrale</strong>
+                          </div>
+                        </div>
+                        <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                          VEDI ANALISI COMPLETA <span>→</span>
+                        </Link>
+                      </div>
+
+                      <div className={styles.timelineNavigation}>
+                        <div className={styles.scrollIndicator + ' ' + styles.leftIndicator} onClick={() => scrollTimeline('left')}>←</div>
+                        <div className={styles.timelineGrid} ref={scrollRef}>
+                          {years.map(year => (
+                            <div key={year} className={styles.yearBlock}>
+                              <div className={styles.yearLabelPremium}>{year}</div>
+                              <div className={styles.quartersRow}>
+                                {quarters.map(q => {
+                                  const file = findAnalysis(group.dossier!.analyses, year, q);
+                                  const isPresent = !!file;
+                                  const dates = getQuarterDates(year, q);
+
+                                  return (
+                                    <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
+                                      onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+
+                                      <div className={styles.tileDates}>
+                                        {dates.start}<br />
+                                        <span className={styles.arrowIconSmall}>↓</span>
+                                        {dates.end}
+                                      </div>
+
+                                      {isPresent ? (
+                                        <div className={styles.valueContainer}>
+                                          <span className={styles.valueLabelSmall}>Rendimento</span>
+                                          <div className={styles.valueDataLarge}>
+                                            {file.forensic_summary?.performance_pct || 'N/D'}
+                                          </div>
+                                          <div className={styles.checkBadge}>✓</div>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div className={styles.statusIndicator}>ASSENTE</div>
+                                          <div className={styles.uploadCircleBtn} onClick={(e) => {
+                                            e.stopPropagation();
+                                            document.getElementById('file-input')?.click();
+                                          }}>+</div>
+                                        </>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className={styles.scrollIndicator + ' ' + styles.rightIndicator} onClick={() => scrollTimeline('right')}>→</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ALERT BLOCK */}
+                  {hasLiquidity && !hasDossier && (
+                    <div className={styles.warningBanner}>
+                      <div className={styles.warnContent}>
+                        <div className={styles.warnIcon}>⚠️</div>
+                        <div className={styles.warnText}>
+                          Hai caricato la Liquidità per <strong>{group.bankName}</strong>, ma manca il <strong>Dossier Titoli</strong>.
                         </div>
                       </div>
-                      <Link href={`/analisi/${group.dossier?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                        VEDI ANALISI COMPLETA <span>→</span>
-                      </Link>
+                      <button className={styles.warnBtn} onClick={() => document.getElementById('file-input')?.click()}>
+                        Carica Dossier
+                      </button>
                     </div>
+                  )}
 
-                    <div className={styles.timelineNavigation}>
-                      <div className={styles.scrollIndicator + ' ' + styles.leftIndicator} onClick={() => scrollTimeline('left')}>←</div>
-                      <div className={styles.timelineGrid} ref={scrollRef}>
-                        {years.map(year => (
-                          <div key={year} className={styles.yearBlock}>
-                            <div className={styles.yearLabelPremium}>{year}</div>
-                            <div className={styles.quartersRow}>
-                              {quarters.map(q => {
-                                const file = findAnalysis(group.dossier!.analyses, year, q);
-                                const isPresent = !!file;
-                                const dates = getQuarterDates(year, q);
-
-                                return (
-                                  <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
-                                    onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
-
-                                    <div className={styles.tileDates}>
-                                      {dates.start}<br />
-                                      <span className={styles.arrowIconSmall}>↓</span>
-                                      {dates.end}
-                                    </div>
-
-                                    {isPresent ? (
-                                      <div className={styles.valueContainer}>
-                                        <span className={styles.valueLabelSmall}>Rendimento</span>
-                                        <div className={styles.valueDataLarge}>
-                                          {file.forensic_summary?.performance_pct || 'N/D'}
-                                        </div>
-                                        <div className={styles.checkBadge}>✓</div>
-                                      </div>
-                                    ) : (
-                                      <>
-                                        <div className={styles.statusIndicator}>ASSENTE</div>
-                                        <div className={styles.uploadCircleBtn} onClick={(e) => {
-                                          e.stopPropagation();
-                                          document.getElementById('file-input')?.click();
-                                        }}>+</div>
-                                      </>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
+                  {/* LIQUIDITY SECTION */}
+                  {hasLiquidity && (
+                    <div className={styles.accountSection}>
+                      <div className={styles.accountHeader}>
+                        <div className={styles.accountTitleInfo}>
+                          <span className={`${styles.accBadge}`} style={{ background: 'rgba(16, 185, 129, 0.08)', color: '#10b981' }}>LIQUIDITÀ</span>
+                          <div className={styles.accDetailsText}>
+                            Conto corrente: <strong>{group.liquidity?.identifier}</strong><br />
+                            Rendicontazione: <strong>Trimestrale</strong>
                           </div>
-                        ))}
+                        </div>
+                        <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                          VEDI ANALISI COMPLETA <span>→</span>
+                        </Link>
                       </div>
-                      <div className={styles.scrollIndicator + ' ' + styles.rightIndicator} onClick={() => scrollTimeline('right')}>→</div>
-                    </div>
-                  </div>
-                )}
 
-                {/* ALERT BLOCK */}
-                {hasLiquidity && !hasDossier && (
-                  <div className={styles.warningBanner}>
-                    <div className={styles.warnContent}>
-                      <div className={styles.warnIcon}>⚠️</div>
-                      <div className={styles.warnText}>
-                        Hai caricato la Liquidità per <strong>{group.bankName}</strong>, ma manca il <strong>Dossier Titoli</strong>.
-                      </div>
-                    </div>
-                    <button className={styles.warnBtn} onClick={() => document.getElementById('file-input')?.click()}>
-                      Carica Dossier
-                    </button>
-                  </div>
-                )}
+                      <div className={styles.timelineNavigation}>
+                        <div className={styles.timelineGrid}>
+                          {years.map(year => (
+                            <div key={year} className={styles.yearBlock}>
+                              <div className={styles.yearLabelPremium}>{year}</div>
+                              <div className={styles.quartersRow}>
+                                {quarters.map(q => {
+                                  const file = findAnalysis(group.liquidity!.analyses, year, q);
+                                  const isPresent = !!file;
+                                  const dates = getQuarterDates(year, q);
 
-                {/* LIQUIDITY SECTION */}
-                {hasLiquidity && (
-                  <div className={styles.accountRow} style={{ marginTop: hasDossier ? '4rem' : '0' }}>
-                    <div className={styles.accountHeader}>
-                      <div className={styles.accountTitleInfo}>
-                        <span className={`${styles.accBadge}`} style={{ background: 'rgba(16, 185, 129, 0.08)', color: '#10b981' }}>LIQUIDITÀ</span>
-                        <div className={styles.accDetailsText}>
-                          Banca: <strong>{group.bankName}</strong><br />
-                          Conto corrente: <strong>{group.liquidity?.identifier}</strong><br />
-                          Rendicontazione: <strong>Trimestrale</strong>
+                                  return (
+                                    <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
+                                      onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+
+                                      <div className={styles.tileDates}>
+                                        {dates.start}<br />
+                                        <span className={styles.arrowIconSmall}>↓</span>
+                                        {dates.end}
+                                      </div>
+
+                                      {isPresent ? (
+                                        <div className={styles.valueContainer}>
+                                          <span className={styles.valueLabelSmall}>Saldo</span>
+                                          <div className={styles.valueDataLarge}>
+                                            €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'standard', minimumFractionDigits: 0 })}
+                                          </div>
+                                          <div className={styles.checkBadge} style={{ background: '#10b981' }}>✓</div>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div className={styles.statusIndicator}>ASSENTE</div>
+                                          <div className={styles.uploadCircleBtn} onClick={(e) => {
+                                            e.stopPropagation();
+                                            document.getElementById('file-input')?.click();
+                                          }}>+</div>
+                                        </>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                      <Link href={`/analisi/${group.liquidity?.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                        VEDI ANALISI COMPLETA <span>→</span>
-                      </Link>
                     </div>
+                  )}
 
-                    <div className={styles.timelineNavigation}>
-                      <div className={styles.timelineGrid}>
-                        {years.map(year => (
-                          <div key={year} className={styles.yearBlock}>
-                            <div className={styles.yearLabelPremium}>{year}</div>
-                            <div className={styles.quartersRow}>
-                              {quarters.map(q => {
-                                const file = findAnalysis(group.liquidity!.analyses, year, q);
-                                const isPresent = !!file;
-                                const dates = getQuarterDates(year, q);
-
-                                return (
-                                  <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
-                                    onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
-
-                                    <div className={styles.tileDates}>
-                                      {dates.start}<br />
-                                      <span className={styles.arrowIconSmall}>↓</span>
-                                      {dates.end}
-                                    </div>
-
-                                    {isPresent ? (
-                                      <div className={styles.valueContainer}>
-                                        <span className={styles.valueLabelSmall}>Saldo</span>
-                                        <div className={styles.valueDataLarge}>
-                                          €{(file.portfolio_value || 0).toLocaleString('it-IT', { notation: 'standard', minimumFractionDigits: 0 })}
-                                        </div>
-                                        <div className={styles.checkBadge} style={{ background: '#10b981' }}>✓</div>
-                                      </div>
-                                    ) : (
-                                      <>
-                                        <div className={styles.statusIndicator}>ASSENTE</div>
-                                        <div className={styles.uploadCircleBtn} onClick={(e) => {
-                                          e.stopPropagation();
-                                          document.getElementById('file-input')?.click();
-                                        }}>+</div>
-                                      </>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ))}
+                  {/* CROSS-CHECK ALERT: MISSING LIQUIDITY */}
+                  {hasDossier && !hasLiquidity && (
+                    <div className={styles.warningBanner} style={{ marginTop: '2rem' }}>
+                      <div className={styles.warnContent}>
+                        <div className={styles.warnIcon}>⚠️</div>
+                        <div className={styles.warnText}>
+                          Hai caricato il Dossier per <strong>{group.bankName}</strong>. Di solito c&apos;è sempre un <strong>Conto Corrente</strong> associato per la liquidità.
+                        </div>
                       </div>
+                      <button className={styles.warnBtn} onClick={() => document.getElementById('file-input')?.click()}>
+                        Carica Liquidità
+                      </button>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* CROSS-CHECK ALERT: MISSING LIQUIDITY */}
-                {hasDossier && !hasLiquidity && (
-                  <div className={styles.warningBanner} style={{ marginTop: '2rem' }}>
-                    <div className={styles.warnContent}>
-                      <div className={styles.warnIcon}>⚠️</div>
-                      <div className={styles.warnText}>
-                        Hai caricato il Dossier per <strong>{group.bankName}</strong>. Di solito c&apos;è sempre un <strong>Conto Corrente</strong> associato per la liquidità.
-                      </div>
-                    </div>
-                    <button className={styles.warnBtn} onClick={() => document.getElementById('file-input')?.click()}>
-                      Carica Liquidità
-                    </button>
-                  </div>
-                )}
-
+                </div> {/* END accountsContainer */}
               </div>
             )
           })
