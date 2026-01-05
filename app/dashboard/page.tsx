@@ -461,7 +461,7 @@ export default function DashboardPage() {
                             ...(group.liquidity?.analyses.map(a => a.id) || [])
                           ];
                           if (allIds.length === 0) return;
-                          const confirmed = window.confirm(`Vuoi eliminare tutti i ${allIds.length} documenti di ${group.bankName}?`);
+                          const confirmed = window.confirm(`Vuoi eliminare la sezione "${group.bankName}" e tutti i suoi documenti?`);
                           if (!confirmed) return;
                           for (const id of allIds) {
                             await handleDelete(id);
