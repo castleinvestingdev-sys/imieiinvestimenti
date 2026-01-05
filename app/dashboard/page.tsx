@@ -311,7 +311,12 @@ export default function DashboardPage() {
                                         <div className="text-center w-full">
                                           <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Rendimento</div>
                                           <div className="text-xl font-black text-slate-800 tracking-tight">
-                                            {file.forensic_summary?.performance_pct ? (file.forensic_summary.performance_pct > 0 ? '+' : '') + file.forensic_summary.performance_pct.toFixed(2) + '%' : 'N/D'}
+                                            {(() => {
+                                              const val = file.forensic_summary?.performance_pct;
+                                              if (val === undefined || val === null) return 'N/D';
+                                              const num = Number(val);
+                                              return isNaN(num) ? 'N/D' : (num > 0 ? '+' : '') + num.toFixed(2) + '%';
+                                            })()}
                                           </div>
                                         </div>
                                         <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white text-sm shadow-md shadow-emerald-200">
