@@ -237,58 +237,86 @@ export default function DashboardPage() {
     )
   }
 
-  // 1. Identify connections
-  const accountMetaMap = analyses.reduce((acc, a) => {
-    const rawAccNum = a.benchmark_comparison || 'N/D'
-    const accNum = rawAccNum.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
-    const bank = a.bank_name?.trim() || 'Banca Sconosciuta'
-    const settlementAcc = (a.costs_breakdown?.settlementAccount as string)?.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
+  // --- 1. Normalizzazione Banche (Clustering) ---
+  const allRawBanks = Array.from(new Set(analyses.map(a => a.bank_name?.trim() || 'Banca Sconosciuta')));
+  const bankClusterMap: Record<string, string> = {};
 
-    if (!acc[accNum]) {
-      acc[accNum] = { bankName: bank, connections: new Set<string>() }
+  // Unifica banche se un nome è contenuto in un altro (es. "Crédit Agricole" e "Cariparma Crédit Agricole")
+  allRawBanks.sort((a, b) => b.length - a.length); // Processa prima i nomi più lunghi
+  allRawBanks.forEach(bank => {
+    if (!bankClusterMap[bank]) {
+      const clusterHead = allRawBanks.find(other =>
+        other !== bank && (bank.includes(other) || other.includes(bank))
+      ) || bank;
+      bankClusterMap[bank] = clusterHead;
     }
-    if (settlementAcc) acc[accNum].connections.add(settlementAcc)
-    return acc
-  }, {} as Record<string, { bankName: string; connections: Set<string> }>)
+  });
 
-  // Fuzzy linking
-  const normalizedKeys = Object.keys(accountMetaMap)
-  normalizedKeys.forEach(accNum => {
-    const meta = accountMetaMap[accNum]
+  // --- 2. Identificazione Connessioni e Normalizzazione Account ---
+  const normalizeAcc = (acc: string) => acc?.replace(/[^a-zA-Z0-9]/g, '').replace(/^0+/, '').toUpperCase() || 'ND';
+
+  const accountMetaMap = analyses.reduce((acc, a) => {
+    const rawAccNum = a.benchmark_comparison || 'N/D';
+    const normAcc = normalizeAcc(rawAccNum);
+    const rawBank = a.bank_name?.trim() || 'Banca Sconosciuta';
+    const bank = bankClusterMap[rawBank] || rawBank;
+    const settlementAcc = normalizeAcc(a.costs_breakdown?.settlementAccount as string);
+
+    if (!acc[normAcc]) {
+      acc[normAcc] = { bankName: bank, connections: new Set<string>(), rawIdentifier: rawAccNum };
+    }
+    if (settlementAcc && settlementAcc !== 'ND') acc[normAcc].connections.add(settlementAcc);
+    return acc
+  }, {} as Record<string, { bankName: string; connections: Set<string>; rawIdentifier: string }>);
+
+  // Fuzzy linking avanzato: gestione suffissi per account della stessa banca
+  const normKeys = Object.keys(accountMetaMap);
+  normKeys.forEach(normKey => {
+    const meta = accountMetaMap[normKey];
     meta.connections.forEach(conn => {
       if (!accountMetaMap[conn]) {
-        const match = normalizedKeys.find(k => k.length > 5 && (conn.includes(k) || k.includes(conn)))
-        if (match && match !== accNum) meta.connections.add(match)
+        // Cerca un match basato sul suffisso (ultimi 7 caratteri) se la banca è la stessa o simile
+        const match = normKeys.find(k => {
+          if (k === normKey) return false;
+          const sameBank = accountMetaMap[k].bankName === meta.bankName;
+          const suffixMatch = k.length > 6 && conn.length > 6 && (k.endsWith(conn.slice(-7)) || conn.endsWith(k.slice(-7)));
+          return sameBank && suffixMatch;
+        });
+        if (match) meta.connections.add(match);
       }
-    })
-  })
+    });
+  });
 
-  // 2. Resolve Bank Names
-  const bankNormalizationMap: Record<string, string> = {}
-  normalizedKeys.forEach(accNum => {
-    if (!bankNormalizationMap[accNum]) bankNormalizationMap[accNum] = accountMetaMap[accNum].bankName
-    accountMetaMap[accNum].connections.forEach(conn => { bankNormalizationMap[conn] = bankNormalizationMap[accNum] })
-  })
+  // --- 3. Risoluzione Nomi Banche Finali ---
+  const finalBankMap: Record<string, string> = {};
+  normKeys.forEach(k => {
+    if (!finalBankMap[k]) finalBankMap[k] = accountMetaMap[k].bankName;
+    accountMetaMap[k].connections.forEach(conn => {
+      finalBankMap[conn] = finalBankMap[k];
+    });
+  });
 
-  // 3. Final Grouping
+  // --- 4. Raggruppamento Finale ---
   const bankGroupsMap = analyses.reduce((acc, a) => {
-    const rawAccNum = a.benchmark_comparison || 'N/D'
-    const accNum = rawAccNum.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
-    const bankIdentifier = bankNormalizationMap[accNum] || a.bank_name?.trim() || 'Banca Sconosciuta'
-    const isLiquidity = a.account_type === 'LIQUIDITY'
+    const rawAccNum = a.benchmark_comparison || 'N/D';
+    const normAcc = normalizeAcc(rawAccNum);
+    const bankName = finalBankMap[normAcc] || bankClusterMap[a.bank_name?.trim() || ''] || 'Banca Sconosciuta';
+    const isLiquidity = a.account_type === 'LIQUIDITY';
 
-    if (!acc[bankIdentifier]) acc[bankIdentifier] = { bankName: bankIdentifier, dossiers: [], liquidityAccounts: [] }
-    const targetList = isLiquidity ? acc[bankIdentifier].liquidityAccounts : acc[bankIdentifier].dossiers
-    let group = targetList.find(g => g.identifier === rawAccNum)
+    if (!acc[bankName]) acc[bankName] = { bankName, dossiers: [], liquidityAccounts: [] };
+
+    const targetList = isLiquidity ? acc[bankName].liquidityAccounts : acc[bankName].dossiers;
+    // Raggruppa per normAcc per unificare record che differiscono solo per zeri iniziali
+    let group = targetList.find(g => normalizeAcc(g.identifier) === normAcc);
     if (!group) {
-      group = { identifier: rawAccNum, analyses: [] }
-      targetList.push(group)
+      group = { identifier: rawAccNum, analyses: [] };
+      targetList.push(group);
     }
-    group.analyses.push(a)
-    return acc
-  }, {} as Record<string, BankGroup>)
+    group.analyses.push(a);
+    return acc;
+  }, {} as Record<string, BankGroup>);
 
-  const bankGroups = Object.values(bankGroupsMap)
+  const bankGroups = Object.values(bankGroupsMap);
 
   const allYears = analyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(Boolean) as number[]
   const minYear = allYears.length > 0 ? Math.min(...allYears) : new Date().getFullYear() - 1
