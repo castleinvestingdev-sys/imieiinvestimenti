@@ -66,6 +66,7 @@
 .cf-snake-step.step-2 {
     top: 120px;
     right: 0;
+    text-align: right;
 }
 
 .cf-snake-step.step-3 {
@@ -77,27 +78,99 @@
     top: 360px;
     right: 0;
     color: var(--primary);
+    text-align: right;
 }
 
 .cf-snake-arrow {
     position: absolute;
-    z-index: 1;
+    z-index: 10;
 }
 
 .cf-snake-arrow.a-1-2 {
-    top: 40px;
-    left: 45%;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 .cf-snake-arrow.a-2-3 {
-    top: 160px;
-    left: 35%;
-    transform: scaleX(-1);
+    top: 180px;
+    left: 50%;
+    transform: translateX(-50%) scaleX(-1);
 }
 
 .cf-snake-arrow.a-3-4 {
-    top: 280px;
-    left: 45%;
+    top: 300px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.cf-snake-arrow path {
+    stroke-width: 2;
+}
+
+/* --- PER CHI E SECTION --- */
+.cf-per-chi-section {
+    padding: 120px 0;
+    background: var(--white);
+}
+
+.cf-per-chi-title {
+    font-size: 4rem;
+    font-weight: 1000;
+    letter-spacing: -3px;
+    margin-bottom: 60px;
+    text-align: center;
+}
+
+.cf-per-chi-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 30px;
+    margin-bottom: 60px;
+}
+
+.cf-per-chi-card {
+    background: var(--white);
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+    padding: 40px 30px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.cf-per-chi-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.cf-per-chi-card span {
+    font-size: 3rem;
+}
+
+.cf-per-chi-card p {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--text-dark);
+    line-height: 1.4;
+    margin: 0;
+}
+
+.cf-per-chi-punchline {
+    text-align: center;
+    font-size: 2.5rem;
+    font-weight: 900;
+    letter-spacing: -1px;
+    margin-top: 80px;
+    margin-bottom: 40px;
+    color: var(--text-dark);
+}
+
+.cf-per-chi-punchline span {
+    color: var(--primary);
 }
 
 /* --- SECTIONS --- */
@@ -106,8 +179,8 @@
     border-top: 1px solid #f1f5f9;
 }
 
-.cf-section.bg-alt {
-    background: #fcfdfe;
+.bg-alt {
+    background: #f2f2f2 !important;
 }
 
 .cf-step-circle {
@@ -292,8 +365,10 @@
 /* --- STEP 4 SPECIFIC --- */
 .cf-step4-visual {
     position: relative;
-    padding-bottom: 100px;
-    margin-top: 60px;
+    margin-top: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
 }
 
 .cf-step4-success {
@@ -301,14 +376,14 @@
     font-weight: 1000;
     color: var(--primary);
     text-align: right;
-    margin-top: 40px;
     letter-spacing: -2px;
 }
 
 .cf-arrow-down-right {
-    width: 120px;
-    float: right;
-    margin-right: 200px;
+    width: 100px;
+    margin-right: 150px;
+    margin-bottom: -20px;
+    z-index: 2;
 }
 
 /* --- FOOTER CTA --- */

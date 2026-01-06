@@ -17,27 +17,27 @@ export default function ComeFunzionaPage() {
                         <div className="cf-snake-step step-1">1. Carichi i documenti</div>
 
                         <div className="cf-snake-arrow a-1-2">
-                            <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
-                                <path d="M10 10C40 10 80 10 110 50" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" />
-                                <path d="M95 50L110 50L110 35" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                            <svg width="120" height="70" viewBox="0 0 120 70" fill="none">
+                                <path d="M10 10C60 10 110 20 110 60" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
+                                <path d="M100 50L110 60L120 50" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                         </div>
 
                         <div className="cf-snake-step step-2">2. Noi li traduciamo</div>
 
                         <div className="cf-snake-arrow a-2-3">
-                            <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
-                                <path d="M10 10C40 10 80 10 110 50" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" />
-                                <path d="M95 50L110 50L110 35" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                            <svg width="120" height="70" viewBox="0 0 120 70" fill="none">
+                                <path d="M10 10C60 10 110 20 110 60" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
+                                <path d="M100 50L110 60L120 50" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                         </div>
 
                         <div className="cf-snake-step step-3">3. Ti restituiamo i numeri</div>
 
                         <div className="cf-snake-arrow a-3-4">
-                            <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
-                                <path d="M10 10C40 10 80 10 110 50" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" />
-                                <path d="M95 50L110 50L110 35" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                            <svg width="120" height="70" viewBox="0 0 120 70" fill="none">
+                                <path d="M10 10C60 10 110 20 110 60" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
+                                <path d="M100 50L110 60L120 50" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                         </div>
 
@@ -45,7 +45,7 @@ export default function ComeFunzionaPage() {
                     </div>
 
                     <div className="cf-cta-bar">
-                        <span className="cf-cta-text">Carica il tuo estratto conto.</span>
+                        <span className="cf-cta-text" style={{ color: '#00C853' }}>Carica il tuo estratto conto.</span>
                         <Link href="/dashboard" className="cf-btn-pill">
                             PROVALO ORA →
                         </Link>
@@ -54,54 +54,68 @@ export default function ComeFunzionaPage() {
             </section>
 
             {/* --- STEP 1: CARICA --- */}
-            <section className="cf-section bg-alt">
+            <section className="cf-section bg-alt" style={{ padding: '60px 0' }}>
                 <div className="cf-container">
-                    <div className="cf-step-circle">1</div>
-                    <h2 className="cf-step-title">Carichi i documenti</h2>
-                    <p className="cf-step-desc">
+                    <div className="cf-step-circle" style={{ marginBottom: '20px' }}>1</div>
+                    <h2 className="cf-step-title" style={{ marginBottom: '15px' }}>Carichi i documenti</h2>
+                    <p className="cf-step-desc" style={{ marginBottom: '40px' }}>
                         Carichi gli estratti conto e i rendiconti che ricevi dalla banca.
                         Non serve capire dove guardare: li conosciamo già noi.
                     </p>
 
-                    <div className="cf-step1-grid">
-                        <div className="cf-doc-card">
+                    <div className="cf-step1-grid" style={{ marginTop: '40px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '60px' }}>
+                        <div className="cf-doc-card" style={{ textAlign: 'center' }}>
                             <Image
-                                src="/document-placeholder.svg"
+                                src="/document-premium.png"
                                 alt="Conto Corrente"
-                                width={100}
-                                height={130}
-                                className="cf-doc-icon"
-                                style={{ filter: 'grayscale(1)', opacity: 0.3 }}
+                                width={140}
+                                height={168}
+                                style={{ margin: '0 auto 20px', display: 'block', mixBlendMode: 'multiply' }}
                             />
-                            <h3 className="cf-doc-title">Conto corrente</h3>
-                            <ul className="cf-pointer-list" style={{ display: 'inline-block', textAlign: 'left' }}>
-                                <li className="cf-pointer-item">👉 Interessi attivi</li>
-                                <li className="cf-pointer-item">👉 Interessi passivi</li>
-                                <li className="cf-pointer-item">👉 Dividendi</li>
-                                <li className="cf-pointer-item">👉 Cedole</li>
-                                <li className="cf-pointer-item">👉 Commissioni...</li>
+                            <h3 className="cf-doc-title" style={{ fontSize: '2.8rem', fontWeight: 1000, letterSpacing: '-2px', marginBottom: '25px' }}>Conto corrente</h3>
+                            <ul className="cf-pointer-list" style={{ listStyle: 'none', padding: 0, textAlign: 'left', display: 'inline-block' }}>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Interessi attivi
+                                </li>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Interessi passivi
+                                </li>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Dividendi
+                                </li>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Cedole
+                                </li>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Commissioni...
+                                </li>
                             </ul>
                         </div>
-                        <div className="cf-doc-card">
+                        <div className="cf-doc-card" style={{ textAlign: 'center' }}>
                             <Image
-                                src="/document-placeholder.svg"
+                                src="/document-premium.png"
                                 alt="Dossier Titoli"
-                                width={100}
-                                height={130}
-                                className="cf-doc-icon"
-                                style={{ filter: 'grayscale(1)', opacity: 0.3 }}
+                                width={140}
+                                height={168}
+                                style={{ margin: '0 auto 20px', display: 'block', mixBlendMode: 'multiply' }}
                             />
-                            <h3 className="cf-doc-title">Dossier Titoli</h3>
-                            <ul className="cf-pointer-list" style={{ display: 'inline-block', textAlign: 'left' }}>
-                                <li className="cf-pointer-item">👉 Performance</li>
-                                <li className="cf-pointer-item">👉 Asset Allocation</li>
-                                <li className="cf-pointer-item">👉 Movimenti</li>
+                            <h3 className="cf-doc-title" style={{ fontSize: '2.8rem', fontWeight: 1000, letterSpacing: '-2px', marginBottom: '25px' }}>Dossier Titoli</h3>
+                            <ul className="cf-pointer-list" style={{ listStyle: 'none', padding: 0, textAlign: 'left', display: 'inline-block' }}>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Performance
+                                </li>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Asset Allocation
+                                </li>
+                                <li className="cf-pointer-item" style={{ fontSize: '1.6rem', fontWeight: 900, marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <span>👉</span> Movimenti
+                                </li>
                             </ul>
                         </div>
                     </div>
 
-                    <div style={{ textAlign: 'center', marginTop: '100px' }}>
-                        <p style={{ fontSize: '2.5rem', fontWeight: 1000, letterSpacing: '-1.5px' }}>Per un’analisi completa caricali entrambi</p>
+                    <div style={{ textAlign: 'center', marginTop: '60px' }}>
+                        <p style={{ fontSize: '2.2rem', fontWeight: 1000, letterSpacing: '-1px' }}>Per un’analisi completa caricali entrambi</p>
                     </div>
                 </div>
             </section>
@@ -135,38 +149,31 @@ export default function ComeFunzionaPage() {
                         In un’unica vista hai ciò che serve davvero per controllare i tuoi investimenti:
                     </p>
 
-                    <div style={{ marginTop: '60px' }}>
+                    <div style={{ marginTop: "60px" }}>
                         <ul className="cf-pointer-list">
-                            <li className="cf-pointer-item large" style={{ display: 'flex', gap: '30px', marginBottom: '40px' }}>
+                            <li className="cf-pointer-item large" style={{ display: 'flex', gap: '30px', marginBottom: '40px', whiteSpace: 'nowrap', alignItems: 'baseline' }}>
                                 <span style={{ fontSize: '2.5rem' }}>👉</span>
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '50px' }}>
-                                        <strong style={{ minWidth: '220px', fontSize: '2.5rem' }}>Rendimento lordo</strong>
-                                        <span style={{ fontWeight: 400, fontSize: '2rem' }}>quanto ha prodotto il portafoglio</span>
-                                    </div>
-                                </div>
+                                <strong style={{ minWidth: '280px', fontSize: '2.5rem' }}>Rendimento lordo</strong>
+                                <span style={{ display: 'flex', alignItems: 'baseline', gap: '15px' }}>
+                                    <span style={{ fontSize: '2rem', fontWeight: 900 }}>→</span>
+                                    <span style={{ fontWeight: 400, fontSize: '2rem' }}>quanto ha prodotto il portafoglio</span>
+                                </span>
                             </li>
-                            <li className="cf-pointer-item large" style={{ display: 'flex', gap: '30px', marginBottom: '40px' }}>
+                            <li className="cf-pointer-item large" style={{ display: 'flex', gap: '30px', marginBottom: '40px', whiteSpace: 'nowrap', alignItems: 'baseline' }}>
                                 <span style={{ fontSize: '2.5rem' }}>👉</span>
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '50px' }}>
-                                        <strong style={{ minWidth: '220px', fontSize: '2.5rem' }}>Benchmark</strong>
-                                        <span style={{ fontWeight: 400, fontSize: '2rem' }}>come sarebbe andata con un’alternativa di</span>
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '50px', marginTop: '5px' }}>
-                                        <span style={{ minWidth: '220px', textAlign: 'center', fontSize: '2rem', fontWeight: 900 }}>→</span>
-                                        <span style={{ fontWeight: 400, fontSize: '2rem' }}>mercato</span>
-                                    </div>
-                                </div>
+                                <strong style={{ minWidth: '280px', fontSize: '2.5rem' }}>Benchmark</strong>
+                                <span style={{ display: 'flex', alignItems: 'baseline', gap: '15px' }}>
+                                    <span style={{ fontSize: '2rem', fontWeight: 900 }}>→</span>
+                                    <span style={{ fontWeight: 400, fontSize: '2rem' }}>come sarebbe andata con un’alternativa di mercato</span>
+                                </span>
                             </li>
-                            <li className="cf-pointer-item large" style={{ display: 'flex', gap: '30px', marginBottom: '40px' }}>
+                            <li className="cf-pointer-item large" style={{ display: 'flex', gap: '30px', marginBottom: '40px', whiteSpace: 'nowrap', alignItems: 'baseline' }}>
                                 <span style={{ fontSize: '2.5rem' }}>👉</span>
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '50px' }}>
-                                        <strong style={{ minWidth: '220px', fontSize: '2.5rem' }}>Rendimento netto</strong>
-                                        <span style={{ fontWeight: 400, fontSize: '2rem' }}>quanto ti resta dopo costi e commissioni</span>
-                                    </div>
-                                </div>
+                                <strong style={{ minWidth: '280px', fontSize: '2.5rem' }}>Rendimento netto</strong>
+                                <span style={{ display: 'flex', alignItems: 'baseline', gap: '15px' }}>
+                                    <span style={{ fontSize: '2rem', fontWeight: 900 }}>→</span>
+                                    <span style={{ fontWeight: 400, fontSize: '2rem' }}>quanto ti resta dopo costi e commissioni</span>
+                                </span>
                             </li>
                         </ul>
                     </div>
@@ -195,9 +202,9 @@ export default function ComeFunzionaPage() {
 
                     <div className="cf-step4-visual">
                         <div className="cf-arrow-down-right">
-                            <svg viewBox="0 0 100 100" fill="none">
-                                <path d="M10 10C50 10 90 30 90 85" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" />
-                                <path d="M75 80L90 85L95 70" stroke="#1a1a1a" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                            <svg viewBox="0 0 120 120" fill="none">
+                                <path d="M20 20C40 60 70 90 100 90" stroke="#1a1a1a" strokeWidth="3" strokeLinecap="round" />
+                                <path d="M85 80L100 90L85 100" stroke="#1a1a1a" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                         </div>
                         <div className="cf-step4-success">
@@ -208,7 +215,7 @@ export default function ComeFunzionaPage() {
             </section>
 
             {/* --- TRUST: WHAT WE DON'T DO --- */}
-            <section className="cf-no-section">
+            <section className="cf-no-section bg-alt">
                 <div className="cf-container">
                     <h2 className="cf-no-title">❌ Cosa non facciamo</h2>
                     <p className="cf-no-lead">Per essere chiari fin da subito:</p>
@@ -234,8 +241,40 @@ export default function ComeFunzionaPage() {
                 </div>
             </section>
 
+            {/* --- PER CHI E --- */}
+            <section className="cf-per-chi-section">
+                <div className="cf-container">
+                    <h2 className="cf-per-chi-title">Per chi è questo servizio</h2>
+
+                    <div className="cf-per-chi-grid">
+                        <div className="cf-per-chi-card">
+                            <span>🚶</span>
+                            <p>Per chi investe ma non riesce a capire davvero come sta andando</p>
+                        </div>
+                        <div className="cf-per-chi-card">
+                            <span>🚶</span>
+                            <p>Per chi vuole trasparenza totale su costi e risultati</p>
+                        </div>
+                        <div className="cf-per-chi-card">
+                            <span>🚶</span>
+                            <p>Per chi pretende di misurare, confrontare, decidere</p>
+                        </div>
+                    </div>
+
+                    <div className="cf-per-chi-punchline">
+                        Se tieni al tuo <span>patrimonio</span>, è lo strumento per <span>te</span>.
+                    </div>
+
+                    <div style={{ textAlign: 'center', marginTop: '60px' }}>
+                        <Link href="/dashboard" className="cf-btn-pill" style={{ padding: '25px 60px', fontSize: '1.8rem' }}>
+                            PROVALO ORA →
+                        </Link>
+                    </div>
+                </div>
+            </section>
+
             {/* --- FINAL CTA --- */}
-            <section className="cf-final-hero">
+            <section className="cf-final-hero bg-alt">
                 <div className="cf-container">
                     <h2>Pronto a scoprire la verità?</h2>
                     <Link href="/dashboard" className="cf-btn-pill" style={{ fontSize: '1.5rem', padding: '25px 60px' }}>
