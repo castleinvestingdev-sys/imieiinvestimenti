@@ -1,18 +1,20 @@
-.cf-page {
+/* --- VARIABLES --- */
+:root {
     --primary: #00C853;
-    --primary-dark: #009624;
-    --primary-soft: #f0fdf4;
-    --text-dark: #0f172a;
-    --text-gray: #64748b;
-    --bg-white: #ffffff;
-    --border: #e2e8f0;
-    --glass-bg: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.5);
+    --primary-hover: #00E676;
+    --text-dark: #1a1a1a;
+    --text-muted: #64748b;
+    --bg-mint: #f1faf5;
+    --border: #e1e7ec;
+    --white: #ffffff;
+}
 
-    background-color: var(--bg-white);
+/* --- LAYOUT --- */
+.cf-page {
+    background: var(--white);
     color: var(--text-dark);
-    font-family: 'Inter', sans-serif;
-    line-height: 1.6;
+    font-family: var(--font-inter), sans-serif;
+    overflow-x: hidden;
 }
 
 .cf-container {
@@ -21,401 +23,341 @@
     padding: 0 24px;
 }
 
-/* --- HERO --- */
-.cf-hero-premium {
-    padding: 180px 0 100px;
-    background: linear-gradient(to bottom, #f0fdf4 0%, #ffffff 100%);
+/* --- HERO: SNAKE FLOW --- */
+.cf-hero-snake {
+    padding: 100px 0 120px;
+    background: var(--white);
     text-align: center;
-    position: relative;
-    overflow: hidden;
 }
 
-.cf-hero-premium h1 {
-    font-size: clamp(2.5rem, 6vw, 4.5rem);
-    font-weight: 900;
+.cf-hero-snake h1 {
+    font-size: 5rem;
+    font-weight: 1000;
+    letter-spacing: -4px;
+    margin-bottom: 80px;
     line-height: 1;
-    letter-spacing: -3px;
-    margin-bottom: 24px;
 }
 
-.cf-hero-premium h1 span {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-/* --- THE JOURNEY (Modern Interconnected Flow) --- */
-.cf-journey {
-    padding: 60px 0 100px;
-    position: relative;
-}
-
-.cf-journey-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0;
-    position: relative;
-}
-
-.cf-journey-card {
-    position: relative;
-    padding: 40px 20px;
-    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    border-radius: 30px;
-}
-
-.cf-journey-card:hover {
-    background: transparent;
-    box-shadow: none;
-}
-
-.cf-step-tracer {
-    position: absolute;
-    top: 65px;
-    left: 50%;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--primary), transparent);
-    z-index: 0;
-    opacity: 0.15;
-}
-
-.cf-journey-card:last-child .cf-step-tracer {
-    display: none;
-}
-
-.cf-icon-wrapper {
-    width: 80px;
-    height: 80px;
-    background: white;
-    border-radius: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 24px;
-    position: relative;
-    z-index: 2;
-    box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.05);
-    border: 1px solid var(--border);
-    transition: all 0.4s ease;
-    color: var(--text-dark);
-}
-
-.cf-journey-card:hover .cf-icon-wrapper {
-    transform: translateY(-5px) scale(1.1);
-    border-color: var(--primary);
+.cf-hero-snake h1 span {
     color: var(--primary);
-    box-shadow: 0 15px 30px -10px rgba(0, 200, 83, 0.3);
 }
 
-.cf-step-num-badge {
+.cf-snake-visual {
+    position: relative;
+    max-width: 1000px;
+    margin: 0 auto 100px;
+    height: 400px;
+    /* Base height for the snake positioning */
+}
+
+.cf-snake-step {
     position: absolute;
-    top: -10px;
-    right: -10px;
-    width: 28px;
-    height: 28px;
+    font-size: 3.5rem;
+    font-weight: 1000;
+    letter-spacing: -2px;
+    white-space: nowrap;
+}
+
+.cf-snake-step.step-1 {
+    top: 0;
+    left: 0;
+}
+
+.cf-snake-step.step-2 {
+    top: 120px;
+    right: 0;
+}
+
+.cf-snake-step.step-3 {
+    top: 240px;
+    left: 0;
+}
+
+.cf-snake-step.step-4 {
+    top: 360px;
+    right: 0;
+    color: var(--primary);
+}
+
+.cf-snake-arrow {
+    position: absolute;
+    z-index: 1;
+}
+
+.cf-snake-arrow.a-1-2 {
+    top: 40px;
+    left: 45%;
+}
+
+.cf-snake-arrow.a-2-3 {
+    top: 160px;
+    left: 35%;
+    transform: scaleX(-1);
+}
+
+.cf-snake-arrow.a-3-4 {
+    top: 280px;
+    left: 45%;
+}
+
+/* --- SECTIONS --- */
+.cf-section {
+    padding: 120px 0;
+    border-top: 1px solid #f1f5f9;
+}
+
+.cf-section.bg-alt {
+    background: #fcfdfe;
+}
+
+.cf-step-circle {
+    width: 60px;
+    height: 60px;
     background: var(--primary);
-    color: white;
+    color: var(--white);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.8rem;
+    font-size: 1.8rem;
     font-weight: 900;
-    border: 3px solid white;
-}
-
-.cf-journey-label {
-    font-weight: 800;
-    font-size: 1.15rem;
-    color: var(--text-dark);
-    line-height: 1.2;
-    max-width: 160px;
-    text-align: center;
-    transition: color 0.3s ease;
-}
-
-.cf-journey-card:hover .cf-journey-label {
-    color: var(--primary);
-}
-
-/* --- DETAILED STEP SECTIONS --- */
-.cf-step-section {
-    padding: 140px 0;
-    border-top: 1px solid var(--border);
-}
-
-.cf-step-section.alt {
-    background: transparent;
-}
-
-.cf-step-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 100px;
-    align-items: center;
-}
-
-.cf-step-tag {
-    display: inline-block;
-    padding: 8px 16px;
-    background: var(--primary-soft);
-    color: var(--primary);
-    border-radius: 100px;
-    font-weight: 800;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 24px;
-}
-
-.cf-step-title {
-    font-size: clamp(2rem, 4vw, 3rem);
-    font-weight: 900;
-    line-height: 1.1;
-    margin-bottom: 24px;
-    letter-spacing: -1.5px;
-}
-
-.cf-step-desc {
-    font-size: 1.25rem;
-    color: var(--text-gray);
     margin-bottom: 40px;
 }
 
-/* Feature List (Premium Style) */
-.cf-feat-list {
+.cf-step-title {
+    font-size: 4rem;
+    font-weight: 1000;
+    letter-spacing: -3px;
+    margin-bottom: 30px;
+    line-height: 1.1;
+}
+
+.cf-step-desc {
+    font-size: 1.8rem;
+    color: var(--text-dark);
+    max-width: 800px;
+    line-height: 1.4;
+    margin-bottom: 60px;
+}
+
+/* --- LISTS --- */
+.cf-pointer-list {
     list-style: none;
     padding: 0;
+    margin: 0;
 }
 
-.cf-feat-item {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 20px;
-    background: white;
-    border-radius: 16px;
-    border: 1px solid var(--border);
-    margin-bottom: 12px;
-    font-weight: 700;
-    transition: all 0.3s ease;
-}
-
-.cf-feat-item:hover {
-    border-color: var(--primary);
-    transform: translateX(8px);
-}
-
-.cf-feat-icon {
-    width: 32px;
-    height: 32px;
-    background: var(--primary-soft);
-    color: var(--primary);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-/* --- STEP 1 ASSET CARDS --- */
-.cf-asset-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 32px;
-}
-
-.cf-asset-card {
-    background: white;
-    padding: 32px;
-    border-radius: 24px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
-    border: 1px solid var(--border);
-    position: relative;
-    overflow: hidden;
-}
-
-.cf-asset-card::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 4px;
-    height: 100%;
-    background: var(--primary);
-}
-
-.cf-asset-title {
-    font-size: 1.5rem;
+.cf-pointer-item {
+    font-size: 2rem;
     font-weight: 800;
-    margin-bottom: 16px;
+    margin-bottom: 15px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 15px;
 }
 
-/* --- STEP 3 METRIC TILES --- */
-.cf-metric-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 16px;
+.cf-pointer-item.large {
+    font-size: 2.2rem;
+    align-items: flex-start;
 }
 
-.cf-metric-tile {
-    background: white;
-    padding: 24px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
+.cf-item-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 15px;
 }
 
-.cf-metric-label {
+.cf-item-desc-wrapper {
+    margin-left: 45px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-weight: 400;
+}
+
+/* --- TRUST SECTION --- */
+.cf-no-section {
+    padding: 100px 0;
+    text-align: left;
+}
+
+.cf-no-title {
+    font-size: 4.5rem;
+    font-weight: 1000;
+    letter-spacing: -3px;
+    margin-bottom: 50px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.cf-no-lead {
+    font-size: 2.2rem;
     font-weight: 800;
-    font-size: 1.2rem;
-}
-
-.cf-metric-val {
-    color: var(--text-gray);
-    font-weight: 500;
-}
-
-/* --- NEGATIVE / TRUST SECTION --- */
-.cf-trust-section {
-    padding: 120px 0;
+    margin-bottom: 40px;
     color: var(--text-dark);
-}
-
-.cf-trust-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 100px;
-    align-items: center;
 }
 
 .cf-no-list {
     list-style: none;
     padding: 0;
+    margin: 0 0 100px 0;
 }
 
 .cf-no-item {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 24px;
+    font-size: 2.2rem;
+    font-weight: 800;
+    margin-bottom: 25px;
     display: flex;
     align-items: center;
     gap: 20px;
-    opacity: 0.9;
 }
 
 .cf-no-icon {
-    width: 40px;
-    height: 40px;
-    background: rgba(239, 68, 68, 0.1);
     color: #ef4444;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.2rem;
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    font-size: 2.5rem;
 }
 
-.cf-trust-reality {
-    font-size: 3.5rem;
-    font-weight: 900;
-    line-height: 1;
-    letter-spacing: -2px;
+.cf-reality-center {
+    text-align: center;
+    font-size: 4.5rem;
+    font-weight: 1000;
+    letter-spacing: -3px;
+    margin-top: 80px;
 }
 
-.cf-trust-reality span {
+.cf-reality-center span {
     color: var(--primary);
 }
 
-/* --- WHO SECTION --- */
-.cf-who-section {
-    padding: 140px 0;
+.cf-step1-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 100px;
+    margin-top: 80px;
+}
+
+.cf-doc-card {
     text-align: center;
 }
 
-.cf-who-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 32px;
+.cf-doc-icon {
+    width: 100px;
+    height: auto;
+    margin: 0 auto 30px;
+    opacity: 0.8;
+}
+
+.cf-doc-title {
+    font-size: 3rem;
+    font-weight: 1000;
+    letter-spacing: -2px;
+    margin-bottom: 30px;
+}
+
+/* --- BUTTONS --- */
+.cf-cta-bar {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    justify-content: center;
+    margin-top: 40px;
+}
+
+.cf-btn-pill {
+    background: var(--primary);
+    color: var(--white);
+    padding: 18px 45px;
+    border-radius: 100px;
+    font-size: 1.3rem;
+    font-weight: 900;
+    text-decoration: none;
+    transition: transform 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cf-btn-pill:hover {
+    transform: scale(1.05);
+}
+
+.cf-cta-text {
+    font-size: 2.5rem;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: var(--primary);
+}
+
+/* --- STEP 4 SPECIFIC --- */
+.cf-step4-visual {
+    position: relative;
+    padding-bottom: 100px;
     margin-top: 60px;
 }
 
-.cf-who-card {
-    background: white;
-    padding: 48px 32px;
-    border-radius: 32px;
-    border: 1px solid var(--border);
-    transition: all 0.3s ease;
+.cf-step4-success {
+    font-size: 3.5rem;
+    font-weight: 1000;
+    color: var(--primary);
+    text-align: right;
+    margin-top: 40px;
+    letter-spacing: -2px;
 }
 
-.cf-who-card:hover {
-    border-color: var(--primary);
-    background: var(--primary-soft);
+.cf-arrow-down-right {
+    width: 120px;
+    float: right;
+    margin-right: 200px;
 }
 
-.cf-who-icon {
-    font-size: 3rem;
-    margin-bottom: 24px;
-    display: block;
-}
-
-.cf-who-card p {
-    font-weight: 700;
-    font-size: 1.2rem;
-    line-height: 1.4;
-}
-
-/* --- FINAL CTA --- */
-.cf-final-cta {
-    padding-bottom: 120px;
+/* --- FOOTER CTA --- */
+.cf-final-hero {
+    padding: 150px 0;
+    background: var(--white);
     text-align: center;
 }
 
-.cf-btn-huge {
-    display: inline-flex;
-    align-items: center;
-    background: var(--primary);
-    color: white;
-    padding: 24px 64px;
-    border-radius: 100px;
-    font-weight: 900;
-    font-size: 1.4rem;
-    text-decoration: none;
-    box-shadow: 0 20px 40px rgba(0, 200, 83, 0.3);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+.cf-final-hero h2 {
+    font-size: 4rem;
+    font-weight: 1000;
+    letter-spacing: -3px;
+    margin-bottom: 60px;
 }
 
-.cf-btn-huge:hover {
-    transform: scale(1.05) translateY(-5px);
-    background: var(--primary-dark);
-}
-
-/* Responsive */
-@media (max-width: 1024px) {
-
-    .cf-step-layout,
-    .cf-trust-grid,
-    .cf-journey-grid,
-    .cf-who-grid {
-        grid-template-columns: 1fr;
-        gap: 40px;
+/* Responsiveness */
+@media (max-width: 900px) {
+    .cf-hero-snake h1 {
+        font-size: 3.5rem;
     }
 
-    .cf-journey-line {
+    .cf-snake-step {
+        font-size: 2rem;
+        position: relative;
+        top: auto !important;
+        left: auto !important;
+        right: auto !important;
+        margin-bottom: 40px;
+        text-align: left;
+    }
+
+    .cf-snake-arrow {
         display: none;
     }
 
-    .cf-trust-section {
-        margin: 20px 0;
-        border-radius: 0;
+    .cf-snake-visual {
+        height: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .cf-step1-grid {
+        grid-template-columns: 1fr;
+        gap: 60px;
+    }
+
+    .cf-step-title {
+        font-size: 2.5rem;
     }
 }
