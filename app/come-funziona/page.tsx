@@ -11,7 +11,7 @@ export default function ComeFunzionaPage() {
             {/* --- HERO: SNAKE FLOW --- */}
             <section className="cf-hero-snake">
                 <div className="cf-container">
-                    <h1>Come funziona <span>imieiinvestimenti.it</span></h1>
+                    <h1 style={{ letterSpacing: '-5px', fontSize: '6rem' }}>Come funziona <span>imieiinvestimenti.it</span></h1>
 
                     <div className="cf-snake-visual">
                         <div className="cf-snake-step step-1">1. Carichi i documenti</div>
@@ -146,7 +146,7 @@ export default function ComeFunzionaPage() {
                     <div className="cf-step-circle">3</div>
                     <h2 className="cf-step-title">Ti restituiamo i numeri</h2>
                     <p className="cf-step-desc">
-                        In un’unica vista hai ciò che serve davvero per controllare i tuoi investimenti:
+                        In un’unica vista hai ciò che serve davvero per controllare i tuoi investimenti in modo professionale:
                     </p>
 
                     <div style={{ marginTop: "60px" }}>
@@ -190,8 +190,8 @@ export default function ComeFunzionaPage() {
                     <div className="cf-step-circle">4</div>
                     <h2 className="cf-step-title">Investi consapevolmente</h2>
                     <p className="cf-step-desc">
-                        Non devi interpretare tabelle o note a piè pagina.
-                        Vedi immediatamente se:
+                        Niente tabelle infinite o note a piè pagina illeggibili.
+                        Vedi subito la verità:
                     </p>
 
                     <ul style={{ listStyle: 'none', padding: 0, fontSize: '2.5rem', fontWeight: 900, letterSpacing: '-1.5px', lineHeight: 1.4, marginBottom: '60px' }}>
@@ -273,15 +273,6 @@ export default function ComeFunzionaPage() {
                 </div>
             </section>
 
-            {/* --- FINAL CTA --- */}
-            <section className="cf-final-hero bg-alt">
-                <div className="cf-container">
-                    <h2>Pronto a scoprire la verità?</h2>
-                    <Link href="/dashboard" className="cf-btn-pill" style={{ fontSize: '1.5rem', padding: '25px 60px' }}>
-                        PROVALO ORA →
-                    </Link>
-                </div>
-            </section>
         </div>
     )
 }
