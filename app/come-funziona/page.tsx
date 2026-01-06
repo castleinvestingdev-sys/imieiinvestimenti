@@ -257,7 +257,7 @@ export default function ComeFunzionaPage() {
                                 </li>
                                 <li className="cf-no-item">
                                     <div className="cf-no-icon"><XCircle size={20} /></div>
-                                    Non “abbelliamo” mai i numeri
+                                    Non ritocchiamo i numeri
                                 </li>
                             </ul>
                         </div>

@@ -174,14 +174,17 @@ export default function CommissioniPage() {
                                 <g transform="translate(200, 40)">
                                     <circle cx="0" cy="0" r="30" fill="white" stroke="var(--text-dark)" strokeWidth="2" />
                                     <text x="0" y="6" textAnchor="middle" fontSize="14" fontWeight="800">🏛️</text>
+                                    <text x="0" y="45" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">FONDO</text>
                                 </g>
                                 <g transform="translate(60, 200)">
                                     <circle cx="0" cy="0" r="30" fill="white" stroke="var(--text-dark)" strokeWidth="2" />
                                     <text x="0" y="6" textAnchor="middle" fontSize="14" fontWeight="800">👤</text>
+                                    <text x="0" y="45" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">UTENTE</text>
                                 </g>
                                 <g transform="translate(340, 200)">
                                     <circle cx="0" cy="0" r="35" fill="var(--text-dark)" />
                                     <text x="0" y="8" textAnchor="middle" fontSize="18" fontWeight="800">🏦</text>
+                                    <text x="0" y="52" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">BANCA</text>
                                 </g>
                                 <text x="275" y="110" fill="var(--danger)" fontWeight="900" fontSize="12" textAnchor="middle">REBATES</text>
                             </svg>

@@ -51,15 +51,19 @@ export default function Header() {
     setUser(null)
   }
 
-  const navLinkStyle: React.CSSProperties = {
-    color: '#555',
-    textDecoration: 'none',
-    fontWeight: 500,
-    fontSize: '0.85rem',
-    padding: '8px 12px',
-    borderRadius: '25px',
-    transition: 'all 0.2s ease',
-    whiteSpace: 'nowrap',
+  const getNavLinkStyle = (linkPath: string): React.CSSProperties => {
+    const isActive = pathname === linkPath
+    return {
+      color: isActive ? '#000' : '#555',
+      textDecoration: 'none',
+      fontWeight: isActive ? 700 : 500,
+      fontSize: '0.85rem',
+      padding: '8px 12px',
+      borderRadius: '25px',
+      transition: 'all 0.2s ease',
+      whiteSpace: 'nowrap',
+      background: isActive ? 'rgba(0,0,0,0.03)' : 'transparent',
+    }
   }
 
   const isFullscreenPage = pathname === '/login' || pathname === '/register'
@@ -116,10 +120,10 @@ export default function Header() {
               background: 'transparent',
               borderRadius: '30px',
             }}>
-              <Link href="/come-funziona" style={navLinkStyle}>Come funziona</Link>
-              <Link href="/commissioni" style={navLinkStyle}>Le commissioni del sistema</Link>
-              <Link href="/rendimenti" style={navLinkStyle}>Rendimenti di mercato</Link>
-              <Link href="/reati" style={navLinkStyle}>Attenzione ai rebates</Link>
+              <Link href="/come-funziona" style={getNavLinkStyle('/come-funziona')}>Come funziona</Link>
+              <Link href="/commissioni" style={getNavLinkStyle('/commissioni')}>Le commissioni del sistema</Link>
+              <Link href="/rendimenti" style={getNavLinkStyle('/rendimenti')}>Rendimenti di mercato</Link>
+              <Link href="/reati" style={getNavLinkStyle('/reati')}>Attenzione ai rebates</Link>
             </div>
 
             {/* Right Actions */}
