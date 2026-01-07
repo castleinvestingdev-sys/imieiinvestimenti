@@ -207,9 +207,20 @@ export default function DashboardPage() {
           ))
           await fetchAnalyses(user.id)
 
-          // Scroll to main content to show new item
+          // Scroll to newly added document
           setTimeout(() => {
-            document.querySelector('[class*="mainContent"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            // First scroll to main content
+            const mainContent = document.querySelector('[class*="mainContent"]')
+            mainContent?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+            // Then find and scroll to the card with data (has the "DATA" label)
+            setTimeout(() => {
+              const dataCards = document.querySelectorAll('[data-has-analysis="true"]')
+              if (dataCards.length > 0) {
+                const firstCard = dataCards[0] as HTMLElement
+                firstCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+              }
+            }, 600)
           }, 500)
         } else {
           setUploadQueue(prev => prev.map(f =>
@@ -776,7 +787,9 @@ export default function DashboardPage() {
                                     const dates = getQuarterDates(year, q);
                                     return (
                                       <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
+                                        data-has-analysis={isPresent ? 'true' : 'false'}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+
                                         <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
@@ -852,7 +865,9 @@ export default function DashboardPage() {
                                     const dates = getQuarterDates(year, q);
                                     return (
                                       <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
+                                        data-has-analysis={isPresent ? 'true' : 'false'}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+
                                         <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
