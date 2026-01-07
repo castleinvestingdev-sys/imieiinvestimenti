@@ -42,12 +42,21 @@ export default function DashboardPage() {
   const [trashedAnalyses, setTrashedAnalyses] = useState<Analysis[]>([])
   const [showTrash, setShowTrash] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [uploadPercent, setUploadPercent] = useState(0)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState('')
   const [inspectorData, setInspectorData] = useState<Analysis | null>(null)
   const router = useRouter()
   const supabase = createClient()
+
+  // Multi-file upload state
+  interface UploadingFile {
+    id: string;
+    name: string;
+    status: 'queued' | 'uploading' | 'analyzing' | 'done' | 'error';
+    progress: number;
+    error?: string;
+  }
+  const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
+  const [isProcessing, setIsProcessing] = useState(false)
+  const fileQueueRef = useRef<File[]>([])
 
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -142,82 +151,122 @@ export default function DashboardPage() {
     checkAuth()
   }, [supabase.auth, router, fetchAnalyses])
 
-  const handleFileUpload = async (file: File) => {
-    if (!user || file.type !== 'application/pdf') {
-      alert('Per favore carica un file PDF')
+  // Process upload queue
+  const processQueue = useCallback(async () => {
+    if (!user || isProcessing || fileQueueRef.current.length === 0) return
+
+    setIsProcessing(true)
+
+    while (fileQueueRef.current.length > 0) {
+      const file = fileQueueRef.current.shift()!
+      const fileId = `${file.name}-${Date.now()}`
+
+      // Update status to uploading
+      setUploadQueue(prev => prev.map(f =>
+        f.id === fileId ? { ...f, status: 'uploading' as const, progress: 10 } : f
+      ))
+
+      try {
+        // Simulate upload progress
+        const progressInterval = setInterval(() => {
+          setUploadQueue(prev => prev.map(f => {
+            if (f.id === fileId && f.status === 'uploading') {
+              const newProgress = Math.min(40, f.progress + 5)
+              return { ...f, progress: newProgress }
+            }
+            return f
+          }))
+        }, 200)
+
+        // Update to analyzing
+        setTimeout(() => {
+          setUploadQueue(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'analyzing' as const, progress: 50 } : f
+          ))
+        }, 800)
+
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('userId', user.id)
+
+        const response = await fetch('/api/parse-pdf', {
+          method: 'POST',
+          body: formData,
+        })
+
+        clearInterval(progressInterval)
+        const result = await response.json()
+
+        if (result.success) {
+          setUploadQueue(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
+          ))
+          await fetchAnalyses(user.id)
+        } else {
+          setUploadQueue(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
+          ))
+        }
+      } catch (error: any) {
+        setUploadQueue(prev => prev.map(f =>
+          f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: error.message } : f
+        ))
+      }
+    }
+
+    setIsProcessing(false)
+
+    // Clear completed files after 3 seconds
+    setTimeout(() => {
+      setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
+    }, 3000)
+  }, [user, isProcessing, fetchAnalyses])
+
+  // Add files to queue
+  const addFilesToQueue = useCallback((files: FileList | File[]) => {
+    const newFiles: UploadingFile[] = []
+    const filesToProcess: File[] = []
+
+    Array.from(files).forEach(file => {
+      if (file.type === 'application/pdf') {
+        const fileId = `${file.name}-${Date.now()}`
+        newFiles.push({
+          id: fileId,
+          name: file.name,
+          status: 'queued',
+          progress: 0
+        })
+        filesToProcess.push(file)
+      }
+    })
+
+    if (newFiles.length === 0) {
+      alert('Per favore carica solo file PDF')
       return
     }
 
-    setUploading(true)
-    setUploadProgress('Analisi in corso...')
-    setUploadPercent(5)
+    setUploadQueue(prev => [...prev, ...newFiles])
+    fileQueueRef.current.push(...filesToProcess)
 
-    const progressInterval = setInterval(() => {
-      setUploadPercent(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval)
-          return 90
-        }
-        const increment = Math.max(1, (95 - prev) / 15)
-        return Math.min(90, prev + increment)
-      })
-    }, 400)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('userId', user.id)
-
-      const response = await fetch('/api/parse-pdf', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const result = await response.json()
-      clearInterval(progressInterval)
-
-      if (result.success) {
-        setUploadPercent(100)
-        setUploadProgress('✓ Analisi completata!')
-        await fetchAnalyses(user.id)
-        setTimeout(() => {
-          setUploading(false)
-          setUploadProgress('')
-          setUploadPercent(0)
-        }, 1500)
-      } else {
-        setUploadProgress(`Errore: ${result.error}`)
-        setUploadPercent(0)
-        setTimeout(() => {
-          setUploading(false)
-          setUploadProgress('')
-        }, 5000)
-      }
-    } catch (error) {
-      clearInterval(progressInterval)
-      console.error('Upload error:', error)
-      setUploadProgress('Errore durante il caricamento')
-      setUploadPercent(0)
-      setTimeout(() => {
-        setUploading(false)
-        setUploadProgress('')
-      }, 3000)
-    }
-  }
+    // Start processing
+    setTimeout(() => processQueue(), 100)
+  }, [processQueue])
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     const files = e.dataTransfer.files
     if (files.length > 0) {
-      handleFileUpload(files[0])
+      addFilesToQueue(files)
     }
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files && files.length > 0) {
-      handleFileUpload(files[0])
+      addFilesToQueue(files)
     }
+    // Reset input to allow selecting same files again
+    e.target.value = ''
   }
 
   const scrollTimeline = (direction: 'left' | 'right', element: HTMLDivElement | null) => {
@@ -435,25 +484,81 @@ export default function DashboardPage() {
             <span className={styles.dropLabel}>TRASCINA I DOCUMENTI QUI</span>
             <span className={styles.dropSeparator}>oppure</span>
             <button className={styles.uploadBtnMain}>SFOGLIA I FILE</button>
-            <input type="file" id="file-input" hidden accept=".pdf" onChange={handleFileSelect} />
+            <input type="file" id="file-input" hidden accept=".pdf" multiple onChange={handleFileSelect} />
           </div>
 
-          {uploading && (
-            <div className={styles.dashStatus} style={{ width: '100%', maxWidth: '500px', margin: '1rem auto' }}>
-              <div className={styles.progressStatus}>
-                <span style={{ color: uploadProgress.includes('✓') ? '#10b981' : '#f59e0b', fontWeight: 800, fontSize: '0.9rem' }}>
-                  {uploadProgress}
-                </span>
-                <span className={styles.progressPercentage}>
-                  {Math.round(uploadPercent)}%
-                </span>
-              </div>
-              <div className={styles.progressContainer}>
-                <div
-                  className={styles.progressBar}
-                  style={{ width: `${uploadPercent}%` }}
-                />
-              </div>
+          {/* Upload Queue */}
+          {uploadQueue.length > 0 && (
+            <div style={{ width: '100%', maxWidth: '600px', margin: '1.5rem auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {uploadQueue.map(file => (
+                <div key={file.id} style={{
+                  background: 'white',
+                  borderRadius: '12px',
+                  padding: '16px 20px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '1.2rem' }}>
+                        {file.status === 'queued' && '⏳'}
+                        {file.status === 'uploading' && '📤'}
+                        {file.status === 'analyzing' && '🧠'}
+                        {file.status === 'done' && '✅'}
+                        {file.status === 'error' && '❌'}
+                      </span>
+                      <span style={{
+                        fontWeight: 700,
+                        color: '#0f172a',
+                        fontSize: '0.9rem',
+                        maxWidth: '300px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {file.name}
+                      </span>
+                    </div>
+                    <span style={{
+                      fontWeight: 800,
+                      fontSize: '0.85rem',
+                      color: file.status === 'done' ? '#10b981' : file.status === 'error' ? '#ef4444' : '#64748b'
+                    }}>
+                      {file.status === 'queued' && 'In coda...'}
+                      {file.status === 'uploading' && `${file.progress}%`}
+                      {file.status === 'analyzing' && 'Analisi AI...'}
+                      {file.status === 'done' && 'Completato!'}
+                      {file.status === 'error' && 'Errore'}
+                    </span>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div style={{
+                    width: '100%',
+                    height: '8px',
+                    background: '#e2e8f0',
+                    borderRadius: '4px',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${file.progress}%`,
+                      height: '100%',
+                      background: file.status === 'error' ? '#ef4444' :
+                        file.status === 'done' ? '#10b981' :
+                          'linear-gradient(90deg, #10b981, #34d399)',
+                      borderRadius: '4px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+
+                  {/* Error message */}
+                  {file.status === 'error' && file.error && (
+                    <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '8px', marginBottom: 0 }}>
+                      {file.error}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
