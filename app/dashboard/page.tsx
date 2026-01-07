@@ -56,7 +56,8 @@ export default function DashboardPage() {
   }
   const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
-  const fileQueueRef = useRef<File[]>([])
+  const fileQueueRef = useRef<{ id: string; file: File }[]>([])
+
 
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -158,8 +159,7 @@ export default function DashboardPage() {
     setIsProcessing(true)
 
     while (fileQueueRef.current.length > 0) {
-      const file = fileQueueRef.current.shift()!
-      const fileId = `${file.name}-${Date.now()}`
+      const { id: fileId, file } = fileQueueRef.current.shift()!
 
       // Update status to uploading
       setUploadQueue(prev => prev.map(f =>
@@ -225,18 +225,18 @@ export default function DashboardPage() {
   // Add files to queue
   const addFilesToQueue = useCallback((files: FileList | File[]) => {
     const newFiles: UploadingFile[] = []
-    const filesToProcess: File[] = []
+    const filesToProcess: { id: string; file: File }[] = []
 
-    Array.from(files).forEach(file => {
+    Array.from(files).forEach((file, index) => {
       if (file.type === 'application/pdf') {
-        const fileId = `${file.name}-${Date.now()}`
+        const fileId = `${file.name}-${Date.now()}-${index}`
         newFiles.push({
           id: fileId,
           name: file.name,
           status: 'queued',
           progress: 0
         })
-        filesToProcess.push(file)
+        filesToProcess.push({ id: fileId, file })
       }
     })
 
