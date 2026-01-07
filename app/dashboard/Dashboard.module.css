@@ -23,7 +23,7 @@
 .dashHero {
   position: relative;
   background: white;
-  padding: 1rem 0 1.5rem;
+  padding: 8rem 0 1.5rem;
   border-bottom: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow: 0 4px 20px -5px rgba(0, 0, 0, 0.02);
   z-index: 1;
@@ -724,7 +724,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 2000;
   padding: 20px;
 }
 

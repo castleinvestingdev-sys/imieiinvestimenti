@@ -5,7 +5,7 @@ export default function HomePage() {
   return (
     <>
       {/* Hero Section */}
-      <section style={{ padding: '120px 0 80px', background: '#fff' }}>
+      <section style={{ padding: '160px 0 80px', background: '#fff' }}>
         <div className="container">
           <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'left' }}>
             <h1 style={{ fontSize: '4.5rem', fontWeight: 900, color: '#1a1a1a', lineHeight: 1, letterSpacing: '-2px', marginBottom: '1.5rem' }}>
