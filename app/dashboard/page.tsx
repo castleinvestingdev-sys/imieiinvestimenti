@@ -53,10 +53,15 @@ export default function DashboardPage() {
     status: 'queued' | 'uploading' | 'analyzing' | 'done' | 'error';
     progress: number;
     error?: string;
+    index?: number;
+    total?: number;
   }
   const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const fileQueueRef = useRef<{ id: string; file: File }[]>([])
+  const totalFilesRef = useRef<number>(0)
+  const currentFileIndexRef = useRef<number>(0)
+
 
 
   const fetchAnalyses = useCallback(async (userId: string) => {
@@ -157,14 +162,25 @@ export default function DashboardPage() {
     if (!user || isProcessing || fileQueueRef.current.length === 0) return
 
     setIsProcessing(true)
+    const totalFiles = fileQueueRef.current.length + uploadQueue.filter(f => f.status !== 'queued').length
+    totalFilesRef.current = totalFiles
+    currentFileIndexRef.current = 0
 
     while (fileQueueRef.current.length > 0) {
       const { id: fileId, file } = fileQueueRef.current.shift()!
+      currentFileIndexRef.current++
 
-      // Update status to uploading
+      // Update status to uploading with index info
       setUploadQueue(prev => prev.map(f =>
-        f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5 } : f
+        f.id === fileId ? {
+          ...f,
+          status: 'uploading' as const,
+          progress: 5,
+          index: currentFileIndexRef.current,
+          total: totalFilesRef.current
+        } : f
       ))
+
 
       try {
         // Progress animation that continues throughout the process
@@ -547,6 +563,19 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {/* File counter for active files */}
+                      {file.index && file.total && file.total > 1 && (
+                        <span style={{
+                          background: '#10b981',
+                          color: 'white',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '0.7rem',
+                          fontWeight: 700
+                        }}>
+                          {file.index}/{file.total}
+                        </span>
+                      )}
                       <span style={{
                         fontWeight: 600,
                         fontSize: '0.8rem',
@@ -569,6 +598,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                   </div>
+
 
                   {/* Progress Bar */}
                   <div style={{
