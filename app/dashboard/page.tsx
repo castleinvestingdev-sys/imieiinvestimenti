@@ -43,6 +43,8 @@ export default function DashboardPage() {
   const [showTrash, setShowTrash] = useState(false)
   const [loading, setLoading] = useState(true)
   const [inspectorData, setInspectorData] = useState<Analysis | null>(null)
+  const [editingValues, setEditingValues] = useState<any>(null)
+  const [isSaving, setIsSaving] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -61,6 +63,9 @@ export default function DashboardPage() {
   const fileQueueRef = useRef<{ id: string; file: File }[]>([])
   const totalFilesRef = useRef<number>(0)
   const currentFileIndexRef = useRef<number>(0)
+  const dropzoneRef = useRef<HTMLDivElement>(null)
+  const batchAccumulatorRef = useRef<File[]>([])
+  const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
 
 
@@ -144,6 +149,71 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
+    if (inspectorData) {
+      setEditingValues(JSON.parse(JSON.stringify(inspectorData.costs_breakdown || {})))
+    } else {
+      setEditingValues(null)
+    }
+  }, [inspectorData])
+
+  const handleUpdateValue = (field: string, value: any) => {
+    setEditingValues((prev: any) => {
+      const currentObj = prev[field]
+      const isObj = typeof currentObj === 'object' && currentObj !== null && 'value' in currentObj
+      const oldValue = isObj ? currentObj.value : currentObj
+      const newValue = isObj ? { ...currentObj, value } : value
+
+      return {
+        ...prev,
+        [field]: newValue,
+        [`${field}_is_modified`]: value !== oldValue
+      }
+    })
+  }
+
+  const handleRestoreValue = (field: string) => {
+    if (!inspectorData) return
+    // Check for permanent AI backup first, then fallback to current session original
+    const originalValue = inspectorData.costs_breakdown?.original_ai_data?.[field] ?? inspectorData.costs_breakdown?.[field]
+    setEditingValues((prev: any) => ({
+      ...prev,
+      [field]: originalValue,
+      [`${field}_is_modified`]: false
+    }))
+  }
+
+  const handleSaveInspector = async () => {
+    if (!user || !inspectorData || !editingValues) return
+    setIsSaving(true)
+
+    try {
+      // Calculate new totals if balances changed
+      const updatedData = { ...editingValues }
+
+      const { error } = await supabase
+        .from('analyses')
+        .update({
+          costs_breakdown: updatedData,
+          portfolio_value: typeof updatedData.final_balance === 'object'
+            ? updatedData.final_balance.value
+            : (typeof updatedData.final_balance === 'number' ? updatedData.final_balance : inspectorData.portfolio_value)
+        })
+        .eq('id', inspectorData.id)
+
+      if (error) throw error
+
+      await fetchAnalyses(user.id)
+      setInspectorData(prev => prev ? { ...prev, costs_breakdown: updatedData } : null)
+      alert('Dati aggiornati con successo')
+    } catch (err: any) {
+      console.error('Error saving inspector data:', err)
+      alert('Errore durante il salvataggio: ' + err.message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  useEffect(() => {
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -161,25 +231,38 @@ export default function DashboardPage() {
   const processQueue = useCallback(async () => {
     if (!user || isProcessing || fileQueueRef.current.length === 0) return
 
+    console.log('--- START PROCESS QUEUE ---')
+    console.log('Files in queue:', fileQueueRef.current.length)
     setIsProcessing(true)
-    const totalFiles = fileQueueRef.current.length + uploadQueue.filter(f => f.status !== 'queued').length
-    totalFilesRef.current = totalFiles
-    currentFileIndexRef.current = 0
+
+    // We only reset index if the queue was totally empty for a while
+    // Otherwise we keep incrementing to provide a "session" feel
+    if (!isProcessing && uploadQueue.length === 0) {
+      currentFileIndexRef.current = 0
+    }
 
     while (fileQueueRef.current.length > 0) {
+      console.log('Processing next file, remaining:', fileQueueRef.current.length)
       const { id: fileId, file } = fileQueueRef.current.shift()!
       currentFileIndexRef.current++
 
       // Update status to uploading with index info
-      setUploadQueue(prev => prev.map(f =>
-        f.id === fileId ? {
-          ...f,
-          status: 'uploading' as const,
-          progress: 5,
-          index: currentFileIndexRef.current,
-          total: totalFilesRef.current
-        } : f
-      ))
+      setUploadQueue(prev => {
+        const currentIndex = currentFileIndexRef.current
+
+        return prev.map(f => {
+          const isCurrent = f.id === fileId
+          return {
+            ...f,
+            // Status and progress only for the current processing file
+            ...(isCurrent ? {
+              status: f.status === 'done' ? f.status : 'uploading' as const,
+              progress: f.status === 'done' ? 100 : Math.max(f.progress, 5),
+              index: currentIndex
+            } : {})
+          }
+        })
+      })
 
 
       try {
@@ -209,10 +292,12 @@ export default function DashboardPage() {
         formData.append('file', file)
         formData.append('userId', user.id)
 
+        console.log('Sending request for:', file.name)
         const response = await fetch('/api/parse-pdf', {
           method: 'POST',
           body: formData,
         })
+        console.log('Response status:', response.status)
 
         clearInterval(progressInterval)
         const result = await response.json()
@@ -243,33 +328,77 @@ export default function DashboardPage() {
           }, 500)
 
         } else {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
-          ))
+          // Check if it's a rate limit error - retry after delay
+          if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
+            setUploadQueue(prev => prev.map(f =>
+              f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
+            ))
+            // Re-add to queue and wait
+            fileQueueRef.current.unshift({ id: fileId, file })
+            await new Promise(resolve => setTimeout(resolve, 5000))
+          } else {
+            setUploadQueue(prev => prev.map(f =>
+              f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
+            ))
+          }
         }
       } catch (error: any) {
         setUploadQueue(prev => prev.map(f =>
           f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: error.message } : f
         ))
       }
+
+      // Wait 3 seconds between files to avoid Gemini rate limiting
+      if (fileQueueRef.current.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 3000))
+      }
     }
 
+
     setIsProcessing(false)
+    // We DON'T reset currentFileIndexRef here, so the next batch continues the count
 
     // Clear completed files after 3 seconds
     setTimeout(() => {
       setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
     }, 3000)
-  }, [user, isProcessing, fetchAnalyses])
+  }, [user, fetchAnalyses])
+
+  // EFFECT: Process queue when items are available and not already processing
+  useEffect(() => {
+    if (!isProcessing && fileQueueRef.current.length > 0) {
+      // Small delay (500ms) to allow multiple drop/select events to batch up
+      const timer = setTimeout(() => {
+        if (!isProcessing && fileQueueRef.current.length > 0) {
+          console.log('[QUEUE-BATCH] Starting processQueue for', fileQueueRef.current.length, 'files')
+          processQueue()
+        }
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [isProcessing, processQueue, uploadQueue])
+
+  // DEBUG EFFECT: Log uploadQueue changes
+  useEffect(() => {
+    if (uploadQueue.length > 0) {
+      console.log('[DEBUG-STATE] UploadQueue:', uploadQueue.map(f => `${f.name} (${f.status})`))
+    }
+  }, [uploadQueue])
 
   // Add files to queue
   const addFilesToQueue = useCallback((files: FileList | File[]) => {
     const newFiles: UploadingFile[] = []
     const filesToProcess: { id: string; file: File }[] = []
 
+    console.log(`[QUEUE] addFilesToQueue: analizzando ${Array.from(files).length} oggetti`)
+
     Array.from(files).forEach((file, index) => {
-      if (file.type === 'application/pdf') {
-        const fileId = `${file.name}-${Date.now()}-${index}`
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+      console.log(`[QUEUE] Controllo: ${file.name} (Size: ${file.size}, Type: ${file.type}, isPdf: ${isPdf})`)
+
+      if (isPdf) {
+        // Use a more unique ID to avoid collisions (timestamp + index + random string)
+        const fileId = `${file.name}-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 9)}`
         newFiles.push({
           id: fileId,
           name: file.name,
@@ -277,36 +406,90 @@ export default function DashboardPage() {
           progress: 0
         })
         filesToProcess.push({ id: fileId, file })
+      } else {
+        console.warn(`[QUEUE] File SCARTATO: ${file.name} (Non PDF o corrotto)`)
       }
     })
 
     if (newFiles.length === 0) {
+      console.error('[QUEUE] Nessun file PDF valido trovato nel batch')
       alert('Per favore carica solo file PDF')
       return
     }
 
-    setUploadQueue(prev => [...prev, ...newFiles])
-    fileQueueRef.current.push(...filesToProcess)
+    console.log(`[QUEUE] addFilesToQueue: aggiunta di ${newFiles.length} file`)
 
-    // Start processing
-    setTimeout(() => processQueue(), 100)
-  }, [processQueue])
+    setUploadQueue(prev => {
+      const combined = [...prev, ...newFiles]
+      const totalInSession = combined.length
+
+      // Update EVERY file in the list with the NEW total and correct index
+      return combined.map((f, i) => ({
+        ...f,
+        index: i + 1,
+        total: totalInSession
+      }))
+    })
+    fileQueueRef.current.push(...filesToProcess)
+    console.log('[QUEUE] Added to internal ref. Pending:', fileQueueRef.current.length)
+  }, [])
+
+  const [dragCounter, setDragCounter] = useState(0)
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragCounter(prev => prev + 1)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragCounter(prev => prev - 1)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+  }
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
+    e.stopPropagation()
+    setDragCounter(0)
+
     const files = e.dataTransfer.files
-    if (files.length > 0) {
-      addFilesToQueue(files)
+    if (files && files.length > 0) {
+      console.log(`[DEBUG-DROP] Drop React: ${files.length} file rilevati`)
+
+      // Accumulate to handle fragmented drops
+      batchAccumulatorRef.current.push(...Array.from(files))
+
+      if (batchTimeoutRef.current) clearTimeout(batchTimeoutRef.current)
+
+      batchTimeoutRef.current = setTimeout(() => {
+        const batch = [...batchAccumulatorRef.current]
+        batchAccumulatorRef.current = []
+        batchTimeoutRef.current = null
+        addFilesToQueue(batch)
+      }, 150)
     }
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (files && files.length > 0) {
-      addFilesToQueue(files)
+    if (files) {
+      console.log(`[EVENT] handleFileSelect: selezionati ${files.length} file`)
+      for (let i = 0; i < files.length; i++) {
+        console.log(`[EVENT] File ${i}: ${files[i].name} (${files[i].type})`)
+      }
+      if (files.length > 0) {
+        addFilesToQueue(files)
+      }
     }
     // Reset input to allow selecting same files again
-    e.target.value = ''
+    if (e.target) e.target.value = ''
   }
 
   const scrollTimeline = (direction: 'left' | 'right', element: HTMLDivElement | null) => {
@@ -466,26 +649,57 @@ export default function DashboardPage() {
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  const findAnalysis = (entries: Analysis[], year: number, q: string) => {
+  const getYearFrequency = (accountAnalyses: Analysis[], year: number) => {
+    const yearAnalyses = accountAnalyses.filter(a => a.period_end && new Date(a.period_end).getFullYear() === year);
+    const hasMonthly = yearAnalyses.some(a => {
+      if (!a.period_start || !a.period_end) return false;
+      const start = new Date(a.period_start);
+      const end = new Date(a.period_end);
+      const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+      return diffDays < 45;
+    });
+    return hasMonthly ? 'monthly' : 'quarterly';
+  }
+
+  const findAnalysisInSlot = (entries: Analysis[], year: number, slotIndex: number, frequency: 'monthly' | 'quarterly') => {
     return entries.find(a => {
-      if (a.period_end) {
-        const date = new Date(a.period_end)
-        const qIndex = parseInt(q.replace('Q', ''))
-        const targetMonth = qIndex * 3
-        return date.getFullYear() === year && (date.getMonth() + 1 >= targetMonth - 2 && date.getMonth() + 1 <= targetMonth)
+      if (!a.period_end) return false;
+      const date = new Date(a.period_end);
+      if (date.getFullYear() !== year) return false;
+
+      const month = date.getMonth() + 1;
+      if (frequency === 'monthly') {
+        // In monthly mode, check if the document ends in this specific month
+        // or if it's a quarterly document that covers this month (usually ends at month 3, 6, 9, 12)
+        const isQuarterly = a.period_start && ((new Date(a.period_end).getTime() - new Date(a.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
+        if (isQuarterly) {
+          // Quarterly documents match the end month (3, 6, 9, 12)
+          return month === slotIndex;
+        }
+        return month === slotIndex;
+      } else {
+        // Quarterly mode (Q1-Q4)
+        const targetMonth = slotIndex * 3;
+        return month >= targetMonth - 2 && month <= targetMonth;
       }
-      return false
     })
   }
 
-  const getQuarterDates = (year: number, q: string) => {
-    const qIndex = parseInt(q.replace('Q', ''))
-    const endMonth = qIndex * 3
-    const startMonth = endMonth - 2
-    const endDate = new Date(year, endMonth, 0)
-    const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    return { start: fmt(new Date(year, startMonth - 1, 0)), end: fmt(endDate) }
+  const getSlotDates = (year: number, slotIndex: number, frequency: 'monthly' | 'quarterly') => {
+    const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    if (frequency === 'monthly') {
+      const startDate = new Date(year, slotIndex - 1, 1);
+      const endDate = new Date(year, slotIndex, 0);
+      return { start: fmt(startDate), end: fmt(endDate), label: startDate.toLocaleString('it-IT', { month: 'short' }).toUpperCase() };
+    } else {
+      const endMonth = slotIndex * 3;
+      const startMonth = endMonth - 2;
+      const startDate = new Date(year, startMonth - 1, 1);
+      const endDate = new Date(year, endMonth, 0);
+      return { start: fmt(startDate), end: fmt(endDate), label: `Q${slotIndex}` };
+    }
   }
+
 
   const renderVal = (val: any, isCurrency = false) => {
     if (val === 'non trovato' || val === null || val === undefined) {
@@ -495,7 +709,7 @@ export default function DashboardPage() {
       return <span className={styles.calcValue}>da calcolare</span>
     }
     const displayVal = isCurrency && typeof val === 'number'
-      ? `€${val.toLocaleString('it-IT')}`
+      ? `€${val.toLocaleString('it-IT')} `
       : val;
     return <span className={styles.foundValue}>{displayVal}</span>
   }
@@ -515,11 +729,21 @@ export default function DashboardPage() {
           </div>
 
           <div
-            className={styles.dashDropzone}
+            className={`${styles.dashDropzone} ${dragCounter > 0 ? styles.dragging : ''}`}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
             onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
             onClick={() => document.getElementById('file-input')?.click()}
+            style={{ position: 'relative' }}
           >
+            {dragCounter > 0 && (
+              <div className={styles.dragOverlay}>
+                <div className={styles.dragOverlayContent}>
+                  RILASCIA I DOCUMENTI QUI
+                </div>
+              </div>
+            )}
             <div className={styles.dashDropIconSm}>↑</div>
             <span className={styles.dropLabel}>TRASCINA I DOCUMENTI QUI</span>
             <span className={styles.dropSeparator}>oppure</span>
@@ -564,16 +788,9 @@ export default function DashboardPage() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       {/* File counter for active files */}
-                      {file.index && file.total && file.total > 1 && (
-                        <span style={{
-                          background: '#10b981',
-                          color: 'white',
-                          padding: '2px 8px',
-                          borderRadius: '10px',
-                          fontSize: '0.7rem',
-                          fontWeight: 700
-                        }}>
-                          {file.index}/{file.total}
+                      {file.total && file.total > 0 && (
+                        <span className={styles.fileCounterBadge}>
+                          {file.index || 1}/{file.total}
                         </span>
                       )}
                       <span style={{
@@ -610,7 +827,7 @@ export default function DashboardPage() {
                     position: 'relative'
                   }}>
                     <div style={{
-                      width: `${file.progress}%`,
+                      width: `${file.progress}% `,
                       height: '100%',
                       background: file.status === 'error' ? '#ef4444' :
                         file.status === 'done' ? '#10b981' :
@@ -637,15 +854,15 @@ export default function DashboardPage() {
 
                   {/* CSS animations */}
                   <style>{`
-                    @keyframes shimmer {
-                      0% { transform: translateX(-100%); }
-                      100% { transform: translateX(100%); }
-                    }
-                    @keyframes pulse {
-                      0%, 100% { opacity: 1; }
-                      50% { opacity: 0.5; }
-                    }
-                  `}</style>
+  @keyframes shimmer {
+    0 % { transform: translateX(-100 %); }
+    100 % { transform: translateX(100 %); }
+  }
+  @keyframes pulse {
+    0 %, 100 % { opacity: 1; }
+    50 % { opacity: 0.5; }
+  }
+  `}</style>
 
                   {/* Error message */}
                   {file.status === 'error' && file.error && (
@@ -663,7 +880,7 @@ export default function DashboardPage() {
       <section className={styles.mainContent}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
-            {showTrash ? `Cestino (${trashedAnalyses.length})` : `I tuoi Conti (${bankGroups.length}) e Estratti Conto (${analyses.length})`}
+            {showTrash ? `Cestino(${trashedAnalyses.length})` : `I tuoi Conti(${bankGroups.length}) e Estratti Conto(${analyses.length})`}
           </h2>
           <button
             onClick={() => setShowTrash(!showTrash)}
@@ -682,7 +899,7 @@ export default function DashboardPage() {
               transition: 'all 0.2s',
             }}
           >
-            🗑️ {showTrash ? 'Torna alla Dashboard' : `Cestino${trashedAnalyses.length > 0 ? ` (${trashedAnalyses.length})` : ''}`}
+            🗑️ {showTrash ? 'Torna alla Dashboard' : `Cestino${trashedAnalyses.length > 0 ? ` (${trashedAnalyses.length})` : ''} `}
           </button>
         </div>
 
@@ -771,17 +988,17 @@ export default function DashboardPage() {
                 <div className={styles.accountsContainer}>
                   {/* Multiple Dossiers per Bank */}
                   {group.dossiers.map((dossier, dIdx) => (
-                    <div key={`dossier-${dIdx}`} className={styles.accountSection}>
+                    <div key={`dossier - ${dIdx} `} className={styles.accountSection}>
                       <div className={styles.accountHeader}>
                         <div className={styles.accountTitleInfo}>
                           <span className={styles.accBadge}>Dossier Titoli</span>
                           <div className={styles.accDetailsText}>
                             Codice Dossier: <strong>{dossier.identifier}</strong><br />
-                            Rendicontazione: <strong>Trimestrale</strong>
+                            Rendicontazione: <strong>Variabile</strong>
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/analisi/${dossier.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                          <Link href={`/ analisi / ${dossier.analyses[0]?.id} `} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI <span>→</span>
                           </Link>
                           <button
@@ -805,28 +1022,51 @@ export default function DashboardPage() {
                           }}>←</div>
                         <div className={styles.timelineGrid}>
                           {years.map(year => {
-                            const visibleQuarters = quarters.filter(q => {
-                              const qIndex = parseInt(q.replace('Q', ''))
-                              const quarterEndDate = new Date(year, qIndex * 3, 0)
-                              return quarterEndDate <= new Date()
-                            })
-                            if (visibleQuarters.length === 0) return null
+                            const freq = getYearFrequency(dossier.analyses, year);
+                            const slots = freq === 'monthly' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [1, 2, 3, 4];
+
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={styles.quartersRow}>
-                                  {visibleQuarters.map(q => {
-                                    const file = findAnalysis(dossier.analyses, year, q);
+                                <div className={`${styles.slotsRow} ${freq === 'monthly' ? styles.grid12 : styles.grid4} `}>
+                                  {slots.map(slotIdx => {
+                                    const file = findAnalysisInSlot(dossier.analyses, year, slotIdx, freq);
                                     const isPresent = !!file;
-                                    const dates = getQuarterDates(year, q);
+                                    const dates = getSlotDates(year, slotIdx, freq);
+
+                                    // Determina se questo slot deve essere visualizzato o se è coperto da uno span
+                                    // Un documento trimestrale in griglia mensile appare al mese 3, 6, 9, 12 e fa span-3 all'indietro
+                                    const isQuarterlyInMonthly = isPresent && freq === 'monthly' &&
+                                      ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
+
+                                    // Se siamo in griglia mensile e questo mese è parte di un trimestre già visualizzato, lo saltiamo
+                                    if (freq === 'monthly' && !isPresent) {
+                                      const coveringQuarter = dossier.analyses.find(a => {
+                                        if (!a.period_end || !a.period_start) return false;
+                                        const end = new Date(a.period_end);
+                                        const start = new Date(a.period_start);
+                                        const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+                                        if (diff < 45) return false;
+                                        if (end.getFullYear() !== year) return false;
+                                        const endMonth = end.getMonth() + 1;
+                                        return slotIdx > endMonth - 3 && slotIdx < endMonth;
+                                      });
+                                      if (coveringQuarter) return null;
+                                    }
+
                                     return (
-                                      <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
+                                      <div key={slotIdx}
+                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent} ${isQuarterlyInMonthly ? styles.span3 : ''} `}
+                                        style={isQuarterlyInMonthly ? { gridColumnStart: slotIdx - 2, gridColumnEnd: slotIdx + 1 } : {}}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? file.id : undefined}
-                                        onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+                                        onClick={() => isPresent && router.push(`/ analisi / ${file.id} `)}>
 
+                                        <div className={styles.tileDates}>
+                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
+                                          {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
+                                        </div>
 
-                                        <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Rendimento</span>
@@ -857,17 +1097,17 @@ export default function DashboardPage() {
 
                   {/* Multiple Liquidity Accounts per Bank */}
                   {group.liquidityAccounts.map((liquidity, lIdx) => (
-                    <div key={`liquidity-${lIdx}`} className={styles.accountSection}>
+                    <div key={`liquidity - ${lIdx} `} className={styles.accountSection}>
                       <div className={styles.accountHeader}>
                         <div className={styles.accountTitleInfo}>
                           <span className={styles.accBadge} style={{ background: 'rgba(59,130,246,0.08)', color: '#3b82f6' }}>LIQUIDITÀ</span>
                           <div className={styles.accDetailsText}>
                             Conto corrente: <strong>{liquidity.identifier}</strong><br />
-                            Rendicontazione: <strong>Trimestrale</strong>
+                            Rendicontazione: <strong>Varabile</strong>
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/analisi/${liquidity.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
+                          <Link href={`/ analisi / ${liquidity.analyses[0]?.id} `} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI <span>→</span>
                           </Link>
                           <button
@@ -885,28 +1125,48 @@ export default function DashboardPage() {
                       <div className={styles.timelineNavigation}>
                         <div className={styles.timelineGrid}>
                           {years.map(year => {
-                            const visibleQuarters = quarters.filter(q => {
-                              const qIndex = parseInt(q.replace('Q', ''))
-                              const quarterEndDate = new Date(year, qIndex * 3, 0)
-                              return quarterEndDate <= new Date()
-                            })
-                            if (visibleQuarters.length === 0) return null
+                            const freq = getYearFrequency(liquidity.analyses, year);
+                            const slots = freq === 'monthly' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [1, 2, 3, 4];
+
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={styles.quartersRow}>
-                                  {visibleQuarters.map(q => {
-                                    const file = findAnalysis(liquidity.analyses, year, q);
+                                <div className={`${styles.slotsRow} ${freq === 'monthly' ? styles.grid12 : styles.grid4} `}>
+                                  {slots.map(slotIdx => {
+                                    const file = findAnalysisInSlot(liquidity.analyses, year, slotIdx, freq);
                                     const isPresent = !!file;
-                                    const dates = getQuarterDates(year, q);
+                                    const dates = getSlotDates(year, slotIdx, freq);
+
+                                    // Determina se questo slot deve essere visualizzato o se è coperto da uno span
+                                    const isQuarterlyInMonthly = isPresent && freq === 'monthly' &&
+                                      ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
+
+                                    if (freq === 'monthly' && !isPresent) {
+                                      const coveringQuarter = liquidity.analyses.find(a => {
+                                        if (!a.period_end || !a.period_start) return false;
+                                        const end = new Date(a.period_end);
+                                        const start = new Date(a.period_start);
+                                        const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+                                        if (diff < 45) return false;
+                                        if (end.getFullYear() !== year) return false;
+                                        const endMonth = end.getMonth() + 1;
+                                        return slotIdx > endMonth - 3 && slotIdx < endMonth;
+                                      });
+                                      if (coveringQuarter) return null;
+                                    }
+
                                     return (
-                                      <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
+                                      <div key={slotIdx}
+                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent} ${isQuarterlyInMonthly ? styles.span3 : ''} `}
+                                        style={isQuarterlyInMonthly ? { gridColumnStart: slotIdx - 2, gridColumnEnd: slotIdx + 1 } : {}}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? file.id : undefined}
-                                        onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+                                        onClick={() => isPresent && router.push(`/ analisi / ${file.id} `)}>
 
-
-                                        <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
+                                        <div className={styles.tileDates}>
+                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
+                                          {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
+                                        </div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Saldo</span>
@@ -943,55 +1203,177 @@ export default function DashboardPage() {
             <div className={styles.modalHeader}>
               <div>
                 <h3>Dati Estratti: {inspectorData.bank_name}</h3>
-                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>Periodo: {new Date(inspectorData.period_start).toLocaleDateString()} - {new Date(inspectorData.period_end).toLocaleDateString()}</p>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>
+                  Periodo: {new Date(inspectorData.period_start).toLocaleDateString()} - {new Date(inspectorData.period_end).toLocaleDateString()}
+                  {inspectorData.account_type === 'LIQUIDITY' && <span className={styles.accBadge} style={{ marginLeft: '10px' }}>LIQUIDITÀ</span>}
+                </p>
               </div>
               <button className={styles.closeBtn} onClick={() => setInspectorData(null)}>×</button>
             </div>
             <div className={styles.modalBody}>
+
+              {inspectorData.account_type === 'LIQUIDITY' && editingValues && (
+                <div className={styles.liquiditySection}>
+                  <div className={styles.liquidityGrid}>
+                    {[
+                      { label: 'Saldo iniziale (liquidità):', key: 'initial_balance', type: 'currency' },
+                      { label: 'Totale movimenti liquidità:', key: 'total_movements_amount', type: 'currency' },
+                      { label: 'Saldo finale (liquidità):', key: 'final_balance', type: 'currency' },
+                      { label: 'Movimenti totali:', key: 'total_movements_count', type: 'number' },
+                      { label: 'Commissioni Totali:', key: 'total_commissions', type: 'currency', negativeColor: true },
+                      { label: 'Proventi titoli:', key: 'total_proventi', type: 'currency', positiveColor: true },
+                      { label: 'Movimenti titoli:', key: 'securities_movements_count', type: 'number' },
+                      { label: 'Movimenti acquisto titoli:', key: 'securities_purchase_count', type: 'number' },
+                      { label: 'Movimenti vendita titoli:', key: 'securities_sale_count', type: 'number' },
+                      { label: 'Movimenti titoli:', key: 'securities_net_amount', type: 'currency' },
+                      { label: 'Acquisto titoli:', key: 'securities_purchase_amount', type: 'currency', negativeColor: true },
+                      { label: 'Vendita titoli:', key: 'securities_sale_amount', type: 'currency', positiveColor: true },
+                    ].map((item) => {
+                      const entry = editingValues[item.key]
+                      const isObj = typeof entry === 'object' && entry !== null && 'value' in entry
+                      const val = isObj ? entry.value : entry
+                      const source = isObj ? entry.source : null
+
+                      // Fallback for old records: balances are "extracted", others are "calculated"
+                      const displaySource = source || (['initial_balance', 'final_balance'].includes(item.key) ? 'extracted' : 'calculated')
+
+                      const isModified = editingValues[`${item.key}_is_modified`]
+                      const isNotFound = val === 'non trovato' || val === undefined
+
+                      return (
+                        <div key={item.key} className={styles.summaryCard}>
+                          <div className={styles.labelLine}>
+                            <span className={styles.labelText}>
+                              {item.label}
+                              {isModified && <span className={styles.modifiedBadge}>(Modificato)</span>}
+                            </span>
+                            {displaySource && (
+                              <span className={`${styles.statusBadge} ${displaySource === 'extracted' ? styles.statusExtracted : styles.statusCalculated}`}>
+                                {displaySource === 'extracted' ? 'Estratto' : 'Calcolato'}
+                              </span>
+                            )}
+                          </div>
+                          <div className={styles.summaryValueContainer}>
+                            {isNotFound ? (
+                              <span className={styles.missingValue}>non trovato</span>
+                            ) : (
+                              <input
+                                type="text"
+                                className={`${styles.summaryInput} ${item.positiveColor && val > 0 ? styles.positiveValue : ''} ${item.negativeColor && val < 0 ? styles.negativeValue : ''}`}
+                                value={`${item.type === 'currency' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`}
+                                onChange={(e) => {
+                                  const raw = e.target.value.replace('+', '').replace(' €', '').replace('.', '').replace(',', '.')
+                                  const num = parseFloat(raw)
+                                  handleUpdateValue(item.key, isNaN(num) ? e.target.value : num)
+                                }}
+                              />
+                            )}
+                          </div>
+                          {isModified && (
+                            <button className={styles.restoreBtn} onClick={() => handleRestoreValue(item.key)}>Ripristina</button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className={styles.infoGrid}>
                 <div className={styles.infoItem}><strong>Banca</strong> {renderVal(inspectorData.bank_name)}</div>
                 <div className={styles.infoItem}><strong>Account</strong> {renderVal(inspectorData.benchmark_comparison)}</div>
                 <div className={styles.infoItem}><strong>Settlement</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
               </div>
 
-              <div className={styles.inspectorSection}>
-                <h4>Portafoglio Finale</h4>
-                <table className={styles.inspectorTable}>
-                  <thead><tr><th>ISIN</th><th>Ticker</th><th>Quantità</th><th>Valore</th></tr></thead>
-                  <tbody>
-                    {inspectorData.holdings?.map((h: any, i: number) => (
-                      <tr key={i}>
-                        <td>{renderVal(h.isin)}</td>
-                        <td>{renderVal(h.ticker)}</td>
-                        <td>{renderVal(h.quantity)}</td>
-                        <td>{renderVal(h.marketValue, true)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {inspectorData.account_type === 'DOSSIER' && (
+                <div className={styles.inspectorSection}>
+                  <h4>Portafoglio Finale</h4>
+                  <table className={styles.inspectorTable}>
+                    <thead><tr><th>ISIN</th><th>Ticker</th><th>Quantità</th><th>Valore</th></tr></thead>
+                    <tbody>
+                      {inspectorData.holdings?.map((h: any, i: number) => (
+                        <tr key={i}>
+                          <td>{renderVal(h.isin)}</td>
+                          <td>{renderVal(h.ticker)}</td>
+                          <td>{renderVal(h.quantity)}</td>
+                          <td>{renderVal(h.marketValue, true)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div className={styles.inspectorSection}>
-                <h4>Movimenti del Periodo</h4>
-                <table className={styles.inspectorTable}>
-                  <thead><tr><th>Data</th><th>Tipo</th><th>ISIN</th><th>Quantità</th><th>Valore</th></tr></thead>
-                  <tbody>
-                    {inspectorData.transactions?.map((t: any, i: number) => (
-                      <tr key={i}>
-                        <td>{renderVal(t.date)}</td>
-                        <td>{renderVal(t.type)}</td>
-                        <td>{renderVal(t.isin)}</td>
-                        <td>{renderVal(t.quantity)}</td>
-                        <td>{renderVal(t.exchangeValue, true)}</td>
+                <h4>
+                  Movimenti del Periodo
+                  {inspectorData.account_type === 'LIQUIDITY' && (
+                    <span className={`${styles.statusBadge} ${styles.statusExtracted}`} style={{ verticalAlign: 'middle', marginLeft: '12px' }}>
+                      Estratto
+                    </span>
+                  )}
+                </h4>
+                {inspectorData.account_type === 'LIQUIDITY' ? (
+                  <table className={styles.inspectorTable}>
+                    <thead>
+                      <tr>
+                        <th>Data</th>
+                        <th>Descrizione</th>
+                        <th>
+                          Tipologia movimento
+                          <span className={`${styles.statusBadge} ${styles.statusCalculated}`} style={{ marginLeft: '6px' }}>
+                            Calcolato
+                          </span>
+                        </th>
+                        <th>Importo</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {inspectorData.transactions?.map((t: any, i: number) => {
+                        const typeClass = styles[`type${t.movement_type || 'Altro'}`] || styles.typeAltro;
+                        const amount = t.amount !== undefined ? t.amount : t.exchangeValue;
+                        const amountClass = amount < 0 ? styles.amountNegative : (amount > 0 ? styles.amountPositive : '');
+
+                        return (
+                          <tr key={i}>
+                            <td>{renderVal(t.date)}</td>
+                            <td style={{ fontSize: '0.75rem', maxWidth: '300px' }}>{renderVal(t.description || 'N/D')}</td>
+                            <td>
+                              <span className={`${styles.typeBadge} ${typeClass}`}>
+                                {t.movement_type || 'Altro'}
+                              </span>
+                            </td>
+                            <td className={amountClass}>
+                              {amount !== undefined ? `€ ${amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : 'N/D'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className={styles.inspectorTable}>
+                    <thead><tr><th>Data</th><th>Tipo</th><th>ISIN</th><th>Quantità</th><th>Valore</th></tr></thead>
+                    <tbody>
+                      {inspectorData.transactions?.map((t: any, i: number) => (
+                        <tr key={i}>
+                          <td>{renderVal(t.date)}</td>
+                          <td>{renderVal(t.type)}</td>
+                          <td>{renderVal(t.isin)}</td>
+                          <td>{renderVal(t.quantity)}</td>
+                          <td>{renderVal(t.exchangeValue, true)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
-              <pre className={styles.rawJson}>
-                {JSON.stringify(inspectorData.costs_breakdown, null, 2)}
-              </pre>
+              <div className={styles.inspectorActions}>
+                <button className={styles.saveBtn} onClick={handleSaveInspector} disabled={isSaving}>
+                  {isSaving ? 'Salvataggio...' : 'Salva Modifiche'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
