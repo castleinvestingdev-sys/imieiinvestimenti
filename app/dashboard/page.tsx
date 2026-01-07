@@ -241,13 +241,24 @@ export default function DashboardPage() {
   const allRawBanks = Array.from(new Set(analyses.map(a => a.bank_name?.trim() || 'Banca Sconosciuta')));
   const bankClusterMap: Record<string, string> = {};
 
-  // Unifica banche se un nome è contenuto in un altro (es. "Crédit Agricole" e "Cariparma Crédit Agricole")
-  allRawBanks.sort((a, b) => b.length - a.length); // Processa prima i nomi più lunghi
+  // Utility per normalizzare i nomi delle banche (rimuove spazi, accenti e ordina le parole)
+  const getBankKey = (name: string) => name.toUpperCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Rimuove accenti
+    .replace(/[^A-Z0-9 ]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 2)
+    .sort()
+    .join(' ');
+
+  allRawBanks.sort((a, b) => b.length - a.length);
   allRawBanks.forEach(bank => {
     if (!bankClusterMap[bank]) {
-      const clusterHead = allRawBanks.find(other =>
-        other !== bank && (bank.includes(other) || other.includes(bank))
-      ) || bank;
+      const bankKey = getBankKey(bank);
+      const clusterHead = allRawBanks.find(other => {
+        if (other === bank) return false;
+        const otherKey = getBankKey(other);
+        return bankKey.includes(otherKey) || otherKey.includes(bankKey) || bankKey === otherKey;
+      }) || bank;
       bankClusterMap[bank] = clusterHead;
     }
   });
@@ -269,18 +280,32 @@ export default function DashboardPage() {
     return acc
   }, {} as Record<string, { bankName: string; connections: Set<string>; rawIdentifier: string }>);
 
-  // Fuzzy linking avanzato: gestione suffissi per account della stessa banca
+  // Fuzzy linking avanzato: gestione suffissi e radici comuni
   const normKeys = Object.keys(accountMetaMap);
   normKeys.forEach(normKey => {
     const meta = accountMetaMap[normKey];
     meta.connections.forEach(conn => {
       if (!accountMetaMap[conn]) {
-        // Cerca un match basato sul suffisso (ultimi 7 caratteri) se la banca è la stessa o simile
+        // Cerca un match basato sulla radice numerica finale (almeno 8 cifre)
         const match = normKeys.find(k => {
           if (k === normKey) return false;
+
+          // Verifichiamo se appartengono alla stessa banca (o cluster)
           const sameBank = accountMetaMap[k].bankName === meta.bankName;
+          if (!sameBank) return false;
+
+          // Estraiamo solo le cifre per il confronto a grana fine
+          const numK = k.replace(/\D/g, '');
+          const numConn = conn.replace(/\D/g, '');
+
+          if (numK.length >= 8 && numConn.length >= 8) {
+            // Se uno è il suffisso dell'altro (es. account vs IBAN)
+            if (numK.endsWith(numConn) || numConn.endsWith(numK)) return true;
+          }
+
+          // Fallback sul suffisso di 7 caratteri (meno preciso ma utile per certi codici interni)
           const suffixMatch = k.length > 6 && conn.length > 6 && (k.endsWith(conn.slice(-7)) || conn.endsWith(k.slice(-7)));
-          return sameBank && suffixMatch;
+          return suffixMatch;
         });
         if (match) meta.connections.add(match);
       }
