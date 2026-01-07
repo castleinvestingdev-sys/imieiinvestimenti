@@ -20,12 +20,12 @@
 
 .discover-hero {
     background: linear-gradient(to bottom, #f0fdf4 0%, #ffffff 100%);
-    padding-top: 100px;
+    padding-top: 60px;
 }
 
 .discover-header {
     text-align: center;
-    margin-bottom: 60px;
+    margin-bottom: 30px;
 }
 
 .discover-header h1 {
