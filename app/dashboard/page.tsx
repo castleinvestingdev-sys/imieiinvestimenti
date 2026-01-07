@@ -290,23 +290,24 @@ export default function DashboardPage() {
     return acc
   }, {} as Record<string, { bankName: string; connections: Set<string>; rawIdentifier: string; numericCore: string; settlementNumericCore: string }>);
 
-  // Fuzzy linking: connette account tramite radice numerica del settlement
+  // Fuzzy linking: connette account tramite suffisso numerico del settlement (ultimi 8 caratteri)
   const normKeys = Object.keys(accountMetaMap);
   normKeys.forEach(normKey => {
     const meta = accountMetaMap[normKey];
     const settlementCore = meta.settlementNumericCore;
 
     if (settlementCore.length >= 8) {
-      // Cerchiamo un altro account il cui numericCore sia un suffisso del nostro settlement (o viceversa)
+      const settlementSuffix = settlementCore.slice(-8);
+
       normKeys.forEach(otherKey => {
         if (otherKey === normKey) return;
         const otherMeta = accountMetaMap[otherKey];
         const otherCore = otherMeta.numericCore;
 
         if (otherCore.length >= 8) {
-          // Match se uno è suffisso dell'altro (es. 35652638 dentro IT63S0623012706000035652638)
-          if (settlementCore.endsWith(otherCore) || otherCore.endsWith(settlementCore) ||
-            settlementCore.includes(otherCore) || otherCore.includes(settlementCore)) {
+          const otherSuffix = otherCore.slice(-8);
+          // Match se gli ultimi 8 caratteri coincidono
+          if (settlementSuffix === otherSuffix) {
             meta.connections.add(otherKey);
           }
         }
