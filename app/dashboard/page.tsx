@@ -1026,7 +1026,7 @@ export default function DashboardPage() {
                 <div className={styles.accountsContainer}>
                   {/* Multiple Dossiers per Bank */}
                   {group.dossiers.map((dossier, dIdx) => (
-                    <div key={`dossier - ${dIdx} `} className={styles.accountSection}>
+                    <div key={`dossier-${dIdx}`} className={styles.accountSection}>
                       <div className={styles.accountHeader}>
                         <div className={styles.accountTitleInfo}>
                           <span className={styles.accBadge}>Dossier Titoli</span>
@@ -1036,7 +1036,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/ analisi / ${dossier.analyses[0]?.id} `} className={styles.btnAnalysisPremium}>
+                          <Link href={`/analisi/${dossier.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI <span>→</span>
                           </Link>
                           <button
@@ -1098,7 +1098,7 @@ export default function DashboardPage() {
                                         style={isQuarterlyInMonthly ? { gridColumnStart: slotIdx - 2, gridColumnEnd: slotIdx + 1 } : {}}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? file.id : undefined}
-                                        onClick={() => isPresent && router.push(`/ analisi / ${file.id} `)}>
+                                        onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
 
                                         <div className={styles.tileDates}>
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
@@ -1135,7 +1135,7 @@ export default function DashboardPage() {
 
                   {/* Multiple Liquidity Accounts per Bank */}
                   {group.liquidityAccounts.map((liquidity, lIdx) => (
-                    <div key={`liquidity - ${lIdx} `} className={styles.accountSection}>
+                    <div key={`liquidity-${lIdx}`} className={styles.accountSection}>
                       <div className={styles.accountHeader}>
                         <div className={styles.accountTitleInfo}>
                           <span className={styles.accBadge} style={{ background: 'rgba(59,130,246,0.08)', color: '#3b82f6' }}>LIQUIDITÀ</span>
@@ -1145,7 +1145,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/ analisi / ${liquidity.analyses[0]?.id} `} className={styles.btnAnalysisPremium}>
+                          <Link href={`/analisi/${liquidity.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
                             VEDI ANALISI <span>→</span>
                           </Link>
                           <button
@@ -1199,7 +1199,7 @@ export default function DashboardPage() {
                                         style={isQuarterlyInMonthly ? { gridColumnStart: slotIdx - 2, gridColumnEnd: slotIdx + 1 } : {}}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? file.id : undefined}
-                                        onClick={() => isPresent && router.push(`/ analisi / ${file.id} `)}>
+                                        onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
 
                                         <div className={styles.tileDates}>
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
