@@ -292,7 +292,7 @@ export default function Header() {
                   >
                     Accedi
                   </Link>
-                  <Link href="/dashboard" style={{
+                  <Link href="/discover" style={{
                     background: 'linear-gradient(135deg, #00C853 0%, #009624 100%)',
                     color: '#fff',
                     padding: '0 24px',

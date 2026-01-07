@@ -12,14 +12,15 @@ export async function POST(request: NextRequest) {
         const formData = await request.formData()
         const file = formData.get('file') as File
         const userId = formData.get('userId') as string
+        const guestEmail = formData.get('guestEmail') as string
         const fileName = file?.name || 'documento.pdf'
 
         console.log(`\n[SERVER] >>> RICEVUTA RICHIESTA DI ANALISI: ${fileName}`)
-        console.log(`[SERVER] UserID: ${userId} | Size: ${file?.size} bytes`)
+        console.log(`[SERVER] UserID: ${userId} | GuestEmail: ${guestEmail} | Size: ${file?.size} bytes`)
 
-        if (!file || !userId) {
-            console.error('[SERVER] ERRORE: File o UserId mancante')
-            return NextResponse.json({ success: false, error: 'File o UserId mancante' }, { status: 400 })
+        if (!file || (!userId && !guestEmail)) {
+            console.error('[SERVER] ERRORE: File, UserId o Email mancante')
+            return NextResponse.json({ success: false, error: 'File, UserId o Email mancante' }, { status: 400 })
         }
 
         if (!GEMINI_API_KEY) {
@@ -226,7 +227,8 @@ Restituisci SOLO il JSON, senza alcun commento o formattazione markdown esterna.
 
         const analysisData = {
             document_id: crypto.randomUUID(),
-            user_id: userId,
+            user_id: userId || null,
+            guest_email: guestEmail || null,
             bank_name: parsed.info?.bankName || 'Banca N/D',
             period_start: parseDate(parsed.info?.period_start),
             period_end: parseDate(parsed.info?.period_end),

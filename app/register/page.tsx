@@ -33,7 +33,7 @@ export default function RegisterPage() {
 
         setLoading(true)
 
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
             email,
             password,
             options: {
@@ -48,6 +48,18 @@ export default function RegisterPage() {
             setError(error.message)
             setLoading(false)
             return
+        }
+
+        // Link guest analyses to the new user if they exist
+        if (data.user) {
+            try {
+                await supabase
+                    .from('analyses')
+                    .update({ user_id: data.user.id, guest_email: null })
+                    .eq('guest_email', email)
+            } catch (linkError) {
+                console.error('Error linking guest analyses:', linkError)
+            }
         }
 
         alert('Registrazione completata! Verifica la tua email.')

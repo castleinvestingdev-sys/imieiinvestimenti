@@ -42,7 +42,7 @@ export default function HomePage() {
               <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1a1a1a', marginBottom: '1.5rem', textTransform: 'uppercase' }}>
                 Ti basta caricare un PDF.
               </h4>
-              <Link href="/dashboard" style={{
+              <Link href="/discover" style={{
                 display: 'inline-block',
                 background: '#00C853',
                 color: '#fff',
@@ -166,7 +166,7 @@ export default function HomePage() {
                 Carica il tuo PDF.<br />Al resto pensiamo noi.
               </h3>
               <p style={{ opacity: 0.8, fontSize: '0.9rem', marginBottom: '2rem', fontWeight: 600 }}>*I PDF verranno analizzati dall’AI.</p>
-              <Link href="/dashboard" style={{
+              <Link href="/discover" style={{
                 background: '#fff',
                 color: '#00C853',
                 fontWeight: 900,
@@ -315,7 +315,7 @@ export default function HomePage() {
               Carica il tuo<br />estratto conto.
             </h3>
 
-            <Link href="/dashboard" style={{
+            <Link href="/discover" style={{
               display: 'flex',
               alignItems: 'center',
               gap: '15px',
