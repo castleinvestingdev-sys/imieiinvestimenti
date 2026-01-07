@@ -202,8 +202,8 @@ export default function DiscoverPage() {
                             )}
                         </div>
 
-                        <div className="discovery-instructions" style={{ marginBottom: '32px', textAlign: 'left' }}>
-                            <p style={{ fontSize: '0.95rem', color: '#000', fontWeight: 600, lineHeight: 1.5 }}>
+                        <div className="discovery-instructions" style={{ marginBottom: '32px', textAlign: 'center' }}>
+                            <p style={{ fontSize: '0.95rem', color: '#64748b', fontWeight: 500, lineHeight: 1.5 }}>
                                 Non lo trovi? Puoi scaricarlo dall&apos;<strong style={{ color: '#00C853' }}>Homebanking</strong>, la banca è tenuta a dartelo per legge.<br />
                                 Lo trovi nella sezione documenti.
                             </p>
