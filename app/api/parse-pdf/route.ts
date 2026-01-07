@@ -32,12 +32,21 @@ export async function POST(request: NextRequest) {
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari e dossier titoli.
 Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un formato JSON rigoroso.
 
+### CLASSIFICAZIONE DEL DOCUMENTO (CRITICO):
+**PRIMA DI TUTTO**, determina il tipo di documento guardando l'INTESTAZIONE/TITOLO del documento:
+- Se il titolo dice "ESTRATTO CONTO" o "CONTO CORRENTE" o "E/C" → type = "LIQUIDITY"
+- Se il titolo dice "ESTRATTO CONTO TITOLI" o "DOSSIER TITOLI" → type = "DOSSIER"
+
+**ATTENZIONE**: Un estratto conto di LIQUIDITÀ può contenere riferimenti a titoli nelle causali dei movimenti (es. "acquisto titolo", "cedola", "dividendo"). Questo NON lo rende un dossier! Il tipo dipende SOLO dall'intestazione del documento.
+
 ### REGOLE FONDAMENTALI:
 1. **STRINGHE SPECIFICHE**: 
    - Se un dato non è presente o non è trovabile, usa ESATTAMENTE la stringa "non trovato". Non usare null o N/D.
    - Per il campo 'quantity' nel 'initialPortfolio', usa sempre la stringa "da calcolare".
 2. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN, Ticker e nomi dei titoli esattamente come appaiono.
 3. **ISIN**: Cerca codici di 12 caratteri (es. IE00B4L5Y983).
+4. **accountNumber**: Per LIQUIDITY usa il numero di conto corrente, per DOSSIER usa il numero del dossier titoli.
+5. **settlementAccount**: Per DOSSIER è il conto corrente di regolamento associato. Per LIQUIDITY può essere l'IBAN.
 
 ### STRUTTURA JSON RICHIESTA:
 {
