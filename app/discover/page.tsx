@@ -117,7 +117,7 @@ export default function DiscoverPage() {
     return (
         <div className="discover-page"
             onDragEnter={handleFullPageDragEnter}
-            onDragOver={handleFullPageDragEnter}
+            onDragOver={handleDragOver}
             onDragLeave={handleFullPageDragLeave}
             onDrop={handleFullPageDrop}
         >
