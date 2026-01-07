@@ -10,12 +10,39 @@ export default function DiscoverPage() {
     const [file, setFile] = useState<File | null>(null)
     const [email, setEmail] = useState('')
     const [isDragging, setIsDragging] = useState(false)
+    const [fullPageDragCounter, setFullPageDragCounter] = useState(0)
     const [isUploading, setIsUploading] = useState(false)
     const [isSuccess, setIsSuccess] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const router = useRouter()
     const supabase = createClient()
+
+    const handleFullPageDragEnter = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setFullPageDragCounter(prev => prev + 1)
+    }
+
+    const handleFullPageDragLeave = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setFullPageDragCounter(prev => prev - 1)
+    }
+
+    const handleFullPageDrop = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setFullPageDragCounter(0)
+
+        const droppedFile = e.dataTransfer.files[0]
+        if (droppedFile && droppedFile.type === 'application/pdf') {
+            setFile(droppedFile)
+            setError(null)
+        } else {
+            setError('Per favore carica un file PDF valido.')
+        }
+    }
 
     useEffect(() => {
         const checkUser = async () => {
@@ -88,7 +115,21 @@ export default function DiscoverPage() {
     }
 
     return (
-        <div className="discover-page">
+        <div className="discover-page"
+            onDragEnter={handleFullPageDragEnter}
+            onDragOver={handleFullPageDragEnter}
+            onDragLeave={handleFullPageDragLeave}
+            onDrop={handleFullPageDrop}
+        >
+            {fullPageDragCounter > 0 && (
+                <div className="fullPageOverlay">
+                    <div className="fullPageOverlayContent">
+                        <div className="fullPageDropIcon">↑</div>
+                        <h2>Rilascia il PDF</h2>
+                        <p>Inizieremo subito l&apos;analisi gratuita</p>
+                    </div>
+                </div>
+            )}
             <div className="discover-container">
                 {isSuccess ? (
                     <div className="success-card">
