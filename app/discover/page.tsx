@@ -154,10 +154,10 @@ export default function DiscoverPage() {
                     <section className="discover-hero">
                         <div className="discover-container">
                             <header className="discover-header">
-                                <h1>Ottieni un&apos;analisi indipendente del tuo portafoglio titoli</h1>
+                                <h1>Carica il tuo Estratto Conto</h1>
                                 <p>
-                                    Scopri i costi nascosti e i rendimenti reali dei tuoi investimenti.<br />
-                                    Ti basta caricare l&apos;estratto conto del dossier titoli.
+                                    Ottieni un&apos;analisi <strong>gratuita</strong> e indipendente del tuo portafoglio titoli.<br />
+                                    Scopri i costi nascosti e i rendimenti reali dei tuoi investimenti.
                                 </p>
                             </header>
                         </div>
