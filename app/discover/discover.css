@@ -15,12 +15,17 @@
 .discover-container {
     max-width: 1150px;
     margin: 0 auto;
-    padding: 120px 24px 80px;
+    padding: 60px 24px 80px;
+}
+
+.discover-hero {
+    background: linear-gradient(to bottom, #f0fdf4 0%, #ffffff 100%);
+    padding-top: 100px;
 }
 
 .discover-header {
     text-align: left;
-    margin-bottom: 60px;
+    margin-bottom: 40px;
 }
 
 .discover-header h1 {

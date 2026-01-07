@@ -148,15 +148,19 @@ export default function DiscoverPage() {
                         </div>
                     </div>
                 ) : (
-                    <>
-                        <header className="discover-header">
-                            <h1>Carica il PDF &ldquo;Estratto Conto&rdquo; del Dossier Titoli</h1>
-                            <p>
-                                Non lo trovi? Puoi scaricarlo dall&apos;<strong style={{ color: '#00C853' }}>Homebanking</strong>, la banca è tenuta a dartelo per legge.<br />
-                                Lo trovi nella sezione documenti.
-                            </p>
-                        </header>
+            <section className="discover-hero">
+                <div className="discover-container">
+                    <header className="discover-header">
+                        <h1>Carica il PDF &ldquo;Estratto Conto&rdquo; del Dossier Titoli</h1>
+                        <p>
+                            Non lo trovi? Puoi scaricarlo dall&apos;<strong style={{ color: '#00C853' }}>Homebanking</strong>, la banca è tenuta a dartelo per legge.<br />
+                            Lo trovi nella sezione documenti.
+                        </p>
+                    </header>
+                </div>
+            </section>
 
+            <div className="discover-container" style={{ paddingTop: 0 }}>
                         <div
                             className={`dropzone-container ${isDragging ? 'dragging' : ''}`}
                             onDragOver={handleDragOver}
@@ -196,58 +200,58 @@ export default function DiscoverPage() {
                         </div>
 
                         {error && (
-                            <div style={{
-                                backgroundColor: '#FEF2F2',
-                                color: '#991B1B',
-                                padding: '16px',
-                                borderRadius: '16px',
-                                marginBottom: '24px',
-                                textAlign: 'center',
-                                fontWeight: 500,
-                                border: '1px solid #FCA5A5'
-                            }}>
-                                ⚠️ {error}
-                            </div>
-                        )}
+                    <div style={{
+                        backgroundColor: '#FEF2F2',
+                        color: '#991B1B',
+                        padding: '16px',
+                        borderRadius: '16px',
+                        marginBottom: '24px',
+                        textAlign: 'center',
+                        fontWeight: 500,
+                        border: '1px solid #FCA5A5'
+                    }}>
+                        ⚠️ {error}
+                    </div>
+                )}
 
-                        <form className="discover-form" onSubmit={handleSubmit}>
-                            <div className="input-group">
-                                <label htmlFor="email">Inserisci la tua email</label>
-                                <input
-                                    type="email"
-                                    id="email"
-                                    className="email-input"
-                                    placeholder="mario.rossi@esempio.it"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    required
-                                />
-                                <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '4px 0 0 4px' }}>
-                                    Ti invieremo il report PDF a questo indirizzo.
-                                </p>
-                            </div>
+                <form className="discover-form" onSubmit={handleSubmit}>
+                    <div className="input-group">
+                        <label htmlFor="email">Inserisci la tua email</label>
+                        <input
+                            type="email"
+                            id="email"
+                            className="email-input"
+                            placeholder="mario.rossi@esempio.it"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                        />
+                        <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '4px 0 0 4px' }}>
+                            Ti invieremo il report PDF a questo indirizzo.
+                        </p>
+                    </div>
 
-                            <button
-                                type="submit"
-                                className="submit-btn"
-                                disabled={!file || !email || isUploading}
-                            >
-                                {isUploading ? 'Analisi in corso...' : 'Richiedi Analisi Gratuita →'}
-                            </button>
-                        </form>
+                    <button
+                        type="submit"
+                        className="submit-btn"
+                        disabled={!file || !email || isUploading}
+                    >
+                        {isUploading ? 'Analisi in corso...' : 'Richiedi Analisi Gratuita →'}
+                    </button>
+                </form>
 
-                        <div className="secondary-cta">
-                            <h3>Vuoi analizzare più anni?</h3>
-                            <p style={{ marginBottom: '20px', color: '#64748b' }}>
-                                Crea un account gratuito per caricare più documenti, visualizzare lo storico e monitorare l&apos;andamento dei tuoi costi nel tempo.
-                            </p>
-                            <Link href="/register" className="register-link">
-                                Crea un account gratuito
-                            </Link>
-                        </div>
-                    </>
+                <div className="secondary-cta">
+                    <h3>Vuoi analizzare più anni?</h3>
+                    <p style={{ marginBottom: '20px', color: '#64748b' }}>
+                        Crea un account gratuito per caricare più documenti, visualizzare lo storico e monitorare l&apos;andamento dei tuoi costi nel tempo.
+                    </p>
+                    <Link href="/register" className="register-link">
+                        Crea un account gratuito
+                    </Link>
+                </div>
+            </>
                 )}
             </div>
-        </div>
+        </div >
     )
 }
