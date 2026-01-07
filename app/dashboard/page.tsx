@@ -264,61 +264,86 @@ export default function DashboardPage() {
   });
 
   // --- 2. Identificazione Connessioni e Normalizzazione Account ---
+  // Estrae solo cifre per confronti numerici
+  const extractNumericCore = (acc: string) => acc?.replace(/\D/g, '') || '';
   const normalizeAcc = (acc: string) => acc?.replace(/[^a-zA-Z0-9]/g, '').replace(/^0+/, '').toUpperCase() || 'ND';
 
+  // Mappa ogni account al suo settlement e alla banca raw
   const accountMetaMap = analyses.reduce((acc, a) => {
     const rawAccNum = a.benchmark_comparison || 'N/D';
     const normAcc = normalizeAcc(rawAccNum);
     const rawBank = a.bank_name?.trim() || 'Banca Sconosciuta';
     const bank = bankClusterMap[rawBank] || rawBank;
-    const settlementAcc = normalizeAcc(a.costs_breakdown?.settlementAccount as string);
+    const rawSettlement = a.costs_breakdown?.settlementAccount as string || '';
+    const settlementAcc = normalizeAcc(rawSettlement);
 
     if (!acc[normAcc]) {
-      acc[normAcc] = { bankName: bank, connections: new Set<string>(), rawIdentifier: rawAccNum };
+      acc[normAcc] = {
+        bankName: bank,
+        connections: new Set<string>(),
+        rawIdentifier: rawAccNum,
+        numericCore: extractNumericCore(rawAccNum),
+        settlementNumericCore: extractNumericCore(rawSettlement)
+      };
     }
     if (settlementAcc && settlementAcc !== 'ND') acc[normAcc].connections.add(settlementAcc);
     return acc
-  }, {} as Record<string, { bankName: string; connections: Set<string>; rawIdentifier: string }>);
+  }, {} as Record<string, { bankName: string; connections: Set<string>; rawIdentifier: string; numericCore: string; settlementNumericCore: string }>);
 
-  // Fuzzy linking avanzato: gestione suffissi e radici comuni
+  // Fuzzy linking: connette account tramite radice numerica del settlement
   const normKeys = Object.keys(accountMetaMap);
   normKeys.forEach(normKey => {
     const meta = accountMetaMap[normKey];
-    meta.connections.forEach(conn => {
-      if (!accountMetaMap[conn]) {
-        // Cerca un match basato sulla radice numerica finale (almeno 8 cifre)
-        const match = normKeys.find(k => {
-          if (k === normKey) return false;
+    const settlementCore = meta.settlementNumericCore;
 
-          // Verifichiamo se appartengono alla stessa banca (o cluster)
-          const sameBank = accountMetaMap[k].bankName === meta.bankName;
-          if (!sameBank) return false;
+    if (settlementCore.length >= 8) {
+      // Cerchiamo un altro account il cui numericCore sia un suffisso del nostro settlement (o viceversa)
+      normKeys.forEach(otherKey => {
+        if (otherKey === normKey) return;
+        const otherMeta = accountMetaMap[otherKey];
+        const otherCore = otherMeta.numericCore;
 
-          // Estraiamo solo le cifre per il confronto a grana fine
-          const numK = k.replace(/\D/g, '');
-          const numConn = conn.replace(/\D/g, '');
-
-          if (numK.length >= 8 && numConn.length >= 8) {
-            // Se uno è il suffisso dell'altro (es. account vs IBAN)
-            if (numK.endsWith(numConn) || numConn.endsWith(numK)) return true;
+        if (otherCore.length >= 8) {
+          // Match se uno è suffisso dell'altro (es. 35652638 dentro IT63S0623012706000035652638)
+          if (settlementCore.endsWith(otherCore) || otherCore.endsWith(settlementCore) ||
+            settlementCore.includes(otherCore) || otherCore.includes(settlementCore)) {
+            meta.connections.add(otherKey);
           }
+        }
+      });
+    }
+  });
 
-          // Fallback sul suffisso di 7 caratteri (meno preciso ma utile per certi codici interni)
-          const suffixMatch = k.length > 6 && conn.length > 6 && (k.endsWith(conn.slice(-7)) || conn.endsWith(k.slice(-7)));
-          return suffixMatch;
-        });
-        if (match) meta.connections.add(match);
-      }
+  // --- 3. Costruzione Union-Find per collegare account transitivamente ---
+  const parent: Record<string, string> = {};
+  const find = (x: string): string => {
+    if (!parent[x]) parent[x] = x;
+    if (parent[x] !== x) parent[x] = find(parent[x]);
+    return parent[x];
+  };
+  const union = (a: string, b: string) => {
+    const pa = find(a), pb = find(b);
+    if (pa !== pb) parent[pa] = pb;
+  };
+
+  // Unisci tutti gli account connessi
+  normKeys.forEach(k => {
+    accountMetaMap[k].connections.forEach(conn => {
+      if (accountMetaMap[conn]) union(k, conn);
     });
   });
 
-  // --- 3. Risoluzione Nomi Banche Finali ---
+  // --- 4. Risoluzione Nomi Banche Finali (basata su Union-Find) ---
+  const clusterBankMap: Record<string, string> = {};
+  normKeys.forEach(k => {
+    const root = find(k);
+    if (!clusterBankMap[root]) {
+      clusterBankMap[root] = accountMetaMap[k].bankName;
+    }
+  });
   const finalBankMap: Record<string, string> = {};
   normKeys.forEach(k => {
-    if (!finalBankMap[k]) finalBankMap[k] = accountMetaMap[k].bankName;
-    accountMetaMap[k].connections.forEach(conn => {
-      finalBankMap[conn] = finalBankMap[k];
-    });
+    finalBankMap[k] = clusterBankMap[find(k)];
   });
 
   // --- 4. Raggruppamento Finale ---
