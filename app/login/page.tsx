@@ -30,6 +30,22 @@ export default function LoginPage() {
   }
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {
+    if (provider === 'google') {
+      const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+      const options = {
+        redirect_uri: `${window.location.origin}/auth/callback`,
+        client_id: '220358867378-v1t5608r6917j7sq5q66si3bopgkfbkm.apps.googleusercontent.com',
+        access_type: 'offline',
+        response_type: 'code',
+        prompt: 'select_account',
+        scope: 'openid email profile',
+      };
+
+      const qs = new URLSearchParams(options).toString();
+      window.location.href = `${rootUrl}?${qs}`;
+      return;
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {

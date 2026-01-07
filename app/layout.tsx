@@ -11,6 +11,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.imieiinvestimenti.it"),
   title: "iMieiInvestimenti.it - I tuoi investimenti rendono davvero?",
   description: "Scopri se i tuoi investimenti rendono davvero. Analisi gratuita e indipendente dei costi bancari nascosti.",
   keywords: "investimenti, rendimenti, commissioni bancarie, consulenza finanziaria, analisi portafoglio",
@@ -19,6 +20,20 @@ export const metadata: Metadata = {
     url: "https://www.imieiinvestimenti.it/",
     title: "iMieiInvestimenti.it - I tuoi investimenti rendono davvero?",
     description: "Scopri se i tuoi investimenti rendono davvero. Analisi gratuita e indipendente dei costi bancari nascosti.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "iMieiInvestimenti.it - Analisi Investimenti",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "iMieiInvestimenti.it - I tuoi investimenti rendono davvero?",
+    description: "Scopri se i tuoi investimenti rendono davvero. Analisi gratuita e indipendente dei costi bancari nascosti.",
+    images: ["/og-image.png"],
   },
 }
 
@@ -33,6 +48,7 @@ export default function RootLayout({
         <Header />
         <main className="min-h-screen">{children}</main>
         <Footer />
+        <script src="https://accounts.google.com/gsi/client" async defer></script>
       </body>
     </html>
   )
