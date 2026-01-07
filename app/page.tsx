@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import Link from 'next/link' // trigger deploy
 import Image from 'next/image'
 
 export default function HomePage() {
