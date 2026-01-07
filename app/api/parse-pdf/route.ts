@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
-
 export async function POST(request: NextRequest) {
+    const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
+
     try {
+        console.log('Ricevuta richiesta di parsing PDF')
+
         const formData = await request.formData()
         const file = formData.get('file') as File
         const userId = formData.get('userId') as string
@@ -15,9 +17,14 @@ export async function POST(request: NextRequest) {
         }
 
         if (!GEMINI_API_KEY) {
-            return NextResponse.json({ success: false, error: 'Configurazione API Google mancante' }, { status: 500 })
+            console.error('ERRORE: GOOGLE_GEMINI_API_KEY non trovata in process.env')
+            return NextResponse.json({
+                success: false,
+                error: 'Configurazione API Google mancante. Assicurati che GOOGLE_GEMINI_API_KEY sia impostata e riavvia il server.'
+            }, { status: 500 })
         }
 
+        console.log(`API Key caricata (lunghezza: ${GEMINI_API_KEY.length})`)
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
         const fileBuffer = await file.arrayBuffer()
         const base64Data = Buffer.from(fileBuffer).toString('base64')

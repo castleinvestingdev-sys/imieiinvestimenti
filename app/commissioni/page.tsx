@@ -145,17 +145,29 @@ export default function CommissioniPage() {
                         <h2>COMMISSIONI DI GESTIONE (FONDI)</h2>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '80px', alignItems: 'center' }}>
+                    <div className="co-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '80px', alignItems: 'center' }}>
                         <div>
                             <div style={{ fontSize: '1.3rem', lineHeight: 1.6, color: 'var(--text-gray)' }}>
                                 <p style={{ fontWeight: 900, marginBottom: '20px', color: 'var(--text-dark)', fontSize: '1.8rem', letterSpacing: '-1px' }}>Sono le più subdole.</p>
                                 <ul style={{ listStyle: 'none', padding: 0 }}>
-                                    <li style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}><MinusCircle className="text-danger" /> Tu paghi il fondo (senza accorgertene)</li>
-                                    <li style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}><Search className="text-danger" /> Il fondo paga la banca (tu non lo sai)</li>
-                                    <li style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}><ShieldAlert className="text-danger" /> È il più grosso conflitto di interessi</li>
+                                    <li style={{ marginBottom: '16px', display: 'flex', gap: '12px', fontSize: '1.2rem', fontWeight: 700 }}>
+                                        <MinusCircle className="text-danger" size={20} /> Tu paghi il fondo (senza accorgertene).
+                                    </li>
+                                    <li style={{ marginBottom: '16px', display: 'flex', gap: '12px', fontSize: '1.2rem', fontWeight: 700 }}>
+                                        <Search className="text-danger" size={20} /> Il fondo paga la banca (tu non lo sai).
+                                    </li>
+                                    <li style={{ marginBottom: '16px', display: 'flex', gap: '12px', fontSize: '1.2rem', fontWeight: 700 }}>
+                                        <AlertTriangle className="text-danger" size={20} /> La banca continua a proporti fondi su cui guadagna di più.
+                                    </li>
                                 </ul>
-                                <p style={{ marginTop: '40px', fontSize: '2.5rem', fontWeight: 900, color: 'var(--text-dark)', lineHeight: 1.1, letterSpacing: '-2px' }}>
-                                    Questa non è consulenza.<br /><span style={{ color: 'var(--danger)' }}>È truffa.</span>
+
+                                <p style={{ marginTop: '40px', fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-dark)', lineHeight: 1.2, letterSpacing: '-1px' }}>
+                                    E’ il più grosso conflitto di interessi nel mondo finanziario.
+                                </p>
+
+                                <p style={{ marginTop: '40px', fontSize: '2.5rem', fontWeight: 1000, color: 'var(--text-dark)', lineHeight: 1.1, letterSpacing: '-2px' }}>
+                                    QUESTA NON È CONSULENZA.<br />
+                                    <span style={{ color: 'var(--danger)' }}>È UN INGANNO.</span>
                                 </p>
                             </div>
                         </div>
@@ -168,27 +180,48 @@ export default function CommissioniPage() {
                                         <path d="M0,0 L0,6 L9,3 z" fill="#333" />
                                     </marker>
                                 </defs>
-                                <path d="M70 180 Q 80 80 170 50" fill="none" stroke="#ccc" strokeWidth="2" strokeDasharray="4,4" markerEnd="url(#arrow)" />
-                                <path d="M230 50 Q 320 80 330 180" fill="none" stroke="var(--danger)" strokeWidth="4" markerEnd="url(#arrow)" />
+
+                                {/* Arrows */}
+                                <path d="M220 50 Q 350 50 340 170" fill="none" stroke="var(--danger)" strokeWidth="4" markerEnd="url(#arrow)" />
+                                <text x="290" y="32" textAnchor="middle" fontSize="13" fontWeight="900" fill="var(--danger)">REBATES</text>
+                                <text x="290" y="15" textAnchor="middle" fontSize="11" fontWeight="800">Il fondo paga la banca</text>
+
                                 <path d="M300 200 L 110 200" fill="none" stroke="var(--text-dark)" strokeWidth="2" markerEnd="url(#arrow)" />
+                                <text x="205" y="222" textAnchor="middle" fontSize="11" fontWeight="800">La banca ti propone il fondo</text>
+
+                                <path d="M70 180 Q 80 80 170 50" fill="none" stroke="#ccc" strokeWidth="2" strokeDasharray="4,4" markerEnd="url(#arrow)" />
+                                <text x="70" y="105" textAnchor="middle" fontSize="11" fontWeight="800">
+                                    <tspan x="70" dy="0">Tu paghi il fondo</tspan>
+                                    <tspan x="70" dy="16" fontSize="9" fontWeight="700">(Trovi il costo nel KID*)</tspan>
+                                </text>
+
+                                {/* Labels/Concepts */}
+                                <text x="200" y="130" textAnchor="middle" fontSize="15" fontWeight="1000">CONFLITTO DI INTERESSI</text>
+
+                                {/* Nodes */}
                                 <g transform="translate(200, 40)">
                                     <circle cx="0" cy="0" r="30" fill="white" stroke="var(--text-dark)" strokeWidth="2" />
-                                    <text x="0" y="6" textAnchor="middle" fontSize="14" fontWeight="800">🏛️</text>
-                                    <text x="0" y="45" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">FONDO</text>
+                                    <text x="0" y="6" textAnchor="middle" fontSize="16" fontWeight="800">👥</text>
+                                    <text x="0" y="48" textAnchor="middle" fontSize="11" fontWeight="900" fill="var(--text-dark)">FONDO</text>
                                 </g>
                                 <g transform="translate(60, 200)">
                                     <circle cx="0" cy="0" r="30" fill="white" stroke="var(--text-dark)" strokeWidth="2" />
-                                    <text x="0" y="6" textAnchor="middle" fontSize="14" fontWeight="800">👤</text>
-                                    <text x="0" y="45" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">UTENTE</text>
+                                    <text x="0" y="6" textAnchor="middle" fontSize="16" fontWeight="800">👤</text>
+                                    <text x="0" y="48" textAnchor="middle" fontSize="11" fontWeight="900" fill="var(--text-dark)">UTENTE</text>
                                 </g>
                                 <g transform="translate(340, 200)">
                                     <circle cx="0" cy="0" r="35" fill="var(--text-dark)" />
-                                    <text x="0" y="8" textAnchor="middle" fontSize="18" fontWeight="800">🏦</text>
-                                    <text x="0" y="52" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">BANCA</text>
+                                    <text x="0" y="8" textAnchor="middle" fontSize="20" fontWeight="800">🏛️</text>
+                                    <text x="0" y="55" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">BANCA</text>
                                 </g>
-                                <text x="275" y="110" fill="var(--danger)" fontWeight="900" fontSize="12" textAnchor="middle">REBATES</text>
                             </svg>
                         </div>
+                    </div>
+
+                    <div style={{ marginTop: '80px', textAlign: 'left' }}>
+                        <p style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: '-2px', color: 'var(--text-dark)' }}>
+                            I fondi più costosi sono i meno performanti.
+                        </p>
                     </div>
 
                     <div style={{ marginTop: '60px', padding: '32px', background: '#f8fafc', borderRadius: '24px', display: 'flex', gap: '20px', alignItems: 'center' }}>
