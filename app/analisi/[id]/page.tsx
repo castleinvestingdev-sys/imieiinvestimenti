@@ -41,29 +41,19 @@ export default async function AnalysisPage({ params }: PageProps) {
 
     return (
         <div className={styles.analysisWrapper}>
-            {/* Top Navigation Bar */}
-            <nav className={styles.navBar}>
-                <div className={styles.navContent}>
-                    <Link href="/dashboard" className={styles.backLink}>
-                        <div className={styles.backIcon}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M19 12H5M12 19l-7-7 7-7" />
-                            </svg>
-                        </div>
-                        <span>Torna alla Dashboard</span>
-                    </Link>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.2em', opacity: 0.3 }}>Foresic Audit Mode</span>
-                        <div style={{ width: '6px', height: '6px', backgroundColor: '#10b981', borderRadius: '50%' }}></div>
-                    </div>
-                </div>
-            </nav>
-
             {/* Header Content */}
             <header className={styles.header}>
                 <div className={styles.headerBg}></div>
                 <div className={styles.headerContent}>
                     <div className={styles.headerInfo}>
+                        <Link href="/dashboard" className={styles.backLinkHeader}>
+                            <div className={styles.backIcon}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M19 12H5M12 19l-7-7 7-7" />
+                                </svg>
+                            </div>
+                            <span>Torna alla Dashboard</span>
+                        </Link>
                         <div className={styles.headerInfoRow}>
                             <span className={`${styles.badge} ${isDossier ? styles.badgeDossier : styles.badgeLiquidity}`}>
                                 {isDossier ? 'Dossier Titoli' : 'Conto Liquidità'}
