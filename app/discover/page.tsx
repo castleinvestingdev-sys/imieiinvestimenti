@@ -154,10 +154,10 @@ export default function DiscoverPage() {
                     <section className="discover-hero">
                         <div className="discover-container">
                             <header className="discover-header">
-                                <h1>Carica il PDF &ldquo;Estratto Conto&rdquo; del Dossier Titoli</h1>
+                                <h1>Ottieni un&apos;analisi indipendente del tuo portafoglio titoli</h1>
                                 <p>
-                                    Non lo trovi? Puoi scaricarlo dall&apos;<strong style={{ color: '#00C853' }}>Homebanking</strong>, la banca è tenuta a dartelo per legge.<br />
-                                    Lo trovi nella sezione documenti.
+                                    Scopri i costi nascosti e i rendimenti reali dei tuoi investimenti.<br />
+                                    Ti basta caricare l&apos;estratto conto del dossier titoli.
                                 </p>
                             </header>
                         </div>
@@ -200,6 +200,13 @@ export default function DiscoverPage() {
                                     <span className="drop-sublabel">oppure clicca per sfogliare i tuoi file</span>
                                 </>
                             )}
+                        </div>
+
+                        <div className="discovery-instructions" style={{ marginBottom: '32px', textAlign: 'left' }}>
+                            <p style={{ fontSize: '0.95rem', color: '#000', fontWeight: 600, lineHeight: 1.5 }}>
+                                Non lo trovi? Puoi scaricarlo dall&apos;<strong style={{ color: '#00C853' }}>Homebanking</strong>, la banca è tenuta a dartelo per legge.<br />
+                                Lo trovi nella sezione documenti.
+                            </p>
                         </div>
 
                         {error && (
