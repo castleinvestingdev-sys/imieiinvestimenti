@@ -435,6 +435,30 @@ export default function DashboardPage() {
   }, [])
 
   const [dragCounter, setDragCounter] = useState(0)
+  const [fullPageDragCounter, setFullPageDragCounter] = useState(0)
+
+  const handleFullPageDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFullPageDragCounter(prev => prev + 1)
+  }
+
+  const handleFullPageDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFullPageDragCounter(prev => prev - 1)
+  }
+
+  const handleFullPageDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFullPageDragCounter(0)
+
+    const files = e.dataTransfer.files
+    if (files && files.length > 0) {
+      addFilesToQueue(files)
+    }
+  }
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -715,7 +739,21 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className={styles.dashWrapper}>
+    <main className={styles.dashWrapper}
+      onDragEnter={handleFullPageDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleFullPageDragLeave}
+      onDrop={handleFullPageDrop}
+    >
+      {fullPageDragCounter > 0 && (
+        <div className={styles.fullPageOverlay}>
+          <div className={styles.fullPageOverlayContent}>
+            <div className={styles.fullPageDropIcon}>↑</div>
+            <h2>Rilascia i PDF ovunque</h2>
+            <p>I documenti verranno analizzati automaticamente</p>
+          </div>
+        </div>
+      )}
       <div className={styles.heroBackground} />
 
       <header className={styles.dashHero}>
