@@ -212,7 +212,7 @@ export default function DiscoverPage() {
 
                         <form className="discover-form" onSubmit={handleSubmit}>
                             <div className="input-group">
-                                <label htmlFor="email">La tua migliore email</label>
+                                <label htmlFor="email">Inserisci la tua email</label>
                                 <input
                                     type="email"
                                     id="email"
