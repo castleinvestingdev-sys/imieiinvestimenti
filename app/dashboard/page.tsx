@@ -207,21 +207,25 @@ export default function DashboardPage() {
           ))
           await fetchAnalyses(user.id)
 
-          // Scroll to newly added document
+          // Scroll to newly added document using the analysis ID from the response
+          const newAnalysisId = result.analysisId
           setTimeout(() => {
             // First scroll to main content
             const mainContent = document.querySelector('[class*="mainContent"]')
             mainContent?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
-            // Then find and scroll to the card with data (has the "DATA" label)
+            // Then find and scroll to the specific tile
             setTimeout(() => {
-              const dataCards = document.querySelectorAll('[data-has-analysis="true"]')
-              if (dataCards.length > 0) {
-                const firstCard = dataCards[0] as HTMLElement
-                firstCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+              const targetTile = newAnalysisId
+                ? document.querySelector(`[data-analysis-id="${newAnalysisId}"]`)
+                : document.querySelectorAll('[data-has-analysis="true"]')[0]
+
+              if (targetTile) {
+                (targetTile as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
               }
             }, 600)
           }, 500)
+
         } else {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
@@ -788,7 +792,9 @@ export default function DashboardPage() {
                                     return (
                                       <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
+                                        data-analysis-id={isPresent ? file.id : undefined}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+
 
                                         <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (
@@ -866,7 +872,9 @@ export default function DashboardPage() {
                                     return (
                                       <div key={q} className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
+                                        data-analysis-id={isPresent ? file.id : undefined}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+
 
                                         <div className={styles.tileDates}>{dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}</div>
                                         {isPresent ? (

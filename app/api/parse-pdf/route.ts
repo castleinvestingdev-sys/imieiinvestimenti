@@ -178,10 +178,12 @@ Restituisci SOLO il JSON, senza alcun commento o formattazione markdown esterna.
 
         return NextResponse.json({
             success: true,
+            analysisId: data.id,
             documentId: data.id,
             fileName: file.name,
             status: 'ready'
         })
+
 
     } catch (error: any) {
         console.error('Errore Parse PDF:', error)
