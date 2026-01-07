@@ -163,27 +163,31 @@ export default function DashboardPage() {
 
       // Update status to uploading
       setUploadQueue(prev => prev.map(f =>
-        f.id === fileId ? { ...f, status: 'uploading' as const, progress: 10 } : f
+        f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5 } : f
       ))
 
       try {
-        // Simulate upload progress
+        // Progress animation that continues throughout the process
+        let currentProgress = 5
         const progressInterval = setInterval(() => {
           setUploadQueue(prev => prev.map(f => {
-            if (f.id === fileId && f.status === 'uploading') {
-              const newProgress = Math.min(40, f.progress + 5)
-              return { ...f, progress: newProgress }
+            if (f.id === fileId && (f.status === 'uploading' || f.status === 'analyzing')) {
+              // Slow down as we approach 90%
+              const maxProgress = 90
+              const increment = Math.max(0.5, (maxProgress - currentProgress) / 20)
+              currentProgress = Math.min(maxProgress, currentProgress + increment)
+              return { ...f, progress: Math.round(currentProgress) }
             }
             return f
           }))
-        }, 200)
+        }, 300)
 
-        // Update to analyzing
+        // Update to analyzing after 1 second
         setTimeout(() => {
           setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'analyzing' as const, progress: 50 } : f
+            f.id === fileId ? { ...f, status: 'analyzing' as const } : f
           ))
-        }, 800)
+        }, 1000)
 
         const formData = new FormData()
         formData.append('file', file)
@@ -202,6 +206,11 @@ export default function DashboardPage() {
             f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
           ))
           await fetchAnalyses(user.id)
+
+          // Scroll to main content to show new item
+          setTimeout(() => {
+            document.querySelector('[class*="mainContent"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }, 500)
         } else {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
@@ -500,7 +509,10 @@ export default function DashboardPage() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '1.2rem' }}>
+                      <span style={{
+                        fontSize: '1.2rem',
+                        animation: (file.status === 'uploading' || file.status === 'analyzing') ? 'pulse 1.5s ease-in-out infinite' : 'none'
+                      }}>
                         {file.status === 'queued' && '⏳'}
                         {file.status === 'uploading' && '📤'}
                         {file.status === 'analyzing' && '🧠'}
@@ -519,26 +531,38 @@ export default function DashboardPage() {
                         {file.name}
                       </span>
                     </div>
-                    <span style={{
-                      fontWeight: 800,
-                      fontSize: '0.85rem',
-                      color: file.status === 'done' ? '#10b981' : file.status === 'error' ? '#ef4444' : '#64748b'
-                    }}>
-                      {file.status === 'queued' && 'In coda...'}
-                      {file.status === 'uploading' && `${file.progress}%`}
-                      {file.status === 'analyzing' && 'Analisi AI...'}
-                      {file.status === 'done' && 'Completato!'}
-                      {file.status === 'error' && 'Errore'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{
+                        fontWeight: 600,
+                        fontSize: '0.8rem',
+                        color: '#64748b'
+                      }}>
+                        {file.status === 'queued' && 'In attesa'}
+                        {file.status === 'uploading' && 'Caricamento'}
+                        {file.status === 'analyzing' && 'Analisi AI'}
+                        {file.status === 'done' && 'Completato'}
+                        {file.status === 'error' && 'Errore'}
+                      </span>
+                      <span style={{
+                        fontWeight: 900,
+                        fontSize: '1rem',
+                        color: file.status === 'done' ? '#10b981' : file.status === 'error' ? '#ef4444' : '#10b981',
+                        minWidth: '45px',
+                        textAlign: 'right'
+                      }}>
+                        {file.progress}%
+                      </span>
+                    </div>
                   </div>
 
                   {/* Progress Bar */}
                   <div style={{
                     width: '100%',
-                    height: '8px',
+                    height: '10px',
                     background: '#e2e8f0',
-                    borderRadius: '4px',
-                    overflow: 'hidden'
+                    borderRadius: '5px',
+                    overflow: 'hidden',
+                    position: 'relative'
                   }}>
                     <div style={{
                       width: `${file.progress}%`,
@@ -546,10 +570,37 @@ export default function DashboardPage() {
                       background: file.status === 'error' ? '#ef4444' :
                         file.status === 'done' ? '#10b981' :
                           'linear-gradient(90deg, #10b981, #34d399)',
-                      borderRadius: '4px',
-                      transition: 'width 0.3s ease'
-                    }} />
+                      borderRadius: '5px',
+                      transition: 'width 0.3s ease',
+                      position: 'relative',
+                      overflow: 'hidden'
+                    }}>
+                      {/* Animated shine effect */}
+                      {(file.status === 'uploading' || file.status === 'analyzing') && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
+                          animation: 'shimmer 1.5s infinite'
+                        }} />
+                      )}
+                    </div>
                   </div>
+
+                  {/* CSS animations */}
+                  <style>{`
+                    @keyframes shimmer {
+                      0% { transform: translateX(-100%); }
+                      100% { transform: translateX(100%); }
+                    }
+                    @keyframes pulse {
+                      0%, 100% { opacity: 1; }
+                      50% { opacity: 0.5; }
+                    }
+                  `}</style>
 
                   {/* Error message */}
                   {file.status === 'error' && file.error && (
