@@ -446,7 +446,7 @@ export default function DashboardPage() {
   const handleFullPageDragLeave = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setFullPageDragCounter(prev => prev - 1)
+    setFullPageDragCounter(prev => Math.max(0, prev - 1))
   }
 
   const handleFullPageDrop = (e: React.DragEvent) => {
