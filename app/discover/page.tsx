@@ -150,10 +150,10 @@ export default function DiscoverPage() {
                 ) : (
                     <>
                         <header className="discover-header">
-                            <h1>Carica il tuo Estratto Conto</h1>
+                            <h1>Carica il PDF &ldquo;Estratto Conto&rdquo; del Dossier Titoli</h1>
                             <p>
-                                Ottieni un&apos;analisi <strong>gratuita</strong> e indipendente del tuo portafoglio titoli.
-                                Scopri i costi nascosti e i rendimenti reali dei tuoi investimenti.
+                                Non lo trovi? Puoi scaricarlo dall&apos;<strong style={{ color: '#00C853' }}>Homebanking</strong>, la banca è tenuta a dartelo per legge.<br />
+                                Lo trovi nella sezione documenti.
                             </p>
                         </header>
 
