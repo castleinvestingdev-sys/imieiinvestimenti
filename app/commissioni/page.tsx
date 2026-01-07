@@ -30,7 +30,7 @@ export default function CommissioniPage() {
 
                     <div className="co-hero-cta">
                         <p>Carica il tuo estratto conto.</p>
-                        <Link href="/dashboard" className="co-btn-primary">
+                        <Link href="/discover" className="co-btn-primary">
                             PROVALO ORA →
                         </Link>
                     </div>
@@ -282,7 +282,7 @@ export default function CommissioniPage() {
                     <p style={{ fontSize: '1.25rem', color: 'var(--text-gray)', marginBottom: '48px', maxWidth: '600px', margin: '0 auto 48px' }}>
                         Analizziamo i tuoi documenti bancari e ti mostriamo ogni singolo centesimo che ti viene sottratto.
                     </p>
-                    <Link href="/dashboard" className="co-btn-primary" style={{ padding: '24px 64px', fontSize: '1.3rem' }}>
+                    <Link href="/discover" className="co-btn-primary" style={{ padding: '24px 64px', fontSize: '1.3rem' }}>
                         ANALIZZA IL MIO PORTAFOGLIO GRATIS →
                     </Link>
                 </div>

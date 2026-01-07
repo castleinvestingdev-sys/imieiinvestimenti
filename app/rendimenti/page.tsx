@@ -295,7 +295,7 @@ export default function RendimentiPage() {
                 <div className="rendimenti-container">
                     <h2>I tuoi soldi meritano di più.</h2>
                     <p>Carica il tuo estratto conto per un&apos;analisi gratuita e scopri quanto stai pagando di troppo.</p>
-                    <Link href="/dashboard" className="btn-pill-large">
+                    <Link href="/discover" className="btn-pill-large">
                         ANALIZZA IL MIO PORTAFOGLIO ORA →
                     </Link>
                 </div>

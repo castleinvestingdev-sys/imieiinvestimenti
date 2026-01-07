@@ -27,7 +27,7 @@ export default function ReatiPage() {
 
                         <div className="rebate-cta-line">
                             <span className="rebate-cta-text">Carica il tuo estratto conto.</span>
-                            <Link href="/dashboard" className="btn-pill">PROVALO ORA →</Link>
+                            <Link href="/discover" className="btn-pill">PROVALO ORA →</Link>
                         </div>
                     </div>
                 </div>
@@ -158,7 +158,7 @@ export default function ReatiPage() {
                 <div className="reati-container">
                     <h2>I tuoi soldi meritano chiarezza.</h2>
                     <p>Scopri quanto stai pagando davvero oggi stesso.</p>
-                    <Link href="/dashboard" className="btn-pill">
+                    <Link href="/discover" className="btn-pill">
                         ANALIZZA IL MIO PDF ORA →
                     </Link>
                 </div>

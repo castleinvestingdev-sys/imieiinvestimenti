@@ -46,7 +46,7 @@ export default function ComeFunzionaPage() {
 
                     <div className="cf-cta-bar">
                         <span className="cf-cta-text" style={{ color: '#00C853' }}>Carica il tuo estratto conto.</span>
-                        <Link href="/dashboard" className="cf-btn-pill">
+                        <Link href="/discover" className="cf-btn-pill">
                             PROVALO ORA →
                         </Link>
                     </div>
@@ -266,7 +266,7 @@ export default function ComeFunzionaPage() {
                     </div>
 
                     <div style={{ textAlign: 'center', marginTop: '60px' }}>
-                        <Link href="/dashboard" className="cf-btn-pill" style={{ padding: '25px 60px', fontSize: '1.8rem' }}>
+                        <Link href="/discover" className="cf-btn-pill" style={{ padding: '25px 60px', fontSize: '1.8rem' }}>
                             PROVALO ORA →
                         </Link>
                     </div>
