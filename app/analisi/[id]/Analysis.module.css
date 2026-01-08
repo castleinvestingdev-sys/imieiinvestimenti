@@ -6,7 +6,7 @@
     color: #1e293b;
     font-family: 'Outfit', sans-serif;
     padding-bottom: 5rem;
-    padding-top: 80px;
+    padding-top: 120px;
     /* Spazio per la Navbar globale */
 }
 
@@ -63,7 +63,7 @@
 .header {
     background-color: white;
     border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-    padding: 3rem 0 2.5rem;
+    padding: clamp(1.5rem, 5vw, 3rem) 0 clamp(1.5rem, 4vw, 2.5rem);
     position: relative;
     overflow: hidden;
 }
@@ -120,7 +120,7 @@
 }
 
 .bankTitle {
-    font-size: 3rem;
+    font-size: clamp(1.75rem, 5vw, 3rem);
     font-weight: 900;
     color: #0f172a;
     letter-spacing: -0.04em;
@@ -151,9 +151,11 @@
 .portfolioSummary {
     background-color: #f8fafc;
     border: 1px solid rgba(226, 232, 240, 0.6);
-    padding: 1.5rem 2rem;
-    border-radius: 24px;
-    min-width: 320px;
+    padding: clamp(1rem, 3vw, 1.5rem) clamp(1rem, 3vw, 2rem);
+    border-radius: 20px;
+    min-width: 0;
+    width: 100%;
+    max-width: 320px;
 }
 
 .portfolioLabel {
@@ -167,7 +169,7 @@
 }
 
 .portfolioValue {
-    font-size: 2.5rem;
+    font-size: clamp(1.75rem, 5vw, 2.5rem);
     font-weight: 900;
     color: #0f172a;
     letter-spacing: -0.02em;
@@ -631,4 +633,167 @@
 .emptyText {
     font-size: 0.875rem;
     font-weight: 700;
+}
+
+/* Responsiveness for Analysis Page */
+@media (max-width: 1024px) {
+    .container {
+        padding: 1rem;
+    }
+
+    .headerContent {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1.5rem;
+    }
+
+    .portfolioSummary {
+        max-width: 100%;
+    }
+
+    .kpiGrid {
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .auditGrid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+
+    .chartSection {
+        padding: 1.5rem;
+    }
+
+    .footerGrid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+
+    .auditCard {
+        padding: 1.5rem;
+        border-radius: 20px;
+    }
+}
+
+@media (max-width: 768px) {
+    .analysisWrapper {
+        padding-top: 110px;
+    }
+
+    .mainGrid {
+        padding: 0 1rem;
+        margin: 2rem auto;
+    }
+
+    .kpiGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .card {
+        padding: 1.25rem;
+        border-radius: 18px;
+    }
+
+    .kpiValue {
+        font-size: 1.75rem;
+    }
+
+    .headerSubRow {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .tableWrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -1rem;
+        padding: 0 1rem;
+    }
+
+    .table th,
+    .table td {
+        padding: 1rem;
+    }
+
+    .analysisTable {
+        min-width: 600px;
+    }
+
+    .badge {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.6rem;
+    }
+
+    .sectionHeader {
+        padding: 1rem;
+    }
+
+    .sectionTitle {
+        font-size: 0.85rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .analysisWrapper {
+        padding-top: 100px;
+        padding-bottom: 3rem;
+    }
+
+    .headerContent {
+        padding: 0 1rem;
+    }
+
+    .backLinkHeader {
+        margin-bottom: 1rem;
+    }
+
+    .headerInfoRow {
+        gap: 0.5rem;
+    }
+
+    .badge {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.55rem;
+    }
+
+    .portfolioValue {
+        font-size: 1.5rem;
+    }
+
+    .kpiTitle {
+        font-size: 0.6rem;
+    }
+
+    .kpiValue {
+        font-size: 1.5rem;
+    }
+
+    .ratingValue {
+        font-size: 2.25rem;
+    }
+
+    .headerActions {
+        width: 100%;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .headerActions button {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .auditCard {
+        padding: 1.25rem;
+    }
+
+    .auditTitle {
+        font-size: 1rem;
+    }
+
+    .auditItem {
+        padding: 1rem;
+        border-radius: 14px;
+    }
 }

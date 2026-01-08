@@ -23,7 +23,7 @@
 .dashHero {
   position: relative;
   background: white;
-  padding: 8rem 0 1.5rem;
+  padding: 10rem 0 1.5rem;
   border-bottom: 1px solid #f1f5f9;
   z-index: 1;
 }
@@ -420,13 +420,12 @@
 
 .timelineGrid {
   display: flex;
-  gap: 3rem;
+  gap: 2rem;
   overflow-x: auto;
-  padding: 1.5rem 0.5rem;
+  padding: 1.5rem 0.5rem 2.5rem;
   scroll-behavior: smooth;
   scrollbar-width: auto;
-  padding: 1.5rem 0.5rem 2.5rem;
-  /* Space for scrollbar */
+  -webkit-overflow-scrolling: touch;
 }
 
 .timelineGrid::-webkit-scrollbar {
@@ -478,11 +477,11 @@
 }
 
 .grid12 {
-  grid-template-columns: repeat(12, 115px);
+  grid-template-columns: repeat(12, minmax(90px, 115px));
 }
 
 .grid4 {
-  grid-template-columns: repeat(4, 115px);
+  grid-template-columns: repeat(4, minmax(90px, 115px));
 }
 
 .span3 {
@@ -491,7 +490,9 @@
 
 /* Tile Premium Styling */
 .tilePremium {
-  width: 115px;
+  width: 100%;
+  min-width: 90px;
+  max-width: 115px;
   height: 145px;
   background: white;
   border-radius: 18px;
@@ -756,28 +757,182 @@
 }
 
 @media (max-width: 768px) {
+  .dashHero {
+    padding: 7.5rem 0 1rem;
+  }
+
+  .dashHeroInner {
+    padding: 0 1rem;
+  }
+
   .dashWelcome h1 {
-    font-size: 2rem;
+    font-size: 1.5rem;
+  }
+
+  .dashWelcome p {
+    font-size: 0.85rem;
+  }
+
+  .dashDropzone {
+    height: auto;
+    padding: 1.5rem 1rem;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .dropLabel {
+    font-size: 0.8rem;
+    text-align: center;
+  }
+
+  .dropSeparator {
+    display: none;
+  }
+
+  .mainContent {
+    padding: 0 1rem;
   }
 
   .bankGroupBlock {
-    padding: 1.5rem;
-    border-radius: 20px;
+    padding: 1rem;
+    border-radius: 16px;
+  }
+
+  .bankHeader {
+    padding-bottom: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .bankName {
+    font-size: 1rem;
   }
 
   .accountHeader {
     flex-direction: column;
     align-items: flex-start;
-    gap: 1.5rem;
+    gap: 1rem;
+  }
+
+  .btnAnalysisPremium {
+    width: 100%;
+    justify-content: center;
+    padding: 0.75rem 1rem;
+    font-size: 0.8rem;
+  }
+
+  .timelineGrid {
+    gap: 1rem;
+    padding: 1rem 0.25rem 2rem;
+  }
+
+  .yearLabelPremium {
+    font-size: 0.85rem;
+  }
+
+  .slotsRow {
+    gap: 0.75rem;
   }
 
   .warningBanner {
     flex-direction: column;
     text-align: center;
+    padding: 1.5rem;
+    gap: 1rem;
+    border-radius: 16px;
   }
 
   .warnContent {
     flex-direction: column;
+    gap: 1rem;
+  }
+
+  .warnIcon {
+    width: 40px;
+    height: 40px;
+    font-size: 1.25rem;
+  }
+
+  .warnText {
+    font-size: 0.95rem;
+  }
+
+  .warnBtn {
+    width: 100%;
+    padding: 0.75rem 1rem;
+  }
+
+  .sectionTitle {
+    font-size: 1.25rem;
+    margin: 2rem 0 1rem;
+  }
+
+  .liquidityGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .modalOverlay {
+    padding: 10px;
+  }
+
+  .modalHeader {
+    padding: 16px;
+  }
+
+  .modalHeader h3 {
+    font-size: 1rem;
+  }
+
+  .modalBody {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashHero {
+    padding: 7rem 0 1rem;
+  }
+
+  .dashWelcome h1 {
+    font-size: 1.25rem;
+  }
+
+  .tilePremium {
+    min-width: 80px;
+    height: 130px;
+    padding: 0.75rem 0.5rem;
+    border-radius: 14px;
+  }
+
+  .tileDates {
+    font-size: 0.55rem;
+  }
+
+  .valueDataLarge {
+    font-size: 0.8rem;
+  }
+
+  .valueLabelSmall {
+    font-size: 0.5rem;
+  }
+
+  .statusIndicator {
+    font-size: 0.55rem;
+    padding: 4px 8px;
+  }
+
+  .fullPageOverlay h2 {
+    font-size: 2rem;
+  }
+
+  .fullPageOverlay p {
+    font-size: 1rem;
+  }
+
+  .fullPageDropIcon {
+    width: 80px;
+    height: 80px;
+    font-size: 2.5rem;
+    border-radius: 24px;
   }
 }
 
@@ -801,7 +956,7 @@
   background: white;
   border-radius: 24px;
   width: 100%;
-  max-width: 800px;
+  max-width: clamp(320px, 90vw, 800px);
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -1161,4 +1316,105 @@
 
 .inspectorTable tr:last-child td {
   border-bottom: none;
+}
+
+/* Responsiveness for Dashboard */
+@media (max-width: 1024px) {
+  .dashboardLayout {
+    flex-direction: column;
+    height: auto;
+    overflow-y: visible;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 20px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    overflow-x: auto;
+  }
+
+  .sidebarContent {
+    flex-direction: row;
+    gap: 20px;
+  }
+
+  .mainContent {
+    padding: 20px;
+  }
+
+  .bankGrid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .bankCard {
+    padding: 20px;
+  }
+
+  .inspectorContent {
+    flex-direction: column;
+    height: auto;
+    max-height: none;
+  }
+
+  .inspectorList {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    max-height: 400px;
+  }
+
+  .inspectorDetail {
+    width: 100%;
+    padding: 20px;
+  }
+
+  .summaryGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .topBar {
+    padding: 16px 20px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .topBarActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 640px) {
+  .sidebar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .sidebarNav {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  .dashboardHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .inspectorTableWrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }

@@ -1,60 +1,43 @@
-import Link from 'next/link' // trigger deploy
+"use client"
+import Link from 'next/link'
 import Image from 'next/image'
 
 export default function HomePage() {
   return (
     <>
       {/* Hero Section */}
-      <section style={{ padding: '160px 0 80px', background: '#fff' }}>
+      <section className="hero-section">
         <div className="container">
-          <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'left' }}>
-            <h1 style={{ fontSize: '4.5rem', fontWeight: 900, color: '#1a1a1a', lineHeight: 1, letterSpacing: '-2px', marginBottom: '1.5rem' }}>
+          <div className="hero-header">
+            <h1 className="hero-title">
               I tuoi investimenti<br />rendono davvero?
             </h1>
-            <h2 style={{ fontSize: '3rem', fontWeight: 800, color: '#1a1a1a', lineHeight: 1.1, marginBottom: '4rem' }}>
+            <h2 className="hero-subtitle">
               La banca non te lo dice.<br />
-              <span style={{ color: '#00C853' }}>Noi sì.</span>
+              <span className="text-primary">Noi sì.</span>
             </h2>
           </div>
 
-          <div style={{ display: 'flex', gap: '4rem', maxWidth: '1000px', margin: '0 auto', alignItems: 'flex-start' }}>
+          <div className="hero-flex">
             {/* Left Column: Desc & List */}
-            <div style={{ flex: 1.2 }}>
-              <p style={{ fontSize: '1.4rem', lineHeight: 1.5, color: '#1a1a1a', marginBottom: '2rem', fontWeight: 500 }}>
-                <span style={{ color: '#00C853', fontWeight: 800 }}>iMieiInvestimenti.it</span> trasforma i tuoi estratti conto bancari in rendiconti chiari, verificabili e indipendenti.
+            <div className="hero-left">
+              <p className="hero-desc">
+                <span className="hero-brand">iMieiInvestimenti.it</span> trasforma i tuoi estratti conto bancari in rendiconti chiari, verificabili e indipendenti.
               </p>
 
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '1.5rem' }}>👉</span> Performance reali
-                </li>
-                <li style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '1.5rem' }}>👉</span> Costi nascosti evidenti
-                </li>
-                <li style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '1.5rem' }}>👉</span> Numeri ricalcolabili da zero
-                </li>
+              <ul className="hero-list">
+                <li><span>👉</span> Performance reali</li>
+                <li><span>👉</span> Costi nascosti evidenti</li>
+                <li><span>👉</span> Numeri ricalcolabili da zero</li>
               </ul>
             </div>
 
             {/* Right Column: CTA */}
-            <div style={{ flex: 0.8, textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', paddingTop: '10px' }}>
-              <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1a1a1a', marginBottom: '1.5rem', textTransform: 'uppercase' }}>
+            <div className="hero-right">
+              <h4 className="hero-cta-title">
                 Ti basta caricare un PDF.
               </h4>
-              <Link href="/discover" style={{
-                display: 'inline-block',
-                background: '#00C853',
-                color: '#fff',
-                fontWeight: 900,
-                padding: '20px 50px',
-                borderRadius: '60px',
-                fontSize: '1.4rem',
-                textTransform: 'uppercase',
-                textDecoration: 'none',
-                boxShadow: '0 10px 30px rgba(0,200,83,0.3)',
-                transition: 'all 0.3s ease'
-              }}>
+              <Link href="/discover" className="hero-btn">
                 PROVALO ORA! →
               </Link>
             </div>
@@ -63,32 +46,32 @@ export default function HomePage() {
       </section>
 
       {/* Problem Section */}
-      <section style={{ padding: '80px 0', background: '#fff' }} id="problem-section">
+      <section className="section-padding" id="problem-section">
         <div className="container">
-          <div style={{ display: 'flex', gap: '6rem', alignItems: 'center' }}>
+          <div className="flex-row-mobile">
             {/* Text Content */}
             <div style={{ flex: 1 }}>
-              <span style={{ fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', color: '#374151', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span className="section-label">
                 <span style={{ fontSize: '2rem' }}>📉</span> IL PROBLEMA
               </span>
-              <h2 style={{ fontSize: '3rem', fontWeight: 800, color: '#000', lineHeight: 1.1, marginBottom: '2rem' }}>
+              <h2 className="section-title">
                 Perché non riesci a calcolare le tue performance?
               </h2>
 
-              <p style={{ fontSize: '1.5rem', fontWeight: 600, color: '#1d1d1f', marginBottom: '1.5rem', lineHeight: 1.4 }}>
+              <p className="section-p">
                 Perché le banche non consegnano estratti conto esaustivi.
               </p>
-              <p style={{ fontSize: '1.5rem', fontWeight: 600, color: '#1d1d1f', lineHeight: 1.4 }}>
+              <p className="section-p">
                 Non mancano i numeri.<br />
                 Mancano quelli giusti.
               </p>
             </div>
 
             {/* Image Content */}
-            <div style={{ flex: 0.8, textAlign: 'center' }}>
+            <div className="section-img-wrapper">
               <div style={{ position: 'relative', display: 'inline-block' }}>
                 <Image src="/assets/evil_banker.png" alt="Consulente Bancario" width={400} height={400} style={{ mixBlendMode: 'multiply' }} />
-                <h3 style={{ fontSize: '1.6rem', fontWeight: 1000, marginTop: '1rem', lineHeight: 1.2, color: '#000' }}>
+                <h3 className="img-caption">
                   Intanto il consulente bancario
                 </h3>
               </div>
@@ -98,86 +81,75 @@ export default function HomePage() {
       </section>
 
       {/* Why Banks Section */}
-      <section style={{ padding: '80px 0', background: '#fff' }}>
+      <section className="section-padding">
         <div className="container">
-          <div style={{ display: 'flex', gap: '6rem', alignItems: 'center' }}>
-            {/* Image Content (Left) */}
-            <div style={{ flex: 0.8, textAlign: 'center', order: 2 }}>
-              <Image src="/assets/confused_investor.png" alt="Investitore Confuso" width={400} height={400} style={{ mixBlendMode: 'multiply' }} />
-              <h3 style={{ fontSize: '1.6rem', fontWeight: 1000, marginTop: '1rem', lineHeight: 1.2, color: '#000' }}>
-                Le banche guadagnano di più da clienti "inconsapevoli"
-              </h3>
-            </div>
-
-            {/* Text Content (Right) */}
-            <div style={{ flex: 1, order: 1 }}>
-              <span style={{ fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', color: '#374151', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div className="flex-row-mobile flip-mobile">
+            {/* Text Content (Right in desktop order) */}
+            <div style={{ flex: 1 }}>
+              <span className="section-label">
                 <span style={{ fontSize: '2rem' }}>🧠</span> PERCHÉ LE BANCHE NON LO FANNO?
               </span>
-              <h2 style={{ fontSize: '3rem', fontWeight: 800, color: '#000', lineHeight: 1.1, marginBottom: '2rem' }}>
+              <h2 className="section-title">
                 Perché la trasparenza ha un costo.
               </h2>
 
-              <p style={{ fontSize: '1.5rem', fontWeight: 600, color: '#1d1d1f', marginBottom: '1.5rem', lineHeight: 1.4 }}>
+              <p className="section-p">
                 E non lo paga la banca.<br />
                 Lo pagherebbe il suo modello di business.
               </p>
 
-              <ul style={{ listStyle: 'none', padding: 0, margin: '2rem 0' }}>
-                <li style={{ fontSize: '1.35rem', fontWeight: 700, marginBottom: '0.8rem', color: '#000' }}>• Costi più evidenti</li>
-                <li style={{ fontSize: '1.35rem', fontWeight: 700, marginBottom: '0.8rem', color: '#000' }}>• Performance meno "belle"</li>
-                <li style={{ fontSize: '1.35rem', fontWeight: 700, marginBottom: '0.8rem', color: '#000' }}>• Clienti più consapevoli</li>
+              <ul className="check-list">
+                <li>• Costi più evidenti</li>
+                <li>• Performance meno "belle"</li>
+                <li>• Clienti più consapevoli</li>
               </ul>
 
-              <p style={{ fontSize: '1.5rem', color: '#f59e0b', fontWeight: 900 }}>👉 Non conviene.</p>
+              <p className="section-p" style={{ color: '#f59e0b', fontWeight: 900 }}>👉 Non conviene.</p>
+            </div>
+
+            {/* Image Content (Left in desktop order) */}
+            <div className="section-img-wrapper">
+              <Image src="/assets/confused_investor.png" alt="Investitore Confuso" width={400} height={400} style={{ mixBlendMode: 'multiply' }} />
+              <h3 className="img-caption">
+                Le banche guadagnano di più da clienti "inconsapevoli"
+              </h3>
             </div>
           </div>
         </div>
       </section>
 
       {/* Green Section (Solution) */}
-      <section style={{ padding: '100px 0', background: '#00C853', color: '#fff' }}>
+      <section className="green-section">
         <div className="container">
-          <h2 style={{ fontSize: '5rem', fontWeight: 900, color: '#fff', lineHeight: 1, marginBottom: '0.5rem', letterSpacing: '-3px' }}>COSA FACCIAMO NOI</h2>
-          <h3 style={{ fontSize: '2.5rem', fontWeight: 700, color: 'rgba(255,255,255,0.95)', lineHeight: 1.2, marginBottom: '4rem' }}>Ricostruiamo tutto. Da zero.</h3>
+          <h2 className="green-title">COSA FACCIAMO NOI</h2>
+          <h3 className="green-subtitle">Ricostruiamo tutto. Da zero.</h3>
 
-          <div style={{ display: 'flex', gap: '6rem', alignItems: 'flex-start' }}>
+          <div className="flex-row-mobile">
             <div style={{ flex: 1 }}>
-              <p style={{ fontSize: '1.5rem', lineHeight: 1.5, color: '#fff', marginBottom: '2.5rem', fontWeight: 500 }}>
+              <p className="green-p">
                 Partiamo dai <strong>documenti ufficiali</strong> della tua banca.<br />
                 Li trasformiamo in <strong>dati leggibili</strong>.
               </p>
 
-              <p style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Ecco cosa otterrai:</p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                <li style={{ fontSize: '1.35rem', fontWeight: 600, marginBottom: '0.6rem' }}><strong>• Portafoglio iniziale reale</strong></li>
-                <li style={{ fontSize: '1.35rem', fontWeight: 600, marginBottom: '0.6rem' }}>• Tutti i movimenti normalizzati</li>
-                <li style={{ fontSize: '1.35rem', fontWeight: 600, marginBottom: '0.6rem' }}><strong>• Commissioni esplicite</strong></li>
-                <li style={{ fontSize: '1.35rem', fontWeight: 600, marginBottom: '0.6rem' }}>• Dividendi e cedole separati</li>
-                <li style={{ fontSize: '1.35rem', fontWeight: 600, marginBottom: '0.6rem' }}>• Performance vera (ricalcolata)</li>
+              <p className="green-list-label">Ecco cosa otterrai:</p>
+              <ul className="green-list">
+                <li><strong>• Portafoglio iniziale reale</strong></li>
+                <li>• Tutti i movimenti normalizzati</li>
+                <li><strong>• Commissioni esplicite</strong></li>
+                <li>• Dividendi e cedole separati</li>
+                <li>• Performance vera (ricalcolata)</li>
                 <li style={{ marginTop: '2rem', fontWeight: 900, background: '#fff', color: '#00C853', padding: '12px 24px', borderRadius: '50px', display: 'inline-block', fontSize: '1.2rem' }}>
                   👉 Quello che la banca non ti dice.
                 </li>
               </ul>
             </div>
 
-            <div style={{ flex: 0.8, textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', height: '100%' }}>
-              <h3 style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff', marginBottom: '1.5rem', lineHeight: 1.1 }}>
+            <div className="green-right">
+              <h3 className="green-cta-title">
                 Carica il tuo PDF.<br />Al resto pensiamo noi.
               </h3>
-              <p style={{ opacity: 0.8, fontSize: '0.9rem', marginBottom: '2rem', fontWeight: 600 }}>*I PDF verranno analizzati dall’AI.</p>
-              <Link href="/discover" style={{
-                background: '#fff',
-                color: '#00C853',
-                fontWeight: 900,
-                padding: '24px 60px',
-                borderRadius: '60px',
-                fontSize: '1.4rem',
-                textTransform: 'uppercase',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-                textDecoration: 'none',
-                transition: 'all 0.3s ease'
-              }}>
+              <p className="green-disclaimer">*I PDF verranno analizzati dall’AI.</p>
+              <Link href="/discover" className="green-btn">
                 PROVALO ORA →
               </Link>
             </div>
@@ -186,52 +158,34 @@ export default function HomePage() {
       </section>
 
       {/* Comparison Section */}
-      <section style={{ background: '#fff', padding: '100px 0' }}>
+      <section className="section-padding">
         <div className="container">
-          <div style={{ display: 'flex', gap: '3rem', alignItems: 'stretch' }}>
+          <div className="comparison-flex">
             {/* Left Column: LE BANCHE */}
-            <div style={{ flex: 1, background: 'linear-gradient(180deg, #fff 0%, #fef2f2 100%)', borderRadius: '24px', padding: '3rem', boxShadow: '0 10px 40px rgba(220, 38, 38, 0.15)', border: '2px solid #dc2626', display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#1a1a1a', marginBottom: '2rem', textTransform: 'uppercase', letterSpacing: '1px' }}>LE BANCHE TI DANNO</h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, flex: 1 }}>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>🔴</span> Valore finale: <strong>24.950 €</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>🔴</span> Performance: <strong style={{ color: '#dc2626' }}>✗</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>🔴</span> Costi: <strong style={{ color: '#dc2626' }}>✗</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>🔴</span> Metodo: <strong style={{ color: '#dc2626' }}>✗</strong>
-                </li>
+            <div className="comp-card card-red">
+              <h3 className="comp-title">LE BANCHE TI DANNO</h3>
+              <ul className="comp-list">
+                <li><span>🔴</span> Valore finale: <strong>24.950 €</strong></li>
+                <li><span>🔴</span> Performance: <strong className="text-danger">✗</strong></li>
+                <li><span>🔴</span> Costi: <strong className="text-danger">✗</strong></li>
+                <li><span>🔴</span> Metodo: <strong className="text-danger">✗</strong></li>
               </ul>
-              <div style={{ textAlign: 'center', marginTop: '3rem' }}>
+              <div className="comp-img">
                 <Image src="/assets/card_confused.png" alt="Investitore Confuso" width={180} height={180} />
               </div>
             </div>
 
             {/* Right Column: CON IMIEIINVESTIMENTI.IT */}
-            <div style={{ flex: 1, background: 'linear-gradient(180deg, #fff 0%, #f0fdf4 100%)', borderRadius: '24px', padding: '3rem', boxShadow: '0 10px 40px rgba(0,200,83,0.15)', border: '2px solid #00C853', display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#1a1a1a', marginBottom: '2rem', textTransform: 'uppercase', letterSpacing: '1px' }}>CON IMIEIINVESTIMENTI.IT 📊</h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, flex: 1 }}>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>✅</span> Capitale investito: <strong>25.000 €</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>✅</span> Commissioni totali: <strong>−50 €</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>✅</span> Performance reale: <strong style={{ color: '#dc2626' }}>−0,20%</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: 600 }}>
-                  <span style={{ fontSize: '1.2rem' }}>✅</span> Metodo: <strong style={{ color: '#00C853' }}>verificabile</strong>
-                </li>
-                <li style={{ fontSize: '1.2rem', marginTop: '1rem', background: '#e5f9e7', padding: '12px 20px', borderRadius: '12px', color: '#00C853', fontWeight: 800 }}>
-                  📌 Numeri semplici. Ma veri.
-                </li>
+            <div className="comp-card card-green">
+              <h3 className="comp-title">CON IMIEIINVESTIMENTI.IT 📊</h3>
+              <ul className="comp-list">
+                <li><span>✅</span> Capitale investito: <strong>25.000 €</strong></li>
+                <li><span>✅</span> Commissioni totali: <strong>−50 €</strong></li>
+                <li><span>✅</span> Performance reale: <strong className="text-danger">−0,20%</strong></li>
+                <li><span>✅</span> Metodo: <strong className="text-primary">verificabile</strong></li>
+                <li className="comp-badge">📌 Numeri semplici. Ma veri.</li>
               </ul>
-              <div style={{ textAlign: 'center', marginTop: '3rem' }}>
+              <div className="comp-img">
                 <Image src="/assets/card_happy.png" alt="Investitore Soddisfatto" width={180} height={180} />
               </div>
             </div>
@@ -240,46 +194,36 @@ export default function HomePage() {
       </section>
 
       {/* "Per chi è" Section */}
-      <section style={{ background: '#fff', padding: '100px 0' }}>
+      <section className="section-padding">
         <div className="container">
           <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
             {/* Top Headline */}
-            <h2 style={{ fontSize: '3.5rem', fontWeight: 900, color: '#1a1a1a', lineHeight: 1.1, marginBottom: '2rem', letterSpacing: '-1.5px' }}>
+            <h2 className="quote-title">
               Valuta il tuo consulente per i suoi rendimenti, non per la sua simpatia*
             </h2>
 
-            <div style={{ display: 'flex', gap: '4rem', alignItems: 'flex-start' }}>
+            <div className="flex-row-mobile">
               {/* Left Column */}
               <div style={{ flex: 1 }}>
-                <h2 style={{ fontSize: '3rem', fontWeight: 900, color: '#00C853', lineHeight: 1.1, marginBottom: '1.5rem', letterSpacing: '-1px' }}>
+                <h2 className="punch-title">
                   Noi ti aiutiamo<br />a farlo.
                 </h2>
-                <p style={{ fontSize: '1.1rem', color: '#1a1a1a', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>
+                <p className="quote-sub">
                   *capacità di persuasione
                 </p>
               </div>
 
               {/* Right Column */}
               <div style={{ flex: 1, paddingTop: '20px' }}>
-                <h3 style={{ fontSize: '1.8rem', fontWeight: 900, textTransform: 'uppercase', color: '#1a1a1a', marginBottom: '2.5rem', letterSpacing: '1px' }}>
+                <h3 className="list-header">
                   PER CHI È iMieiInvestimenti.it
                 </h3>
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  <li style={{ fontSize: '1.4rem', marginBottom: '0.4rem', fontWeight: 850, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span>✓ Risparmiatori consapevoli</span>
-                  </li>
-                  <li style={{ fontSize: '1.4rem', marginBottom: '0.4rem', fontWeight: 850, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '45px' }}>
-                    <span>✓ Investitori autonomi</span>
-                  </li>
-                  <li style={{ fontSize: '1.4rem', marginBottom: '0.4rem', fontWeight: 850, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '15px' }}>
-                    <span>✓ Clienti bancari e private</span>
-                  </li>
-                  <li style={{ fontSize: '1.4rem', marginBottom: '0.4rem', fontWeight: 850, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '55px' }}>
-                    <span>✓ Consulenti indipendenti</span>
-                  </li>
-                  <li style={{ fontSize: '1.4rem', fontWeight: 850, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '-15px' }}>
-                    <span>✓ Chi vuole capire prima di fidarsi</span>
-                  </li>
+                <ul className="target-list">
+                  <li className="t-1"><span>✓ Risparmiatori consapevoli</span></li>
+                  <li className="t-2"><span>✓ Investitori autonomi</span></li>
+                  <li className="t-3"><span>✓ Clienti bancari e private</span></li>
+                  <li className="t-4"><span>✓ Consulenti indipendenti</span></li>
+                  <li className="t-5"><span>✓ Chi vuole capire prima di fidarsi</span></li>
                 </ul>
               </div>
             </div>
@@ -288,50 +232,21 @@ export default function HomePage() {
       </section>
 
       {/* Final CTA Section */}
-      <section style={{ background: '#fff', padding: '120px 0 160px', textAlign: 'center' }}>
+      <section className="cta-section">
         <div className="container">
-          <div style={{ marginBottom: '100px' }}>
-            <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1a1a1a', lineHeight: 1.4, letterSpacing: '-0.5px' }}>
+          <div className="cta-header">
+            <h2 className="cta-title-top">
               Carica il tuo estratto conto<br />
               e scopri quanto hai davvero guadagnato (o perso)
             </h2>
           </div>
 
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '50px',
-            flexWrap: 'wrap'
-          }}>
-            <h3 style={{
-              fontSize: '5.5rem',
-              fontWeight: 950,
-              color: '#00C853',
-              lineHeight: 0.9,
-              margin: 0,
-              letterSpacing: '-4px'
-            }}>
+          <div className="cta-flex">
+            <h3 className="cta-big-text">
               Carica il tuo<br />estratto conto.
             </h3>
 
-            <Link href="/discover" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '15px',
-              background: '#00C853',
-              color: '#fff',
-              fontWeight: 950,
-              padding: '30px 60px',
-              borderRadius: '80px',
-              fontSize: '1.8rem',
-              textTransform: 'uppercase',
-              textDecoration: 'none',
-              boxShadow: '0 15px 40px rgba(0,200,83,0.3)',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              border: 'none',
-              transform: 'translateY(10px)'
-            }}>
+            <Link href="/discover" className="cta-btn-large">
               PROVALO ORA
               <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14" />
@@ -341,6 +256,438 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <style jsx>{`
+        .hero-section {
+          padding: 180px 0 80px;
+          background: #fff;
+        }
+        .hero-title {
+          font-size: clamp(2.5rem, 8vw, 4.5rem);
+          font-weight: 900;
+          color: #1a1a1a;
+          line-height: 1;
+          letter-spacing: -2px;
+          margin-bottom: 1.5rem;
+        }
+        .hero-subtitle {
+          font-size: clamp(1.8rem, 5vw, 3rem);
+          font-weight: 800;
+          color: #1a1a1a;
+          line-height: 1.1;
+          margin-bottom: 4rem;
+        }
+        .hero-flex {
+          display: flex;
+          gap: 4rem;
+          max-width: 1000px;
+          margin: 0 auto;
+          align-items: flex-start;
+        }
+        .hero-left { flex: 1.2; }
+        .hero-right {
+          flex: 0.8;
+          text-align: right;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          padding-top: 10px;
+        }
+        .hero-desc {
+          font-size: clamp(1.1rem, 3vw, 1.4rem);
+          line-height: 1.5;
+          color: #1a1a1a;
+          margin-bottom: 2rem;
+          font-weight: 500;
+        }
+        .hero-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+        .hero-list li {
+          font-size: clamp(1rem, 2.5vw, 1.25rem);
+          font-weight: 700;
+          margin-bottom: 1rem;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .hero-cta-title {
+          font-size: 1.2rem;
+          font-weight: 800;
+          color: #1a1a1a;
+          margin-bottom: 1.5rem;
+          text-transform: uppercase;
+        }
+        .hero-btn {
+          display: inline-block;
+          background: #00C853;
+          color: #fff;
+          font-weight: 900;
+          padding: 20px 50px;
+          border-radius: 60px;
+          font-size: 1.4rem;
+          text-transform: uppercase;
+          text-decoration: none;
+          box-shadow: 0 10px 30px rgba(0,200,83,0.3);
+          transition: all 0.3s ease;
+        }
+
+        .section-padding { padding: 80px 0; background: #fff; }
+        .flex-row-mobile {
+          display: flex;
+          gap: 6rem;
+          align-items: center;
+        }
+        .section-title {
+          font-size: clamp(1.8rem, 5vw, 3rem);
+          font-weight: 800;
+          color: #000;
+          line-height: 1.1;
+          margin-bottom: 2rem;
+        }
+        .section-p {
+          font-size: clamp(1.1rem, 3vw, 1.5rem);
+          font-weight: 600;
+          color: #1d1d1f;
+          margin-bottom: 1.5rem;
+          line-height: 1.4;
+        }
+
+        .green-section {
+          padding: 100px 0;
+          background: #00C853;
+          color: #fff;
+        }
+        .green-title {
+          font-size: clamp(2.5rem, 10vw, 5rem);
+          font-weight: 900;
+          color: #fff;
+          line-height: 1;
+          margin-bottom: 0.5rem;
+          letter-spacing: -3px;
+        }
+        .green-subtitle {
+          font-size: clamp(1.5rem, 5vw, 2.5rem);
+          font-weight: 700;
+          color: rgba(255,255,255,0.95);
+          line-height: 1.2;
+          margin-bottom: 4rem;
+        }
+        .green-p {
+          font-size: clamp(1.2rem, 3vw, 1.5rem);
+          line-height: 1.5;
+          margin-bottom: 2.5rem;
+          font-weight: 500;
+        }
+        .green-list-label {
+          font-size: 1.2rem;
+          font-weight: 800;
+          margin-bottom: 1rem;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        .green-list { list-style: none; padding: 0; margin: 0; }
+        .green-list li {
+          font-size: clamp(1.1rem, 3vw, 1.35rem);
+          font-weight: 600;
+          margin-bottom: 0.6rem;
+        }
+        .green-right {
+          flex: 0.8;
+          text-align: right;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          justify-content: center;
+        }
+        .green-cta-title {
+          font-size: clamp(1.8rem, 5vw, 2.5rem);
+          font-weight: 900;
+          margin-bottom: 1.5rem;
+          line-height: 1.1;
+        }
+        .green-btn {
+          background: #fff;
+          color: #00C853;
+          font-weight: 900;
+          padding: 24px 60px;
+          border-radius: 60px;
+          font-size: 1.4rem;
+          text-transform: uppercase;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+          text-decoration: none;
+          transition: all 0.3s ease;
+        }
+
+        .comparison-flex {
+          display: flex;
+          gap: 3rem;
+          align-items: stretch;
+        }
+        .comp-card {
+          flex: 1;
+          border-radius: 24px;
+          padding: 3rem;
+          display: flex;
+          flex-direction: column;
+        }
+        .card-red {
+          background: linear-gradient(180deg, #fff 0%, #fef2f2 100%);
+          box-shadow: 0 10px 40px rgba(220, 38, 38, 0.15);
+          border: 2px solid #dc2626;
+        }
+        .card-green {
+          background: linear-gradient(180deg, #fff 0%, #f0fdf4 100%);
+          box-shadow: 0 10px 40px rgba(0,200,83,0.15);
+          border: 2px solid #00C853;
+        }
+        .comp-title {
+          font-size: 1.6rem;
+          font-weight: 900;
+          color: #1a1a1a;
+          margin-bottom: 2rem;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        .comp-list { list-style: none; padding: 0; margin: 0; flex: 1; }
+        .comp-list li {
+          font-size: 1.2rem;
+          margin-bottom: 1.2rem;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-weight: 600;
+        }
+        .comp-badge {
+          margin-top: 1rem;
+          background: #e5f9e7;
+          padding: 12px 20px;
+          border-radius: 12px;
+          color: #00C853;
+          font-weight: 800;
+        }
+        .comp-img { text-align: center; margin-top: 3rem; }
+
+        .quote-title {
+          font-size: clamp(2rem, 6vw, 3.5rem);
+          font-weight: 900;
+          color: #1a1a1a;
+          line-height: 1.1;
+          margin-bottom: 2rem;
+          letter-spacing: -1.5px;
+        }
+        .punch-title {
+          font-size: clamp(2rem, 5vw, 3rem);
+          font-weight: 900;
+          color: #00C853;
+          line-height: 1.1;
+          margin-bottom: 1.5rem;
+          letter-spacing: -1px;
+        }
+        .target-list { list-style: none; padding: 0; margin: 0; }
+        .target-list li {
+          font-size: clamp(1.1rem, 3vw, 1.4rem);
+          font-weight: 850;
+          color: #1a1a1a;
+          margin-bottom: 0.4rem;
+        }
+        .t-2 { margin-left: 45px; }
+        .t-3 { margin-left: 15px; }
+        .t-4 { margin-left: 55px; }
+        .t-5 { margin-left: -15px; }
+
+        .cta-section { padding: 120px 0 160px; text-align: center; background: #fff; }
+        .cta-title-top {
+          font-size: clamp(1.5rem, 4vw, 2.2rem);
+          font-weight: 800;
+          color: #1a1a1a;
+          line-height: 1.4;
+          margin-bottom: 100px;
+        }
+        .cta-flex {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 50px;
+        }
+        .cta-big-text {
+          font-size: clamp(2.5rem, 10vw, 5.5rem);
+          font-weight: 950;
+          color: #00C853;
+          line-height: 0.9;
+          margin: 0;
+          letter-spacing: -4px;
+          text-align: left;
+        }
+        .cta-btn-large {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          background: #00C853;
+          color: #fff;
+          font-weight: 950;
+          padding: 30px 60px;
+          border-radius: 80px;
+          font-size: clamp(1.2rem, 4vw, 1.8rem);
+          text-transform: uppercase;
+          text-decoration: none;
+          box-shadow: 0 15px 40px rgba(0,200,83,0.3);
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .text-primary { color: #00C853; }
+        .text-danger { color: #dc2626; }
+        .hero-brand { color: #00C853; font-weight: 800; }
+        .section-label {
+          font-size: 1.2rem;
+          font-weight: 900;
+          text-transform: uppercase;
+          color: #374151;
+          margin-bottom: 1.5rem;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .img-caption {
+          font-size: 1.6rem;
+          font-weight: 1000;
+          marginTop: 1rem;
+          line-height: 1.2;
+          color: #000;
+        }
+        .check-list { list-style: none; padding: 0; margin: 2rem 0; }
+        .check-list li {
+          font-size: clamp(1.1rem, 3vw, 1.35rem);
+          font-weight: 700;
+          margin-bottom: 0.8rem;
+          color: #000;
+        }
+
+        @media (max-width: 1024px) {
+          .hero-section { padding: 160px 0 70px; }
+          .hero-flex, .flex-row-mobile, .comparison-flex, .cta-flex {
+            flex-direction: column;
+            text-align: center;
+            align-items: center;
+            gap: 3rem;
+          }
+          .hero-right, .green-right, .cta-big-text {
+            text-align: center;
+            align-items: center;
+          }
+          .hero-btn, .green-btn, .cta-btn-large {
+            padding: 15px 40px;
+            font-size: 1.2rem;
+          }
+          .t-1, .t-2, .t-3, .t-4, .t-5 { margin-left: 0; }
+          .flip-mobile { flex-direction: column-reverse; }
+        }
+
+        @media (max-width: 640px) {
+          .hero-section {
+            padding: 110px 0 50px !important;
+          }
+          .hero-title {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+          }
+          .hero-subtitle {
+            font-size: 1.4rem;
+            margin-bottom: 2.5rem;
+          }
+          .hero-desc {
+            font-size: 1rem;
+          }
+          .hero-list li {
+            font-size: 0.95rem;
+          }
+          .hero-cta-title {
+            font-size: 1rem;
+          }
+          .hero-btn {
+            width: 100%;
+            padding: 16px 24px;
+            font-size: 1.1rem;
+            text-align: center;
+          }
+          .section-padding {
+            padding: 50px 0;
+          }
+          .section-title {
+            font-size: 1.5rem;
+          }
+          .section-p {
+            font-size: 1rem;
+          }
+          .section-img-wrapper {
+            max-width: 280px;
+          }
+          .img-caption {
+            font-size: 1.2rem;
+          }
+          .green-section {
+            padding: 60px 0;
+          }
+          .green-title {
+            font-size: 2rem;
+          }
+          .green-subtitle {
+            font-size: 1.3rem;
+            margin-bottom: 2.5rem;
+          }
+          .green-btn {
+            width: 100%;
+            padding: 16px 24px;
+            font-size: 1.1rem;
+            text-align: center;
+          }
+          .comp-card {
+            padding: 1.5rem;
+            border-radius: 16px;
+          }
+          .comp-title {
+            font-size: 1.2rem;
+          }
+          .comp-list li {
+            font-size: 1rem;
+          }
+          .comp-img img {
+            width: 120px;
+            height: 120px;
+          }
+          .quote-title {
+            font-size: 1.5rem;
+          }
+          .punch-title {
+            font-size: 1.5rem;
+          }
+          .list-header {
+            font-size: 1rem;
+          }
+          .target-list li {
+            font-size: 1rem;
+          }
+          .cta-section {
+            padding: 60px 0 80px;
+          }
+          .cta-title-top {
+            font-size: 1.2rem;
+            margin-bottom: 50px;
+          }
+          .cta-big-text {
+            font-size: 2rem;
+            letter-spacing: -2px;
+          }
+          .cta-btn-large {
+            width: 100%;
+            padding: 18px 24px;
+            font-size: 1rem;
+            justify-content: center;
+          }
+        }
+      `}</style>
     </>
   )
 }

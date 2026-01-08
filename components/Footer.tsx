@@ -6,7 +6,7 @@ export default function Footer() {
     return (
         <footer style={{ background: '#2d2d2d', color: '#fff', padding: '60px 0 40px 0' }}>
             <div className="container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 2rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: '3rem', marginBottom: '3rem' }}>
+                <div className="footer-grid" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: '3rem', marginBottom: '3rem' }}>
 
                     {/* Brand */}
                     <div>
@@ -103,10 +103,27 @@ export default function Footer() {
         footer a:hover {
           color: #00C853 !important;
         }
-        @media (max-width: 768px) {
-          footer > div > div:first-child {
+        @media (max-width: 900px) {
+          .footer-grid {
             grid-template-columns: 1fr !important;
-            gap: 2rem !important;
+            gap: 2.5rem !important;
+            text-align: center !important;
+          }
+          .footer-grid > div {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+          }
+          .footer-grid p {
+            max-width: 100% !important;
+          }
+        }
+        @media (max-width: 640px) {
+          footer {
+            padding: 40px 0 30px 0 !important;
+          }
+          .container {
+            padding: 0 1rem !important;
           }
         }
       `}</style>

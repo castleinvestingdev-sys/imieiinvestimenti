@@ -26,7 +26,7 @@
 
 /* --- HERO SECTION --- */
 .rendimenti-hero {
-    padding: 140px 0 60px;
+    padding: 180px 0 60px;
     text-align: center;
     background: linear-gradient(to bottom, #f0fdf4 0%, #ffffff 100%);
 }
@@ -61,7 +61,7 @@
 
 /* --- FUNDAMENTAL SECTION --- */
 .fundamental-section {
-    padding: 80px 0;
+    padding: clamp(50px, 8vw, 80px) 0;
 }
 
 .fundamental-content {
@@ -97,7 +97,7 @@
 
 /* --- INTERACTIVE SECTION --- */
 .interactive-section {
-    padding: 100px 0;
+    padding: clamp(60px, 10vw, 100px) 0;
     background: #ffffff;
 }
 
@@ -258,7 +258,7 @@
 
 /* --- COMPARISON SECTION --- */
 .comparison-section {
-    padding: 80px 0;
+    padding: clamp(50px, 8vw, 80px) 0;
     background: #ffffff;
     border-top: 1px solid var(--border);
 }
@@ -284,6 +284,7 @@
 
 .comparison-table-wrapper {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     margin-bottom: 32px;
 }
 
@@ -362,7 +363,7 @@
 
 /* --- WHY IT MATTERS --- */
 .importance-section {
-    padding: 100px 0;
+    padding: clamp(60px, 10vw, 100px) 0;
 }
 
 .importance-grid {
@@ -405,7 +406,7 @@
 
 /* --- FINAL CTA --- */
 .final-cta {
-    padding: 100px 0;
+    padding: clamp(60px, 10vw, 100px) 0;
     text-align: center;
     background: white;
     border-top: 1px solid var(--border);
@@ -444,16 +445,155 @@
     box-shadow: 0 30px 60px rgba(0, 200, 83, 0.4);
 }
 
-@media (max-width: 768px) {
-    .fundamental-content {
-        grid-template-columns: 1fr;
+@media (max-width: 1024px) {
+    .rendimenti-hero {
+        padding: 120px 0 50px !important;
     }
 
     .rendimenti-hero h1 {
-        font-size: 2.5rem;
+        font-size: clamp(2rem, 8vw, 3rem);
+        letter-spacing: -1.5px;
+    }
+
+    .fundamental-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+        text-align: center;
+    }
+
+    .fundamental-text h2 {
+        font-size: clamp(1.8rem, 6vw, 2.25rem);
+    }
+
+    .fundamental-viz {
+        padding: 20px;
+    }
+
+    .interactive-main {
+        grid-template-columns: 1fr;
+    }
+
+    .chart-header {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 20px;
+    }
+
+    .chart-stat {
+        text-align: center;
+    }
+
+    .sectors-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .comparison-card {
+        padding: 30px 20px;
+        border-radius: 24px;
+    }
+
+    .comparison-header h2 {
+        font-size: clamp(1.6rem, 5vw, 2.25rem);
+    }
+
+    .comparison-insight {
+        font-size: 1rem;
+        padding: 20px;
+    }
+
+    .importance-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .importance-card {
+        padding: 30px 20px;
     }
 
     .final-cta h2 {
-        font-size: 2rem;
+        font-size: clamp(1.8rem, 6vw, 2.5rem);
+    }
+}
+
+@media (max-width: 640px) {
+    .rendimenti-container {
+        padding: 0 16px;
+    }
+
+    .rendimenti-hero {
+        padding: 100px 0 40px !important;
+    }
+
+    .rendimenti-hero h1 {
+        font-size: 1.75rem;
+    }
+
+    .rendimenti-hero p {
+        font-size: 1rem;
+    }
+
+    .fundamental-text h2 {
+        font-size: 1.5rem;
+    }
+
+    .fundamental-text p {
+        font-size: 1rem;
+    }
+
+    .interactive-controls {
+        padding: 20px;
+    }
+
+    .interactive-visualization {
+        padding: 20px;
+    }
+
+    .filter-label {
+        font-size: 0.8rem;
+    }
+
+    .filter-tag {
+        padding: 8px 14px;
+        font-size: 0.8rem;
+    }
+
+    .sectors-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .sector-card {
+        padding: 10px;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+        padding: 12px 16px;
+        font-size: 0.85rem;
+    }
+
+    .importance-card {
+        padding: 25px 20px;
+    }
+
+    .importance-icon {
+        font-size: 2.5rem;
+    }
+
+    .importance-card h4 {
+        font-size: 1.1rem;
+    }
+
+    .final-cta h2 {
+        font-size: 1.5rem;
+    }
+
+    .final-cta p {
+        font-size: 1rem;
+    }
+
+    .btn-pill-large {
+        width: 100%;
+        text-align: center;
+        padding: 18px 24px;
     }
 }

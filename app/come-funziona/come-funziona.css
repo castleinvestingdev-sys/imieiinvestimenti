@@ -25,15 +25,15 @@
 
 /* --- HERO: SNAKE FLOW --- */
 .cf-hero-snake {
-    padding: 160px 0 120px;
+    padding: clamp(160px, 18vw, 200px) 0 clamp(80px, 10vw, 120px);
     background: var(--white);
     text-align: center;
 }
 
 .cf-hero-snake h1 {
-    font-size: 5rem;
+    font-size: clamp(2.5rem, 8vw, 5rem);
     font-weight: 1000;
-    letter-spacing: -4px;
+    letter-spacing: -3px;
     margin-bottom: 80px;
     line-height: 1;
 }
@@ -110,7 +110,7 @@
 
 /* --- PER CHI E SECTION --- */
 .cf-per-chi-section {
-    padding: 120px 0;
+    padding: clamp(60px, 10vw, 120px) 0;
     background: var(--white);
 }
 
@@ -175,7 +175,7 @@
 
 /* --- SECTIONS --- */
 .cf-section {
-    padding: 120px 0;
+    padding: clamp(60px, 10vw, 120px) 0;
     border-top: 1px solid #f1f5f9;
 }
 
@@ -262,7 +262,7 @@
 
 /* --- TRUST SECTION --- */
 .cf-no-section {
-    padding: 100px 0;
+    padding: clamp(60px, 10vw, 100px) 0;
     text-align: left;
 }
 
@@ -400,7 +400,7 @@
 
 /* --- FOOTER CTA --- */
 .cf-final-hero {
-    padding: 150px 0;
+    padding: clamp(80px, 12vw, 150px) 0;
     background: var(--white);
     text-align: center;
 }
@@ -413,23 +413,15 @@
 }
 
 /* Responsiveness */
-@media (max-width: 900px) {
+/* Responsiveness */
+@media (max-width: 1024px) {
+    .cf-hero-snake {
+        padding: 120px 0 50px !important;
+    }
+
     .cf-hero-snake h1 {
-        font-size: 3.5rem;
-    }
-
-    .cf-snake-step {
-        font-size: 2rem;
-        position: relative;
-        top: auto !important;
-        left: auto !important;
-        right: auto !important;
-        margin-bottom: 40px;
-        text-align: left;
-    }
-
-    .cf-snake-arrow {
-        display: none;
+        font-size: clamp(2.5rem, 8vw, 4rem);
+        letter-spacing: -2px;
     }
 
     .cf-snake-visual {
@@ -437,14 +429,152 @@
         display: flex;
         flex-direction: column;
         align-items: center;
+        gap: 3rem;
+        margin-bottom: 60px;
+    }
+
+    .cf-snake-step {
+        position: relative;
+        top: auto !important;
+        left: auto !important;
+        right: auto !important;
+        text-align: center !important;
+        font-size: clamp(1.8rem, 5vw, 2.5rem);
+        white-space: normal;
+        letter-spacing: -1px;
+    }
+
+    .cf-snake-arrow {
+        display: none;
+    }
+
+    .cf-per-chi-title {
+        font-size: clamp(2rem, 6vw, 3.5rem);
+        letter-spacing: -2px;
+    }
+
+    .cf-per-chi-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .cf-per-chi-punchline {
+        font-size: clamp(1.5rem, 4vw, 2rem);
+    }
+
+    .cf-step-title {
+        font-size: clamp(2rem, 8vw, 3.5rem);
+        letter-spacing: -2px;
+    }
+
+    .cf-step-desc {
+        font-size: 1.2rem;
+    }
+
+    .cf-pointer-item {
+        font-size: 1.2rem;
+    }
+
+    .cf-pointer-item span {
+        font-size: 1.5rem;
+    }
+
+    .cf-no-title {
+        font-size: clamp(2rem, 6vw, 3.5rem);
+        letter-spacing: -2px;
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .cf-no-lead {
+        font-size: 1.4rem;
+        text-align: center;
+    }
+
+    .cf-no-item {
+        font-size: 1.3rem;
     }
 
     .cf-step1-grid {
         grid-template-columns: 1fr;
-        gap: 60px;
+        gap: 40px;
     }
 
-    .cf-step-title {
-        font-size: 2.5rem;
+    .cf-cta-bar {
+        flex-direction: column;
+        gap: 20px;
+    }
+
+    .cf-cta-text {
+        font-size: 1.8rem;
+    }
+
+    .cf-final-hero h2 {
+        font-size: clamp(2rem, 6vw, 3.5rem);
+    }
+
+    .cf-section {
+        padding: 80px 0;
+    }
+}
+
+@media (max-width: 640px) {
+    .cf-container {
+        padding: 0 16px;
+    }
+
+    .cf-hero-snake {
+        padding: 100px 0 40px !important;
+    }
+
+    .cf-hero-snake h1 {
+        margin-bottom: 40px;
+    }
+
+    .cf-per-chi-title {
+        font-size: clamp(1.5rem, 6vw, 2rem);
+    }
+
+    .cf-per-chi-card {
+        padding: 30px 20px;
+    }
+
+    .cf-per-chi-card p {
+        font-size: 1.1rem;
+    }
+
+    .cf-step-circle {
+        width: 50px;
+        height: 50px;
+        font-size: 1.5rem;
+        margin-bottom: 20px;
+    }
+
+    .cf-step-desc {
+        font-size: 1rem;
+        margin-bottom: 40px;
+    }
+
+    .cf-doc-title {
+        font-size: 2rem;
+    }
+
+    .cf-btn-pill {
+        width: 100%;
+        justify-content: center;
+        padding: 16px 30px;
+        font-size: 1.1rem;
+    }
+
+    .cf-cta-text {
+        font-size: 1.5rem;
+    }
+
+    .cf-reality-center {
+        font-size: clamp(1.5rem, 6vw, 2.5rem);
+    }
+
+    .cf-final-hero h2 {
+        font-size: clamp(1.5rem, 6vw, 2.5rem);
     }
 }

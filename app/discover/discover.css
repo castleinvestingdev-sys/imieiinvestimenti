@@ -15,12 +15,12 @@
 .discover-container {
     max-width: 1150px;
     margin: 0 auto;
-    padding: 40px 24px;
+    padding: clamp(24px, 5vw, 40px) clamp(16px, 4vw, 24px);
 }
 
 .discover-hero {
     background: linear-gradient(to bottom, #f0fdf4 0%, #ffffff 100%);
-    padding-top: 80px;
+    padding-top: 160px;
 }
 
 .discover-header {
@@ -51,8 +51,8 @@
 .dropzone-container {
     background: #ffffff;
     border: 2px dashed #CBD5E1;
-    border-radius: 32px;
-    padding: 40px;
+    border-radius: clamp(20px, 4vw, 32px);
+    padding: clamp(24px, 5vw, 40px);
     text-align: center;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -341,8 +341,101 @@
     margin-bottom: 16px;
 }
 
-.success-card p {
-    font-size: 1.1rem;
-    color: #166534;
-    margin-bottom: 32px;
+@media (max-width: 1024px) {
+    .discover-container {
+        padding: 40px 16px;
+    }
+
+    .discover-header h1 {
+        font-size: clamp(2rem, 8vw, 3rem);
+        letter-spacing: -1.5px;
+    }
+
+    .discover-header p {
+        font-size: 1.1rem;
+    }
+
+    .dropzone-container {
+        padding: 30px 20px;
+        border-radius: 20px;
+    }
+
+    .drop-label {
+        font-size: 1.25rem;
+    }
+
+    .drop-sublabel {
+        font-size: 0.9rem;
+    }
+
+    .secondary-cta {
+        padding: 30px 20px;
+        border-radius: 20px;
+    }
+
+    .fullPageOverlay h2 {
+        font-size: 2.5rem;
+    }
+
+    .fullPageOverlay p {
+        font-size: 1.2rem;
+    }
+
+    .fullPageDropIcon {
+        width: 100px;
+        height: 100px;
+        font-size: 3rem;
+    }
+}
+
+@media (max-width: 640px) {
+    .discover-hero {
+        padding-top: 100px !important;
+    }
+
+    .discover-header h1 {
+        font-size: 1.75rem;
+    }
+
+    .discover-header p {
+        font-size: 1rem;
+    }
+
+    .drop-icon-wrapper {
+        width: 60px;
+        height: 60px;
+        font-size: 1.5rem;
+        border-radius: 16px;
+    }
+
+    .drop-label {
+        font-size: 1rem;
+    }
+
+    .discover-form {
+        gap: 16px;
+    }
+
+    .email-input {
+        padding: 14px 20px;
+        font-size: 1rem;
+    }
+
+    .submit-btn {
+        width: 100%;
+        padding: 16px 24px;
+        font-size: 1rem;
+    }
+
+    .secondary-cta h3 {
+        font-size: 1.25rem;
+    }
+
+    .success-card {
+        padding: 40px 24px;
+    }
+
+    .success-card h2 {
+        font-size: 1.5rem;
+    }
 }
