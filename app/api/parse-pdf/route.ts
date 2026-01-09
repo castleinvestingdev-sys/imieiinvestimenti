@@ -130,6 +130,16 @@ Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un
 
 Restituisci SOLO il JSON.`
 
+        // Modelli da provare in ordine di priorità
+        const models = [
+            'gemini-2.0-flash',
+            'gemini-1.5-pro',
+            'gemini-1.5-flash'
+        ]
+
+        let resText = ''
+        let success = false
+        let lastError = ''
         const maxRetries = 2
 
         for (const modelName of models) {
