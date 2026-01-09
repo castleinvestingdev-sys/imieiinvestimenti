@@ -1060,21 +1060,56 @@ export default function DashboardPage() {
                           }}>←</div>
                         <div className={styles.timelineGrid}>
                           {years.map(year => {
-                            const freq = getYearFrequency(dossier.analyses, year);
-                            const slots = freq === 'monthly' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [1, 2, 3, 4];
+                            // Always use 12 slots if there is ANY monthly logic involved
+                            const slots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+                            // Track covered months to skip rendering
+                            const coveredMonths = new Set<number>();
+
+                            // Pre-calculate coverage to know what to skip
+                            dossier.analyses.forEach(a => {
+                              if (a.period_end && a.period_start && new Date(a.period_end).getFullYear() === year) {
+                                const start = new Date(a.period_start);
+                                const end = new Date(a.period_end);
+                                const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+                                if (diff > 45) { // It's quarterly
+                                  const endMonth = end.getMonth() + 1; // e.g., 3 for March
+                                  // Mark intermediate months as covered (e.g., if ends in March, cover Jan(1) and Feb(2) IF they are within the same year)
+                                  // Simplified: Quarterly usually ends 3, 6, 9, 12. Covers (end-2, end-1, end)
+                                  coveredMonths.add(endMonth - 1);
+                                  coveredMonths.add(endMonth - 2);
+                                }
+                              }
+                            });
 
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={`${styles.slotsRow} ${freq === 'monthly' ? styles.grid12 : styles.grid4} `}>
+                                <div className={`${styles.slotsRow} ${styles.grid12}`}>
                                   {slots.map(slotIdx => {
-                                    const file = findAnalysisInSlot(dossier.analyses, year, slotIdx, freq);
-                                    const isPresent = !!file;
-                                    const dates = getSlotDates(year, slotIdx, freq);
+                                    // If this slot is covered by a previous quarterly doc, SKIP IT entirely
+                                    if (coveredMonths.has(slotIdx)) return null;
 
-                                    // Calcolo durata per etichetta
-                                    const isQuarterlyDoc = isPresent && file.period_start && file.period_end &&
+                                    // Find if there is a doc ending in this month (Quarterly docs match their END month)
+                                    // Modified find logic: check for monthly OR quarterly ending here
+                                    const file = dossier.analyses.find(a => {
+                                      if (!a.period_end) return false;
+                                      const d = new Date(a.period_end);
+                                      return d.getFullYear() === year && (d.getMonth() + 1) === slotIdx;
+                                    });
+
+                                    const isPresent = !!file;
+                                    const dates = getSlotDates(year, slotIdx, 'monthly'); // Always get standard dates first
+
+                                    // OVerwrite label if it's a quarterly doc found
+                                    const isQuarterlyDoc = isPresent && file.period_start &&
                                       ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
+
+                                    let displayLabel = dates.label;
+                                    if (isQuarterlyDoc) {
+                                      const qNum = Math.ceil(slotIdx / 3);
+                                      displayLabel = `Q${qNum}`;
+                                    }
 
                                     return (
                                       <div key={slotIdx}
@@ -1089,8 +1124,18 @@ export default function DashboardPage() {
                                               {isQuarterlyDoc ? 'TRIMESTRALE' : 'MENSILE'}
                                             </div>
                                           )}
-                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
-                                          {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
+                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
+                                          {isPresent ? (
+                                            <>
+                                              {new Date(file.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
+                                              <span className={styles.arrowIconSmall}>↓</span>
+                                              {new Date(file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                            </>
+                                          ) : (
+                                            <>
+                                              {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
+                                            </>
+                                          )}
                                         </div>
 
                                         {isPresent ? (
@@ -1151,21 +1196,52 @@ export default function DashboardPage() {
                       <div className={styles.timelineNavigation}>
                         <div className={styles.timelineGrid}>
                           {years.map(year => {
-                            const freq = getYearFrequency(liquidity.analyses, year);
-                            const slots = freq === 'monthly' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : [1, 2, 3, 4];
+                            // Always use 12 slots if there is ANY monthly logic involved
+                            const slots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+                            // Track covered months to skip rendering
+                            const coveredMonths = new Set<number>();
+
+                            // Pre-calculate coverage to know what to skip
+                            liquidity.analyses.forEach(a => { // USING LIQUIDITY ANALYSES HERE
+                              if (a.period_end && a.period_start && new Date(a.period_end).getFullYear() === year) {
+                                const start = new Date(a.period_start);
+                                const end = new Date(a.period_end);
+                                const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+                                if (diff > 45) { // It's quarterly
+                                  const endMonth = end.getMonth() + 1;
+                                  coveredMonths.add(endMonth - 1);
+                                  coveredMonths.add(endMonth - 2);
+                                }
+                              }
+                            });
 
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={`${styles.slotsRow} ${freq === 'monthly' ? styles.grid12 : styles.grid4} `}>
+                                <div className={`${styles.slotsRow} ${styles.grid12}`}>
                                   {slots.map(slotIdx => {
-                                    const file = findAnalysisInSlot(liquidity.analyses, year, slotIdx, freq);
-                                    const isPresent = !!file;
-                                    const dates = getSlotDates(year, slotIdx, freq);
+                                    // If this slot is covered by a previous quarterly doc, SKIP IT entirely
+                                    if (coveredMonths.has(slotIdx)) return null;
 
-                                    // Calcolo durata per etichetta
-                                    const isQuarterlyDoc = isPresent && file.period_start && file.period_end &&
+                                    // Find if there is a doc ending in this month
+                                    const file = liquidity.analyses.find(a => {
+                                      if (!a.period_end) return false;
+                                      const d = new Date(a.period_end);
+                                      return d.getFullYear() === year && (d.getMonth() + 1) === slotIdx;
+                                    });
+
+                                    const isPresent = !!file;
+                                    const dates = getSlotDates(year, slotIdx, 'monthly');
+
+                                    const isQuarterlyDoc = isPresent && file.period_start &&
                                       ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
+
+                                    let displayLabel = dates.label;
+                                    if (isQuarterlyDoc) {
+                                      const qNum = Math.ceil(slotIdx / 3);
+                                      displayLabel = `Q${qNum}`;
+                                    }
 
                                     return (
                                       <div key={slotIdx}
@@ -1180,8 +1256,18 @@ export default function DashboardPage() {
                                               {isQuarterlyDoc ? 'TRIMESTRALE' : 'MENSILE'}
                                             </div>
                                           )}
-                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
-                                          {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
+                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
+                                          {isPresent ? (
+                                            <>
+                                              {new Date(file.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
+                                              <span className={styles.arrowIconSmall}>↓</span>
+                                              {new Date(file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                            </>
+                                          ) : (
+                                            <>
+                                              {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
+                                            </>
+                                          )}
                                         </div>
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
