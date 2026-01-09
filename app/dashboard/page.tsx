@@ -1333,8 +1333,22 @@ export default function DashboardPage() {
                     ].map((item) => {
                       const entry = editingValues[item.key]
                       const isObj = typeof entry === 'object' && entry !== null && 'value' in entry
-                      const val = isObj ? entry.value : entry
+                      let val = isObj ? entry.value : entry
                       const source = isObj ? entry.source : null
+
+                      // Special calculation for "Totale movimenti liquidità" -> Final - Initial
+                      if (item.key === 'total_movements_amount') {
+                        const getVal = (k: string) => {
+                          const e = editingValues[k];
+                          const v = (typeof e === 'object' && e !== null && 'value' in e) ? e.value : e;
+                          return typeof v === 'number' ? v : null;
+                        };
+                        const ini = getVal('initial_balance');
+                        const fin = getVal('final_balance');
+                        if (ini !== null && fin !== null) {
+                          val = fin - ini;
+                        }
+                      }
 
                       // Fallback for old records: balances are "extracted", others are "calculated"
                       const displaySource = source || (['initial_balance', 'final_balance'].includes(item.key) ? 'extracted' : 'calculated')
