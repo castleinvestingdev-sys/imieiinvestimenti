@@ -1384,7 +1384,7 @@ export default function DashboardPage() {
               <div className={styles.infoGrid}>
                 <div className={styles.infoItem}><strong>Banca</strong> {renderVal(inspectorData.bank_name)}</div>
                 <div className={styles.infoItem}><strong>Account</strong> {renderVal(inspectorData.benchmark_comparison)}</div>
-                <div className={styles.infoItem}><strong>Settlement</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
+                <div className={styles.infoItem}><strong>IBAN</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
               </div>
 
               {inspectorData.account_type === 'DOSSIER' && (
