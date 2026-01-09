@@ -1363,6 +1363,7 @@ export default function DashboardPage() {
                       let displaySource: string | null = null;
                       let isVerification = item.isVerification || false;
                       let verificationStatus = 'neutral'; // neutral, ok, error
+                      let transactionCount = 0;
 
                       if (item.key === 'total_movements_amount') {
                         // This is the Reference Value (Final - Initial)
