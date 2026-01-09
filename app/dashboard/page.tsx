@@ -1376,6 +1376,7 @@ export default function DashboardPage() {
                           // Exclude metadata rows if they exist
                           const desc = (t.description || '').toLowerCase();
                           if (desc.includes('saldo iniziale') || desc.includes('saldo finale')) return acc;
+                          transactionCount++;
                           return acc + (t.amount || 0);
                         }, 0);
                         val = sumTxs;
@@ -1445,8 +1446,13 @@ export default function DashboardPage() {
                                     handleUpdateValue(item.key, isNaN(num) ? e.target.value : num)
                                   }}
                                 />
-                                {isVerification && verificationStatus === 'ok' && <span title="Corrisponde al delta dei saldi" style={{ color: '#22c55e', fontWeight: 'bold' }}>✅ OK</span>}
-                                {isVerification && verificationStatus === 'error' && <span title="Non corrisponde al delta dei saldi!" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ ERR</span>}
+                                {isVerification && (
+                                  <>
+                                    {verificationStatus === 'ok' && <span title="Corrisponde al delta dei saldi" style={{ color: '#22c55e', fontWeight: 'bold' }}>✅ OK</span>}
+                                    {verificationStatus === 'error' && <span title="Non corrisponde al delta dei saldi!" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ ERR</span>}
+                                    <span style={{ fontSize: '0.8rem', color: '#64748b', whiteSpace: 'nowrap', marginLeft: '5px' }}>({transactionCount} op.)</span>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
