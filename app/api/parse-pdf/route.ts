@@ -45,28 +45,37 @@ Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un
 - Se il titolo dice "ESTRATTO CONTO TITOLI" o "DOSSIER TITOLI" → type = "DOSSIER"
 - Se il titolo dice "RIEPILOGO SALDI", "POSIZIONE TITOLI", "SITUAZIONE PORTAFOGLIO" o contiene esplicitamente "NON UFFICIALE" → type = "UNOFFICIAL"
 
-**ATTENZIONE**: Un estratto conto di LIQUIDITÀ può contenere riferimenti a titoli nelle causali dei movimenti (es. "acquisto titolo", "cedola", "dividendo"). Questo NON lo rende un dossier! Il tipo dipende SOLO dall'intestazione del documento.
+**ATTENZIONE**: Un estratto conto di LIQUIDITÀ può contenere riferimenti a titoli nelle causali dei movimenti. Il tipo dipende SOLO dall'intestazione.
 
 ### REGOLE FONDAMENTALI:
-1. **STRINGHE SPECIFICHE**: 
-   - Se un dato non è presente o non è trovabile, usa ESATTAMENTE la stringa "non trovato". Non usare null o N/D.
-   - Per il campo 'quantity' nel 'initialPortfolio', usa sempre la stringa "da calcolare".
-2. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN, Ticker e nomi dei titoli esattamente come appaiono.
+1. **STRINGHE SPECIFICHE**: Usa "non trovato" se un dato manca.
+2. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN e Ticker esattamente.
 3. **ISIN**: Cerca codici di 12 caratteri (es. IE00B4L5Y983).
-4. **accountNumber**: Per LIQUIDITY usa il numero di conto corrente, per DOSSIER usa il numero del dossier titoli.
-5. **settlementAccount**: Per DOSSIER è il conto corrente di regolamento associato. Per LIQUIDITY può essere l'IBAN.
-6. **DATE (CRITICO)**: Se il nome del file suggerisce un documento mensile (es. contiene "Gennaio", "Ottobre", "Mensile", "Mensilità" o date come "31_10") o se il documento stesso copre un solo mese, assicurati che 'period_start' e 'period_end' riflettano esattamente quel mese (es. dal 01 al 31). Non estendere mai automaticamente al trimestre intero se il documento è mensile.
+4. **DATE (CRITICO)**: Rispettare rigorosamente il periodo del documento (mese singolo o trimestre).
+
+### GESTIONE MOVIMENTI E SEGNI (CRITICO):
+5. **DARE / AVERE**:
+   - Colonne "Movimenti DARE", "ADDEBITI", "USCITE" o segni "-": Sono valori **NEGATIVI**.
+   - Colonne "Movimenti AVERE", "ACCREDITI", "ENTRATE": Sono valori **POSITIVI**.
+   - **IMPORTANTE**: Spesso i PDF hanno colonne separate per Dare/Avere. Devi identificare in quale colonna si trova l'importo e attribuire il segno corretto.
+   
+6. **DESCRIZIONI MULTI-RIGA**:
+   - Molte transazioni hanno descrizioni che continuano su più righe (righe successive prive di data e importo).
+   - **DEVI CONCATENARE** queste righe alla descrizione della transazione principale immediatamente sopra. Non ignorarle e non creare transazioni vuote.
+
+### VERIFICA MATEMATICA (OBBLIGATORIA):
+7. **CONSISTENZA DEI SALDI**:
+   - Estrai **Saldo Iniziale** e **Saldo Finale**.
+   - Calcola la somma algebrica di TUTTI i movimenti estratti.
+   - LA REGOLA È: **Saldo Finale - Saldo Iniziale = Somma Movimenti**.
+   - Se i conti non tornano, significa che hai perso dei movimenti o invertito dei segni. **RICONTROLLA E CORREGGI** prima di generare l'output.
 
 ### REGOLE DI RIEPILOGO (SUMMARY):
-7. **LIQUIDITY SUMMARY (MANDATORIO)**: Per documenti LIQUIDITY, estrai questi dati con la massima precisione. Per ogni campo, specifica anche il "source":
-   - **initial_balance** e **final_balance**: Usa "extracted" se li trovi scritti chiaramente (es. "Saldo al...").
-   - **Tutti gli altri campi** (totali movimenti, commissioni, proventi, conteggi): Usa "calculated" se li devi dedurre/sommare analizzando i movimenti riga per riga. Usa "extracted" SOLO se trovi una tabella di riepilogo nel PDF che riporta esattamente quel totale già calcolato.
-   
-   **REGOLA D'ORO**: Se devi fare una somma o un conteggio tu, il source è "calculated". Se riporti un dato già scritto nel testo/tabella, il source è "extracted".
+8. **LIQUIDITY SUMMARY**:
+   - **calculate_movements**: Ricalcola sempre il totale movimenti sommando quelli che hai estratto (per verifica).
+   - **Saldo Iniziale/Finale**: Usa "extracted" se li leggi esplicitamente dal documento.
 
-### CONTESTO FILENAME:
-Il file che stai analizzando si chiama: "${fileName}"
-(Usa questo nome per capire se si tratta di un documento mensile, trimestrale o annuale).
+### CONTESTO FILENAME: "${fileName}"
 
 ### STRUTTURA JSON RICHIESTA:
 {
@@ -85,7 +94,7 @@ Il file che stai analizzando si chiama: "${fileName}"
   "movements": [
     { 
       "date": "GG/MM/AAAA", 
-      "description": "Descrizione completa del movimento", 
+      "description": "Descrizione completa (concatenata)", 
       "movement_type": "Commissioni" | "Acquisto" | "Vendita" | "Proventi" | "Bonifico" | "Spesa" | "Altro",
       "amount": 0,
       "isin": "string", 
@@ -95,7 +104,7 @@ Il file che stai analizzando si chiama: "${fileName}"
     }
   ],
   
-  "calculation_notes": "Usa questo campo per spiegare brevemente come hai dedotto i saldi se non erano espliciti (es. Saldo finale = Saldo iniziale + Somma movimenti)",
+  "calculation_notes": "Spiega qui se la verifica (Finale - Iniziale) ha avuto successo o se hai dovuto correggere qualcosa.",
   "finalPortfolio": [
     { "isin": "string", "ticker": "string", "quantity": 0, "marketValue": 0 }
   ],
@@ -112,32 +121,15 @@ Il file che stai analizzando si chiama: "${fileName}"
     "initial_balance": { "value": 0, "source": "extracted" | "calculated" },
     "final_balance": { "value": 0, "source": "extracted" | "calculated" },
     "total_movements_amount": { "value": 0, "source": "extracted" | "calculated" },
-    "total_movements_count": { "value": 0, "source": "extracted" | "calculated" },
     "total_commissions": { "value": 0, "source": "extracted" | "calculated" },
     "total_proventi": { "value": 0, "source": "extracted" | "calculated" },
     "securities_movements_count": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_purchase_count": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_sale_count": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_net_amount": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_purchase_amount": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_sale_amount": { "value": 0, "source": "extracted" | "calculated" }
+    "securities_net_amount": { "value": 0, "source": "extracted" | "calculated" }
   }
 }
 
-Restituisci SOLO il JSON, senza alcun commento o formattazione markdown esterna.`
+Restituisci SOLO il JSON.`
 
-        // Modelli da provare in ordine di priorità
-        const models = [
-            'gemini-2.5-flash-lite',
-            'gemini-2.0-flash-lite',
-            'gemini-1.5-flash-lite',
-            'gemini-2.0-flash',
-            'gemini-1.5-flash'
-        ]
-
-        let resText = ''
-        let success = false
-        let lastError = ''
         const maxRetries = 2
 
         for (const modelName of models) {
