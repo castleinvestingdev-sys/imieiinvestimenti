@@ -1071,13 +1071,18 @@ export default function DashboardPage() {
                               if (a.period_end && a.period_start && new Date(a.period_end).getFullYear() === year) {
                                 const start = new Date(a.period_start);
                                 const end = new Date(a.period_end);
-                                const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-                                if (diff > 45) { // It's quarterly
-                                  const endMonth = end.getMonth() + 1; // e.g., 3 for March
-                                  // Mark intermediate months as covered (e.g., if ends in March, cover Jan(1) and Feb(2) IF they are within the same year)
-                                  // Simplified: Quarterly usually ends 3, 6, 9, 12. Covers (end-2, end-1, end)
-                                  coveredMonths.add(endMonth - 1);
-                                  coveredMonths.add(endMonth - 2);
+                                const startMonth = start.getMonth() + 1;
+                                const endMonth = end.getMonth() + 1;
+
+                                // Skip all months between start (exclusive) and end (exclusive) if they are in the same year
+                                // Actually, we render the card at the END month slot. So we should skip everything BEFORE the end month, starting from start month.
+                                // Example: Annual (Jan-Dec). Render at Dec (12). Skip 1..11.
+                                // Example: Q1 (Jan-Mar). Render at Mar (3). Skip 1, 2.
+
+                                if (endMonth > startMonth) {
+                                  for (let m = startMonth; m < endMonth; m++) {
+                                    coveredMonths.add(m);
+                                  }
                                 }
                               }
                             });
@@ -1101,14 +1106,25 @@ export default function DashboardPage() {
                                     const isPresent = !!file;
                                     const dates = getSlotDates(year, slotIdx, 'monthly'); // Always get standard dates first
 
-                                    // OVerwrite label if it's a quarterly doc found
-                                    const isQuarterlyDoc = isPresent && file.period_start &&
-                                      ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
-
+                                    // Calculate duration for labeling
+                                    let frequencyLabel = 'MENSILE';
                                     let displayLabel = dates.label;
-                                    if (isQuarterlyDoc) {
-                                      const qNum = Math.ceil(slotIdx / 3);
-                                      displayLabel = `Q${qNum}`;
+
+                                    if (isPresent && file.period_start) {
+                                      const s = new Date(file.period_start);
+                                      const e = new Date(file.period_end);
+                                      const diffDays = (e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24);
+
+                                      if (diffDays > 300) {
+                                        frequencyLabel = 'ANNUALE';
+                                        displayLabel = 'YEAR';
+                                      } else if (diffDays > 150) {
+                                        frequencyLabel = 'SEMESTRALE';
+                                        displayLabel = 'SEM';
+                                      } else if (diffDays > 45) {
+                                        frequencyLabel = 'TRIMESTRALE';
+                                        displayLabel = `Q${Math.ceil(slotIdx / 3)}`;
+                                      }
                                     }
 
                                     return (
@@ -1121,7 +1137,7 @@ export default function DashboardPage() {
                                         <div className={styles.tileDates}>
                                           {isPresent && (
                                             <div className={styles.freqBadge}>
-                                              {isQuarterlyDoc ? 'TRIMESTRALE' : 'MENSILE'}
+                                              {frequencyLabel}
                                             </div>
                                           )}
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
