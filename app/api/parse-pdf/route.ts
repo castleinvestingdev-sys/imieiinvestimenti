@@ -36,96 +36,62 @@ export async function POST(request: NextRequest) {
         const fileBuffer = await file.arrayBuffer()
         const base64Data = Buffer.from(fileBuffer).toString('base64')
 
-        const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari e dossier titoli.
+        const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
 Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un formato JSON rigoroso.
 
-### CLASSIFICAZIONE DEL DOCUMENTO (CRITICO):
-**PRIMA DI TUTTO**, determina il tipo di documento guardando l'INTESTAZIONE/TITOLO del documento:
-- Se il titolo dice "ESTRATTO CONTO", "CONTO CORRENTE", "E/C" o "RIEPILOGO MOVIMENTI" → type = "LIQUIDITY"
-- Se il titolo dice "ESTRATTO CONTO TITOLI" o "DOSSIER TITOLI" → type = "DOSSIER"
-- Se il titolo dice "RIEPILOGO SALDI", "POSIZIONE TITOLI", "SITUAZIONE PORTAFOGLIO" o contiene esplicitamente "NON UFFICIALE" → type = "UNOFFICIAL"
+### CLASSIFICAZIONE DEL DOCUMENTO:
+- "ESTRATTO CONTO", "CONTO CORRENTE", "E/C" → type = "LIQUIDITY"
+- "DOSSIER TITOLI", "ESTRATTO CONTO TITOLI" → type = "DOSSIER"
 
-**ATTENZIONE**: Un estratto conto di LIQUIDITÀ può contenere riferimenti a titoli nelle causali dei movimenti. Il tipo dipende SOLO dall'intestazione.
+### REGOLE DI PARSING (CRÉDIT AGRICOLE & GENERALI):
+1. **LAYOUT COLONNE**: Spesso il layout è: \`Data | Valuta | DARE (Uscite) | AVERE (Entrate) | Descrizione\`.
+   - I numeri nella colonna **DARE** sono **NEGATIVI** (es. Spese, prelievi, bonifici in uscita, investimenti).
+   - I numeri nella colonna **AVERE** sono **POSITIVI** (es. Stipendi, bonifici in entrata, dividendi, vendite).
+   - IGNORA simboli come \`*\` che precedono i numeri (es. \`* 8,62\` è \`8.62\`).
 
-### REGOLE FONDAMENTALI:
-1. **STRINGHE SPECIFICHE**: Usa "non trovato" se un dato manca.
-2. **TRASCRIZIONE LETTERALE**: Trascrivi ISIN e Ticker esattamente.
-3. **ISIN**: Cerca codici di 12 caratteri (es. IE00B4L5Y983).
-4. **DATE (CRITICO)**: Rispettare rigorosamente il periodo del documento (mese singolo o trimestre).
+2. **DETERMINAZIONE SEGNO TRAMITE KEYWORDS (FALLBACK)**:
+   Se il layout è ambiguo, usa queste parole chiave nella descrizione per determinare il segno:
+   - **NEGATIVO (-)**: "SOTTOSC" (Sottoscrizione Fondi/PAC), "ADDEBITO", "SDD", "BOLLO", "COMMISSIONI", "SPESE", "PREL" (Prelievo), "PAGAMENTO", "BONIFICO A", "V/ORDINE".
+   - **POSITIVO (+)**: "PENSIONE", "STIPENDIO", "EMOLUMENTI", "DIVIDENDO", "CEDOLA", "ACCREDITO", "BONIFICO DA", "VERSAMENTO", "RIMBORSO".
 
-### GESTIONE MOVIMENTI E SEGNI (CRITICO):
-5. **DARE / AVERE**:
-   - Colonne "Movimenti DARE", "ADDEBITI", "USCITE" o segni "-": Sono valori **NEGATIVI**.
-   - Colonne "Movimenti AVERE", "ACCREDITI", "ENTRATE": Sono valori **POSITIVI**.
-   - **IMPORTANTE**: Spesso i PDF hanno colonne separate per Dare/Avere. Devi identificare in quale colonna si trova l'importo e attribuire il segno corretto.
-   
-6. **DESCRIZIONI MULTI-RIGA**:
-   - Molte transazioni hanno descrizioni che continuano su più righe (righe successive prive di data e importo).
-   - **DEVI CONCATENARE** queste righe alla descrizione della transazione principale immediatamente sopra. Non ignorarle e non creare transazioni vuote.
+3. **DESCRIZIONI MULTI-RIGA**:
+   - Concatena le righe successive che non hanno data/importo alla descrizione della transazione precedente.
+   - Esempio: "SDD A: TELECOM..." + "ADDEBITO SDD..." deve diventare un'unica descrizione.
 
-### VERIFICA MATEMATICA (OBBLIGATORIA):
-7. **CONSISTENZA DEI SALDI**:
-   - Estrai **Saldo Iniziale** e **Saldo Finale**.
-   - Calcola la somma algebrica di TUTTI i movimenti estratti.
-   - LA REGOLA È: **Saldo Finale - Saldo Iniziale = Somma Movimenti**.
-   - Se i conti non tornano, significa che hai perso dei movimenti o invertito dei segni. **RICONTROLLA E CORREGGI** prima di generare l'output.
-
-### REGOLE DI RIEPILOGO (SUMMARY):
-8. **LIQUIDITY SUMMARY**:
-   - **calculate_movements**: Ricalcola sempre il totale movimenti sommando quelli che hai estratto (per verifica).
-   - **Saldo Iniziale/Finale**: Usa "extracted" se li leggi esplicitamente dal documento.
-
-### CONTESTO FILENAME: "${fileName}"
+4. **VERIFICA MATEMATICA (OBBLIGATORIA)**:
+   - Estrai \`saldo_iniziale\` e \`saldo_finale\` dal documento.
+   - Calcola la somma di TUTTI i movimenti estratti.
+   - DEVE valere: **Saldo Finale - Saldo Iniziale = Somma Movimenti**.
+   - Se non torna, ricontrolla i segni (spesso "SOTTOSC" viene scambiato per positivo, ma è un acquisto -> uscita -> negativo).
 
 ### STRUTTURA JSON RICHIESTA:
 {
   "type": "DOSSIER" | "LIQUIDITY",
   "info": {
     "bankName": "Nome Banca",
-    "accountNumber": "Numero Conto/Dossier",
+    "accountNumber": "Numero Conto",
     "period_start": "YYYY-MM-DD",
     "period_end": "YYYY-MM-DD",
     "holder": "Intestatario",
-    "settlementAccount": "IBAN Conto Corrente associato"
+    "settlementAccount": "IBAN"
   },
-  "initialPortfolio": [
-    { "isin": "string", "ticker": "string", "quantity": "da calcolare" }
-  ],
   "movements": [
     { 
       "date": "GG/MM/AAAA", 
-      "description": "Descrizione completa (concatenata)", 
-      "movement_type": "Commissioni" | "Acquisto" | "Vendita" | "Proventi" | "Bonifico" | "Spesa" | "Altro",
-      "amount": 0,
-      "isin": "string", 
-      "ticker": "string", 
-      "quantity": 0, 
-      "exchangeValue": 0 
+      "description": "Descrizione completa", 
+      "amount": 0,    // Usa il punto per i decimali. NEGATIVO per uscite.
+      "movement_type": "Commissioni" | "Acquisto" | "Vendita" | "Proventi" | "Bonifico" | "Spesa" | "Altro"
     }
   ],
-  
-  "calculation_notes": "Spiega qui se la verifica (Finale - Iniziale) ha avuto successo o se hai dovuto correggere qualcosa.",
-  "finalPortfolio": [
-    { "isin": "string", "ticker": "string", "quantity": 0, "marketValue": 0 }
-  ],
-  "dividends": [
-    { "date": "GG/MM/AAAA", "isin": "string", "ticker": "string", "grossAmount": 0, "tax": 0, "netAmount": 0 }
-  ],
-  "coupons": [
-    { "date": "GG/MM/AAAA", "isin": "string", "ticker": "string", "grossAmount": 0, "tax": 0, "netAmount": 0 }
-  ],
-  "titles": [
-    { "isin": "string", "ticker": "string", "name": "Nome Titolo" }
-  ],
   "summary": {
-    "initial_balance": { "value": 0, "source": "extracted" | "calculated" },
-    "final_balance": { "value": 0, "source": "extracted" | "calculated" },
-    "total_movements_amount": { "value": 0, "source": "extracted" | "calculated" },
-    "total_commissions": { "value": 0, "source": "extracted" | "calculated" },
-    "total_proventi": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_movements_count": { "value": 0, "source": "extracted" | "calculated" },
-    "securities_net_amount": { "value": 0, "source": "extracted" | "calculated" }
-  }
+    "initial_balance": { "value": 0, "source": "extracted" },
+    "final_balance": { "value": 0, "source": "extracted" },
+    "total_movements_amount": { "value": 0, "source": "calculated" }, // Final - Initial
+    "total_commissions": { "value": 0, "source": "calculated" },
+    "total_proventi": { "value": 0, "source": "calculated" }
+  },
+  "finalPortfolio": [],
+  "dividends": []
 }
 
 Restituisci SOLO il JSON.`
