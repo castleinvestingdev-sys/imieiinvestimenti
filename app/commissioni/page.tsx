@@ -2,6 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import {
     AlertTriangle,
     ArrowRight,
@@ -174,47 +175,13 @@ export default function CommissioniPage() {
 
                         <div className="co-conflict-box">
                             <h3 style={{ fontWeight: 900, marginBottom: '40px', fontSize: '1.2rem', textTransform: 'uppercase' }}>Il Ciclo del Conflitto</h3>
-                            <svg width="100%" height="auto" viewBox="0 0 440 250" style={{ overflow: 'visible', maxWidth: '440px' }}>
-                                <defs>
-                                    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                                        <path d="M0,0 L0,6 L9,3 z" fill="#333" />
-                                    </marker>
-                                </defs>
-
-                                {/* Arrows */}
-                                <path d="M220 50 Q 350 50 340 170" fill="none" stroke="var(--danger)" strokeWidth="4" markerEnd="url(#arrow)" />
-                                <text x="290" y="32" textAnchor="middle" fontSize="13" fontWeight="900" fill="var(--danger)">REBATES</text>
-                                <text x="290" y="15" textAnchor="middle" fontSize="11" fontWeight="800">Il fondo paga la banca</text>
-
-                                <path d="M300 200 L 110 200" fill="none" stroke="var(--text-dark)" strokeWidth="2" markerEnd="url(#arrow)" />
-                                <text x="205" y="222" textAnchor="middle" fontSize="11" fontWeight="800">La banca ti propone il fondo</text>
-
-                                <path d="M70 180 Q 80 80 170 50" fill="none" stroke="#ccc" strokeWidth="2" strokeDasharray="4,4" markerEnd="url(#arrow)" />
-                                <text x="70" y="105" textAnchor="middle" fontSize="11" fontWeight="800">
-                                    <tspan x="70" dy="0">Tu paghi il fondo</tspan>
-                                    <tspan x="70" dy="16" fontSize="9" fontWeight="700">(Trovi il costo nel KID*)</tspan>
-                                </text>
-
-                                {/* Labels/Concepts */}
-                                <text x="200" y="130" textAnchor="middle" fontSize="15" fontWeight="1000">CONFLITTO DI INTERESSI</text>
-
-                                {/* Nodes */}
-                                <g transform="translate(200, 40)">
-                                    <circle cx="0" cy="0" r="30" fill="white" stroke="var(--text-dark)" strokeWidth="2" />
-                                    <text x="0" y="6" textAnchor="middle" fontSize="16" fontWeight="800">👥</text>
-                                    <text x="0" y="48" textAnchor="middle" fontSize="11" fontWeight="900" fill="var(--text-dark)">FONDO</text>
-                                </g>
-                                <g transform="translate(60, 200)">
-                                    <circle cx="0" cy="0" r="30" fill="white" stroke="var(--text-dark)" strokeWidth="2" />
-                                    <text x="0" y="6" textAnchor="middle" fontSize="16" fontWeight="800">👤</text>
-                                    <text x="0" y="48" textAnchor="middle" fontSize="11" fontWeight="900" fill="var(--text-dark)">UTENTE</text>
-                                </g>
-                                <g transform="translate(340, 200)">
-                                    <circle cx="0" cy="0" r="35" fill="var(--text-dark)" />
-                                    <text x="0" y="8" textAnchor="middle" fontSize="20" fontWeight="800">🏛️</text>
-                                    <text x="0" y="55" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--text-dark)">BANCA</text>
-                                </g>
-                            </svg>
+                            <Image
+                                src="/images/conflitto-di-interessi.jpg"
+                                alt="Ciclo del conflitto di interessi"
+                                width={500}
+                                height={400}
+                                style={{ width: '100%', height: 'auto', maxWidth: '500px' }}
+                            />
                         </div>
                     </div>
 
