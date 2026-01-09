@@ -1337,7 +1337,8 @@ export default function DashboardPage() {
                       { label: 'Saldo iniziale (liquidità):', key: 'initial_balance', type: 'currency' },
                       { label: 'Totale movimenti liquidità:', key: 'total_movements_amount', type: 'currency' },
                       { label: 'Saldo finale (liquidità):', key: 'final_balance', type: 'currency' },
-                      { label: 'Movimenti totali:', key: 'total_movements_count', type: 'number' },
+                      // Replaced 'Movimenti totali' with calculated sum verification
+                      { label: 'Sommatoria Movimenti:', key: 'calculated_transactions_sum', type: 'currency', isVerification: true },
                       { label: 'Commissioni Totali:', key: 'total_commissions', type: 'currency', negativeColor: true },
                       { label: 'Proventi titoli:', key: 'total_proventi', type: 'currency', positiveColor: true },
                       { label: 'Movimenti titoli:', key: 'securities_movements_count', type: 'number' },
@@ -1347,33 +1348,61 @@ export default function DashboardPage() {
                       { label: 'Acquisto titoli:', key: 'securities_purchase_amount', type: 'currency', negativeColor: true },
                       { label: 'Vendita titoli:', key: 'securities_sale_amount', type: 'currency', positiveColor: true },
                     ].map((item) => {
-                      const entry = editingValues[item.key]
-                      const isObj = typeof entry === 'object' && entry !== null && 'value' in entry
-                      let val = isObj ? entry.value : entry
-                      const source = isObj ? entry.source : null
+                      // Calculate "Totale movimenti liquidità" (Final - Initial)
+                      let balanceDelta = null;
+                      const getVal = (k: string) => {
+                        const e = editingValues[k];
+                        const v = (typeof e === 'object' && e !== null && 'value' in e) ? e.value : e;
+                        return typeof v === 'number' ? v : null;
+                      };
+                      const ini = getVal('initial_balance');
+                      const fin = getVal('final_balance');
+                      if (ini !== null && fin !== null) balanceDelta = fin - ini;
 
-                      // Special calculation for "Totale movimenti liquidità" -> Final - Initial
+                      let val: any;
+                      let displaySource: string | null = null;
+                      let isVerification = item.isVerification || false;
+                      let verificationStatus = 'neutral'; // neutral, ok, error
+
                       if (item.key === 'total_movements_amount') {
-                        const getVal = (k: string) => {
-                          const e = editingValues[k];
-                          const v = (typeof e === 'object' && e !== null && 'value' in e) ? e.value : e;
-                          return typeof v === 'number' ? v : null;
-                        };
-                        const ini = getVal('initial_balance');
-                        const fin = getVal('final_balance');
-                        if (ini !== null && fin !== null) {
-                          val = fin - ini;
+                        // This is the Reference Value (Final - Initial)
+                        if (balanceDelta !== null) val = balanceDelta;
+                        else val = editingValues[item.key]?.value ?? editingValues[item.key];
+                        displaySource = 'calculated';
+                      } else if (item.key === 'calculated_transactions_sum') {
+                        // This is the Checked Value (Sum of rows)
+                        const txs = inspectorData.transactions || [];
+                        const sumTxs = txs.reduce((acc: number, t: any) => {
+                          // Exclude metadata rows if they exist
+                          const desc = (t.description || '').toLowerCase();
+                          if (desc.includes('saldo iniziale') || desc.includes('saldo finale')) return acc;
+                          return acc + (t.amount || 0);
+                        }, 0);
+                        val = sumTxs;
+                        displaySource = 'calculated';
+
+                        // Compare with Balance Delta
+                        if (balanceDelta !== null) {
+                          const diff = Math.abs(sumTxs - balanceDelta);
+                          if (diff < 0.05) verificationStatus = 'ok';
+                          else verificationStatus = 'error';
                         }
+                      } else {
+                        // Standard fields
+                        const entry = editingValues[item.key]
+                        const isObj = typeof entry === 'object' && entry !== null && 'value' in entry
+                        val = isObj ? entry.value : entry
+                        displaySource = isObj ? entry.source : null
+                        if (!displaySource && ['initial_balance', 'final_balance'].includes(item.key)) displaySource = 'extracted';
+                        if (!displaySource) displaySource = 'calculated';
                       }
 
-                      // Fallback for old records: balances are "extracted", others are "calculated"
-                      const displaySource = source || (['initial_balance', 'final_balance'].includes(item.key) ? 'extracted' : 'calculated')
-
                       const isModified = editingValues[`${item.key}_is_modified`]
-                      const isNotFound = val === 'non trovato' || val === undefined
+                      const isNotFound = (val === 'non trovato' || val === undefined) && !isVerification
 
                       const formulaMap: Record<string, string> = {
                         'total_movements_amount': 'Saldo finale - Saldo iniziale',
+                        'calculated_transactions_sum': 'Somma algebrica di tutte le righe estratte',
                         'total_commissions': 'Somma di tutte le commissioni rilevate',
                         'total_proventi': 'Somma di cedole e dividendi',
                         'securities_net_amount': 'Vendite titoli - Acquisti titoli'
@@ -1381,7 +1410,8 @@ export default function DashboardPage() {
                       const formula = formulaMap[item.key] || 'Valore calcolato automaticamente dal sistema';
 
                       return (
-                        <div key={item.key} className={styles.summaryCard}>
+                        <div key={item.key} className={styles.summaryCard}
+                          style={isVerification ? { border: verificationStatus === 'error' ? '2px solid #ef4444' : (verificationStatus === 'ok' ? '2px solid #22c55e' : undefined) } : undefined}>
                           <div className={styles.labelLine}>
                             <span className={styles.labelText}>
                               {item.label}
@@ -1397,23 +1427,30 @@ export default function DashboardPage() {
                               </span>
                             )}
                           </div>
+
                           <div className={styles.summaryValueContainer}>
                             {isNotFound ? (
                               <span className={styles.missingValue}>non trovato</span>
                             ) : (
-                              <input
-                                type="text"
-                                className={`${styles.summaryInput} ${item.positiveColor && val > 0 ? styles.positiveValue : ''} ${item.negativeColor && val < 0 ? styles.negativeValue : ''}`}
-                                value={`${item.type === 'currency' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`}
-                                onChange={(e) => {
-                                  const raw = e.target.value.replace('+', '').replace(' €', '').replace('.', '').replace(',', '.')
-                                  const num = parseFloat(raw)
-                                  handleUpdateValue(item.key, isNaN(num) ? e.target.value : num)
-                                }}
-                              />
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+                                <input
+                                  type="text"
+                                  readOnly={isVerification} // Verification field is read-only
+                                  className={`${styles.summaryInput} ${item.positiveColor && val > 0 ? styles.positiveValue : ''} ${item.negativeColor && val < 0 ? styles.negativeValue : ''}`}
+                                  value={`${item.type === 'currency' && typeof val === 'number' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`}
+                                  onChange={(e) => {
+                                    if (isVerification) return;
+                                    const raw = e.target.value.replace('+', '').replace(' €', '').replace('.', '').replace(',', '.')
+                                    const num = parseFloat(raw)
+                                    handleUpdateValue(item.key, isNaN(num) ? e.target.value : num)
+                                  }}
+                                />
+                                {isVerification && verificationStatus === 'ok' && <span title="Corrisponde al delta dei saldi" style={{ color: '#22c55e', fontWeight: 'bold' }}>✅ OK</span>}
+                                {isVerification && verificationStatus === 'error' && <span title="Non corrisponde al delta dei saldi!" style={{ color: '#ef4444', fontWeight: 'bold' }}>❌ ERR</span>}
+                              </div>
                             )}
                           </div>
-                          {isModified && (
+                          {isModified && !isVerification && (
                             <button className={styles.restoreBtn} onClick={() => handleRestoreValue(item.key)}>Ripristina</button>
                           )}
                         </div>
