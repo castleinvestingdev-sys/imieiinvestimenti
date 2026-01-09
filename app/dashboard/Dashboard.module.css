@@ -493,9 +493,8 @@
 }
 
 .grid12 {
-  grid-template-columns: repeat(12, minmax(90px, 115px)) !important;
-  min-width: 1500px !important;
-  /* Forced horizontal width */
+  grid-template-columns: repeat(auto-fill, minmax(90px, 115px)) !important;
+  min-width: fit-content !important;
 }
 
 .grid4 {
