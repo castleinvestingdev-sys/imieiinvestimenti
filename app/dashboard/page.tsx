@@ -1072,35 +1072,23 @@ export default function DashboardPage() {
                                     const isPresent = !!file;
                                     const dates = getSlotDates(year, slotIdx, freq);
 
-                                    // Determina se questo slot deve essere visualizzato o se è coperto da uno span
-                                    // Un documento trimestrale in griglia mensile appare al mese 3, 6, 9, 12 e fa span-3 all'indietro
-                                    const isQuarterlyInMonthly = isPresent && freq === 'monthly' &&
+                                    // Calcolo durata per etichetta
+                                    const isQuarterlyDoc = isPresent && file.period_start && file.period_end &&
                                       ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
-
-                                    // Se siamo in griglia mensile e questo mese è parte di un trimestre già visualizzato, lo saltiamo
-                                    if (freq === 'monthly' && !isPresent) {
-                                      const coveringQuarter = dossier.analyses.find(a => {
-                                        if (!a.period_end || !a.period_start) return false;
-                                        const end = new Date(a.period_end);
-                                        const start = new Date(a.period_start);
-                                        const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-                                        if (diff < 45) return false;
-                                        if (end.getFullYear() !== year) return false;
-                                        const endMonth = end.getMonth() + 1;
-                                        return slotIdx > endMonth - 3 && slotIdx < endMonth;
-                                      });
-                                      if (coveringQuarter) return null;
-                                    }
 
                                     return (
                                       <div key={slotIdx}
-                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent} ${isQuarterlyInMonthly ? styles.span3 : ''} `}
-                                        style={isQuarterlyInMonthly ? { gridColumnStart: slotIdx - 2, gridColumnEnd: slotIdx + 1 } : {}}
+                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? file.id : undefined}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
 
                                         <div className={styles.tileDates}>
+                                          {isPresent && (
+                                            <div className={styles.freqBadge}>
+                                              {isQuarterlyDoc ? 'TRIMESTRALE' : 'MENSILE'}
+                                            </div>
+                                          )}
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
                                           {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
                                         </div>
@@ -1175,33 +1163,23 @@ export default function DashboardPage() {
                                     const isPresent = !!file;
                                     const dates = getSlotDates(year, slotIdx, freq);
 
-                                    // Determina se questo slot deve essere visualizzato o se è coperto da uno span
-                                    const isQuarterlyInMonthly = isPresent && freq === 'monthly' &&
+                                    // Calcolo durata per etichetta
+                                    const isQuarterlyDoc = isPresent && file.period_start && file.period_end &&
                                       ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
-
-                                    if (freq === 'monthly' && !isPresent) {
-                                      const coveringQuarter = liquidity.analyses.find(a => {
-                                        if (!a.period_end || !a.period_start) return false;
-                                        const end = new Date(a.period_end);
-                                        const start = new Date(a.period_start);
-                                        const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-                                        if (diff < 45) return false;
-                                        if (end.getFullYear() !== year) return false;
-                                        const endMonth = end.getMonth() + 1;
-                                        return slotIdx > endMonth - 3 && slotIdx < endMonth;
-                                      });
-                                      if (coveringQuarter) return null;
-                                    }
 
                                     return (
                                       <div key={slotIdx}
-                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent} ${isQuarterlyInMonthly ? styles.span3 : ''} `}
-                                        style={isQuarterlyInMonthly ? { gridColumnStart: slotIdx - 2, gridColumnEnd: slotIdx + 1 } : {}}
+                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? file.id : undefined}
                                         onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
 
                                         <div className={styles.tileDates}>
+                                          {isPresent && (
+                                            <div className={styles.freqBadge}>
+                                              {isQuarterlyDoc ? 'TRIMESTRALE' : 'MENSILE'}
+                                            </div>
+                                          )}
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{dates.label}</div>
                                           {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
                                         </div>
