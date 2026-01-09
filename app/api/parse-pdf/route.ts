@@ -230,7 +230,6 @@ Restituisci SOLO il JSON.`
         const analysisData = {
             document_id: crypto.randomUUID(),
             user_id: userId || null,
-            guest_email: guestEmail || null,
             bank_name: parsed.info?.bankName || 'Banca N/D',
             period_start: parseDate(parsed.info?.period_start),
             period_end: parseDate(parsed.info?.period_end),
