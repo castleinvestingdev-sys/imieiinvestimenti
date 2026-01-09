@@ -1356,6 +1356,14 @@ export default function DashboardPage() {
                       const isModified = editingValues[`${item.key}_is_modified`]
                       const isNotFound = val === 'non trovato' || val === undefined
 
+                      const formulaMap: Record<string, string> = {
+                        'total_movements_amount': 'Saldo finale - Saldo iniziale',
+                        'total_commissions': 'Somma di tutte le commissioni rilevate',
+                        'total_proventi': 'Somma di cedole e dividendi',
+                        'securities_net_amount': 'Vendite titoli - Acquisti titoli'
+                      };
+                      const formula = formulaMap[item.key] || 'Valore calcolato automaticamente dal sistema';
+
                       return (
                         <div key={item.key} className={styles.summaryCard}>
                           <div className={styles.labelLine}>
@@ -1364,7 +1372,11 @@ export default function DashboardPage() {
                               {isModified && <span className={styles.modifiedBadge}>(Modificato)</span>}
                             </span>
                             {displaySource && (
-                              <span className={`${styles.statusBadge} ${displaySource === 'extracted' ? styles.statusExtracted : styles.statusCalculated}`}>
+                              <span
+                                className={`${styles.statusBadge} ${displaySource === 'extracted' ? styles.statusExtracted : styles.statusCalculated}`}
+                                title={displaySource === 'calculated' ? formula : 'Dato estratto direttamente dal documento'}
+                                style={{ cursor: 'help' }}
+                              >
                                 {displaySource === 'extracted' ? 'Estratto' : 'Calcolato'}
                               </span>
                             )}
