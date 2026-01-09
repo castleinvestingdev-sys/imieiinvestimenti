@@ -413,19 +413,24 @@
 }
 
 /* Timeline Components */
+/* Timeline Reset & Strict Layout */
 .timelineNavigation {
   position: relative;
   margin-top: 1rem;
+  width: 100%;
 }
 
 .timelineGrid {
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
   gap: 2rem;
   overflow-x: auto;
   padding: 1.5rem 0.5rem 2.5rem;
   scroll-behavior: smooth;
   scrollbar-width: auto;
   -webkit-overflow-scrolling: touch;
+  width: 100%;
 }
 
 .timelineGrid::-webkit-scrollbar {
@@ -448,11 +453,14 @@
 }
 
 .yearBlock {
-  display: flex;
-  flex-direction: column;
+  display: flex !important;
+  flex-direction: column !important;
   gap: 1.5rem;
-  flex: 0 0 auto;
-  width: max-content;
+  flex: 0 0 auto !important;
+  /* STRICT: Never shrink, never grow */
+  width: max-content !important;
+  /* STRICT: Always take content size */
+  min-width: min-content;
 }
 
 .yearLabelPremium {
@@ -463,6 +471,7 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  white-space: nowrap;
 }
 
 .yearLabelPremium::after {
@@ -474,23 +483,25 @@
 }
 
 .slotsRow {
-  display: inline-grid;
-  grid-auto-flow: column;
+  display: inline-grid !important;
+  grid-auto-flow: column !important;
+  grid-template-rows: 1fr !important;
   gap: 1.25rem;
-  width: max-content;
-  grid-template-rows: 1fr;
+  width: max-content !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .grid12 {
-  grid-template-columns: repeat(12, minmax(90px, 115px));
-  min-width: 1500px;
-  /* Force horizontal scroll on Safari */
+  grid-template-columns: repeat(12, minmax(90px, 115px)) !important;
+  min-width: 1500px !important;
+  /* Forced horizontal width */
 }
 
 .grid4 {
-  grid-template-columns: repeat(4, minmax(90px, 115px));
-  min-width: 500px;
-  /* Force horizontal scroll on Safari */
+  grid-template-columns: repeat(4, minmax(90px, 115px)) !important;
+  min-width: 500px !important;
+  /* Forced horizontal width */
 }
 
 .span3 {
