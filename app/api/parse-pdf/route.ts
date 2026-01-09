@@ -51,12 +51,16 @@ Il tuo compito è analizzare il documento fornito (PDF) ed estrarre i dati in un
 
 2. **DETERMINAZIONE SEGNO TRAMITE KEYWORDS (FALLBACK)**:
    Se il layout è ambiguo, usa queste parole chiave nella descrizione per determinare il segno:
-   - **NEGATIVO (-)**: "SOTTOSC" (Sottoscrizione Fondi/PAC), "ADDEBITO", "SDD", "BOLLO", "COMMISSIONI", "SPESE", "PREL" (Prelievo), "PAGAMENTO", "BONIFICO A", "V/ORDINE".
+   - **NEGATIVO (-)**: "SOTTOSC" (Sottoscrizione Fondi/PAC), "ADDEBITO", "SDD", "BOLLO", "COMMISSIONI", "SPESE", "PREL" (Prelievo), "PAGAMENTO", "BONIFICO A", "V/ORDINE", "PAGAM", "EMESSO".
    - **POSITIVO (+)**: "PENSIONE", "STIPENDIO", "EMOLUMENTI", "DIVIDENDO", "CEDOLA", "ACCREDITO", "BONIFICO DA", "VERSAMENTO", "RIMBORSO".
 
-3. **DESCRIZIONI MULTI-RIGA**:
-   - Concatena le righe successive che non hanno data/importo alla descrizione della transazione precedente.
-   - Esempio: "SDD A: TELECOM..." + "ADDEBITO SDD..." deve diventare un'unica descrizione.
+   **REGOLA DI DEFAULT (CRIRICO)**:
+   - Se una transazione è ambigua e NON contiene parole chiave esplicitamente POSITIVE, assumi che sia un'**USCITA (NEGATIVO)**. È statisticamente più probabile nei conti personali.
+
+3. **DESCRIZIONI MULTI-RIGA (FONDAMENTALE)**:
+   - Molte transazioni hanno descrizioni che continuano su più righe (righe successive prive di data e importo).
+   - **DEVI ASSOLUTAMENTE LEGGERE E CONCATENARE** le righe successive (fino alla prossima data) per trovare keywords come "V/ORDINE" o "ADDEBITO".
+   - Esempio: "15.11 ... 332,00 FRIGERI..." seguito da "V/ORDINE E CONTO" -> "V/ORDINE" indica NEGATIVO.
 
 4. **VERIFICA MATEMATICA (OBBLIGATORIA)**:
    - Estrai \`saldo_iniziale\` e \`saldo_finale\` dal documento.
