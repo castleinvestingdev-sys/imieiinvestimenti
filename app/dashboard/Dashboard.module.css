@@ -481,10 +481,14 @@
 
 .grid12 {
   grid-template-columns: repeat(12, minmax(90px, 115px));
+  min-width: 1500px;
+  /* Force horizontal scroll on Safari */
 }
 
 .grid4 {
   grid-template-columns: repeat(4, minmax(90px, 115px));
+  min-width: 500px;
+  /* Force horizontal scroll on Safari */
 }
 
 .span3 {
