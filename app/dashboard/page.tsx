@@ -1386,7 +1386,7 @@ export default function DashboardPage() {
                         // Compare with Balance Delta
                         if (balanceDelta !== null) {
                           const diff = Math.abs(sumTxs - balanceDelta);
-                          if (diff < 0.05) verificationStatus = 'ok';
+                          if (diff < 0.01) verificationStatus = 'ok';
                           else verificationStatus = 'error';
                         }
                       } else {
