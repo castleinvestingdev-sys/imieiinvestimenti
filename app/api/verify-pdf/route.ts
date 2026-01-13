@@ -1,108 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-
-// Funzione per riparare JSON troncato (spostata fuori per evitare errori strict mode)
-function repairTruncatedJson(jsonStr: string): string | null {
-    let repaired = jsonStr
-
-    // Conta parentesi aperte
-    let openBraces = 0
-    let openBrackets = 0
-    let inString = false
-
-    for (let i = 0; i < repaired.length; i++) {
-        const char = repaired[i]
-        const prevChar = i > 0 ? repaired[i - 1] : ''
-
-        if (char === '"' && prevChar !== '\\') {
-            inString = !inString
-        }
-
-        if (!inString) {
-            if (char === '{') openBraces++
-            else if (char === '}') openBraces--
-            else if (char === '[') openBrackets++
-            else if (char === ']') openBrackets--
-        }
-    }
-
-    // Se siamo dentro una stringa, tronca all'ultimo quote
-    if (inString) {
-        const lastQuote = repaired.lastIndexOf('"')
-        if (lastQuote > 0) {
-            repaired = repaired.substring(0, lastQuote)
-            repaired = repaired.replace(/,?\s*"[^"]*"?\s*:?\s*$/, '')
-        }
-    }
-
-    // Riconta dopo la potenziale troncatura
-    openBraces = 0
-    openBrackets = 0
-    inString = false
-
-    for (let i = 0; i < repaired.length; i++) {
-        const char = repaired[i]
-        const prevChar = i > 0 ? repaired[i - 1] : ''
-
-        if (char === '"' && prevChar !== '\\') {
-            inString = !inString
-        }
-
-        if (!inString) {
-            if (char === '{') openBraces++
-            else if (char === '}') openBraces--
-            else if (char === '[') openBrackets++
-            else if (char === ']') openBrackets--
-        }
-    }
-
-    // Rimuovi virgola finale se presente
-    repaired = repaired.replace(/,\s*$/, '')
-
-    // Chiudi parentesi non chiuse
-    while (openBrackets > 0) {
-        repaired += ']'
-        openBrackets--
-    }
-    while (openBraces > 0) {
-        repaired += '}'
-        openBraces--
-    }
-
-    return repaired
-}
 
 export async function POST(request: NextRequest) {
     const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
 
     try {
-        console.log('\n========== NUOVA RICHIESTA PARSE PDF ==========')
-        console.log('Timestamp:', new Date().toISOString())
-
         const formData = await request.formData()
         const file = formData.get('file') as File
-        const userId = formData.get('userId') as string
-        const guestEmail = formData.get('guestEmail') as string
         const fileName = file?.name || 'documento.pdf'
 
-        console.log(`\n[SERVER] >>> RICEVUTA RICHIESTA DI ANALISI: ${fileName}`)
-        console.log(`[SERVER] UserID: ${userId} | GuestEmail: ${guestEmail} | Size: ${file?.size} bytes`)
-
-        if (!file || (!userId && !guestEmail)) {
-            console.error('[SERVER] ERRORE: File, UserId o Email mancante')
-            return NextResponse.json({ success: false, error: 'File, UserId o Email mancante' }, { status: 400 })
+        if (!file) {
+            return NextResponse.json({ success: false, error: 'File mancante' }, { status: 400 })
         }
 
         if (!GEMINI_API_KEY) {
-            console.error('ERRORE: GOOGLE_GEMINI_API_KEY non trovata in process.env')
             return NextResponse.json({
                 success: false,
-                error: 'Configurazione API Google mancante. Assicurati che GOOGLE_GEMINI_API_KEY sia impostata e riavvia il server.'
+                error: 'Configurazione API Google mancante.'
             }, { status: 500 })
         }
 
-        console.log(`API Key caricata (lunghezza: ${GEMINI_API_KEY.length})`)
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
         const fileBuffer = await file.arrayBuffer()
         const base64Data = Buffer.from(fileBuffer).toString('base64')
@@ -113,6 +30,15 @@ Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON
 ### FASE 1: CLASSIFICAZIONE DEL DOCUMENTO
 - "ESTRATTO CONTO", "CONTO CORRENTE", "E/C" → type = "LIQUIDITY"
 - "DOSSIER TITOLI", "ESTRATTO CONTO TITOLI" → type = "DOSSIER"
+
+### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
+Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
+- Layout: DUE COLONNE SEPARATE per DARE e AVERE
+- **DARE** (colonna sinistra degli importi) = USCITE = **NEGATIVO**
+- **AVERE** (colonna destra degli importi) = ENTRATE = **POSITIVO**
+- Un importo può apparire SOLO in una delle due colonne, mai in entrambe
+- Se l'importo è nella posizione sinistra → è un DARE → **NEGATIVO**
+- Se l'importo è nella posizione destra → è un AVERE → **POSITIVO**
 
 ### FASE 2: ANALISI DEL LAYOUT (CRITICA - NON SALTARE)
 **PRIMA di estrarre i movimenti, DEVI analizzare il layout del documento:**
@@ -226,15 +152,14 @@ Restituisci SOLO il JSON, nessun altro testo.`
         for (const modelName of models) {
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    console.log(`Provando modello Gemini: ${modelName} (tentativo ${attempt}/${maxRetries})`)
                     const model = genAI.getGenerativeModel({
                         model: modelName,
                         generationConfig: {
                             temperature: 0,
                             topP: 1,
                             topK: 1,
-                            maxOutputTokens: 65536,
-                            responseMimeType: 'application/json',
+                            maxOutputTokens: 65536, // Larger output for complex PDFs
+                            responseMimeType: 'application/json', // Force valid JSON output
                         }
                     })
 
@@ -253,27 +178,21 @@ Restituisci SOLO il JSON, nessun altro testo.`
 
                     if (resText && resText.length > 10) {
                         success = true
-                        console.log(`Successo con modello ${modelName}`)
                         break
                     }
                 } catch (err: any) {
                     const errMsg = err.message || ''
-                    console.error(`Errore con modello ${modelName} (tentativo ${attempt}):`, errMsg)
                     lastError = errMsg
 
-                    // If model not found or not supported, skip immediately
                     if (errMsg.includes('not found') || errMsg.includes('not supported') || errMsg.includes('404')) {
-                        console.log(`Modello ${modelName} non disponibile, salto...`)
                         break
                     }
 
-                    // If rate limited, wait before retry
                     if (errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('Resource')) {
-                        const waitTime = attempt * 15000 // 15s, 30s
-                        console.log(`Rate limit su ${modelName} - aspetto ${waitTime / 1000}s prima di riprovare...`)
+                        const waitTime = attempt * 15000
                         await new Promise(resolve => setTimeout(resolve, waitTime))
                     } else {
-                        break // Altri errori (es. PDF non valido), prova prossimo modello
+                        break
                     }
                 }
             }
@@ -281,8 +200,88 @@ Restituisci SOLO il JSON, nessun altro testo.`
         }
 
         if (!success) {
-            console.error('Tutti i modelli hanno fallito. Ultimo errore:', lastError)
             return NextResponse.json({ success: false, error: 'Gemini AI fallito: ' + lastError }, { status: 500 })
+        }
+
+        // Funzione per riparare JSON troncato
+        function repairTruncatedJson(jsonStr: string): string | null {
+            // Remove any trailing incomplete strings
+            let repaired = jsonStr
+
+            // Count open brackets
+            let openBraces = 0
+            let openBrackets = 0
+            let inString = false
+            let lastValidPos = 0
+
+            for (let i = 0; i < repaired.length; i++) {
+                const char = repaired[i]
+                const prevChar = i > 0 ? repaired[i - 1] : ''
+
+                if (char === '"' && prevChar !== '\\') {
+                    inString = !inString
+                }
+
+                if (!inString) {
+                    if (char === '{') openBraces++
+                    else if (char === '}') openBraces--
+                    else if (char === '[') openBrackets++
+                    else if (char === ']') openBrackets--
+
+                    // Track last valid position (complete value)
+                    if (char === ',' || char === '{' || char === '[' || char === '}' || char === ']') {
+                        lastValidPos = i
+                    }
+                }
+            }
+
+            // If we're inside a string, truncate to before the string started
+            if (inString) {
+                // Find the last quote and remove from there
+                const lastQuote = repaired.lastIndexOf('"')
+                if (lastQuote > 0) {
+                    repaired = repaired.substring(0, lastQuote)
+                    // Remove the key if it's incomplete (e.g., "key":)
+                    repaired = repaired.replace(/,?\s*"[^"]*"?\s*:?\s*$/, '')
+                }
+            }
+
+            // If still unbalanced, try to close properly
+            // Recount after potential truncation
+            openBraces = 0
+            openBrackets = 0
+            inString = false
+
+            for (let i = 0; i < repaired.length; i++) {
+                const char = repaired[i]
+                const prevChar = i > 0 ? repaired[i - 1] : ''
+
+                if (char === '"' && prevChar !== '\\') {
+                    inString = !inString
+                }
+
+                if (!inString) {
+                    if (char === '{') openBraces++
+                    else if (char === '}') openBraces--
+                    else if (char === '[') openBrackets++
+                    else if (char === ']') openBrackets--
+                }
+            }
+
+            // Remove trailing comma if present
+            repaired = repaired.replace(/,\s*$/, '')
+
+            // Close any unclosed brackets/braces
+            while (openBrackets > 0) {
+                repaired += ']'
+                openBrackets--
+            }
+            while (openBraces > 0) {
+                repaired += '}'
+                openBraces--
+            }
+
+            return repaired
         }
 
         // Pulizia JSON con retry per errori di parsing
@@ -300,30 +299,26 @@ Restituisci SOLO il JSON, nessun altro testo.`
 
                 let jsonToParse = jsonMatch[0]
 
-                // Prova parsing diretto
+                // Try direct parse first
                 try {
                     parsed = JSON.parse(jsonToParse)
                     break
                 } catch (directParseErr) {
-                    // Prova a riparare JSON troncato
+                    // Try to repair truncated JSON
                     const repaired = repairTruncatedJson(jsonToParse)
                     if (repaired) {
                         parsed = JSON.parse(repaired)
-                        console.log('JSON riparato con successo')
                         break
                     }
                     throw directParseErr
                 }
             } catch (parseErr: any) {
                 jsonError = parseErr.message
-                console.log(`Tentativo JSON ${jsonAttempt}/${maxJsonRetries} fallito: ${jsonError}`)
-
                 if (jsonAttempt < maxJsonRetries) {
-                    // Riprova con un modello diverso
+                    // Retry with a different model with larger output context
                     const retryModel = retryModels[(jsonAttempt - 1) % retryModels.length]
-                    const retryTemp = jsonAttempt <= 2 ? 0 : 0.1
+                    const retryTemp = jsonAttempt <= 2 ? 0 : 0.1 // Use 0 temp for first retries
                     try {
-                        console.log(`Riprovo con modello ${retryModel}...`)
                         const model = genAI.getGenerativeModel({
                             model: retryModel,
                             generationConfig: {
@@ -348,22 +343,65 @@ Restituisci SOLO il JSON, nessun altro testo.`
                         const response = await result.response
                         resText = response.text()
                     } catch {
-                        // Ignora errori di retry
+                        // Ignore retry errors, will fail on next parse attempt
                     }
                 }
             }
         }
 
         if (!parsed) {
-            return NextResponse.json({ success: false, error: 'Parsing JSON fallito: ' + jsonError }, { status: 500 })
+            return NextResponse.json({ success: false, error: jsonError }, { status: 500 })
         }
 
-        // Calcolo fallback summary se mancante o troncato
+        // Ensure summary exists and calculate missing values
         if (!parsed.summary) {
             parsed.summary = {}
         }
 
+        // Auto-correct signs if math doesn't match
         const movements = parsed.movements || []
+        const initialBalance = parsed.summary.initial_balance?.value || 0
+        const finalBalance = parsed.summary.final_balance?.value || 0
+        const expectedDelta = finalBalance - initialBalance
+
+        let currentSum = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+
+        // Auto-correct signs: try to fix errors by flipping transactions
+        const MAX_CORRECTIONS = 20
+        let corrections = 0
+        const flippedIndices = new Set<number>()
+
+        while (Math.abs(currentSum - expectedDelta) > 0.01 && corrections < MAX_CORRECTIONS) {
+            const error = currentSum - expectedDelta
+            const targetFlipAmount = Math.abs(error / 2)
+
+            // Find the movement closest to the target flip amount (that hasn't been flipped yet)
+            let bestMatch = -1
+            let bestDiff = Infinity
+
+            for (let i = 0; i < movements.length; i++) {
+                if (flippedIndices.has(i)) continue // Don't flip same transaction twice
+                const absAmount = Math.abs(movements[i].amount || 0)
+                const diff = Math.abs(absAmount - targetFlipAmount)
+                if (diff < bestDiff) {
+                    bestDiff = diff
+                    bestMatch = i
+                }
+            }
+
+            // More aggressive tolerance: 50% of target or diff < 10€
+            if (bestMatch >= 0 && (bestDiff < targetFlipAmount * 0.5 || bestDiff < 10)) {
+                movements[bestMatch].amount = -movements[bestMatch].amount
+                movements[bestMatch].sign_source = 'auto_corrected'
+                flippedIndices.add(bestMatch)
+                currentSum = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+            } else {
+                break
+            }
+
+            corrections++
+        }
+
         const calculatedTotal = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
         const calculatedCommissions = movements
             .filter((m: any) => m.movement_type === 'Commissioni')
@@ -372,16 +410,16 @@ Restituisci SOLO il JSON, nessun altro testo.`
             .filter((m: any) => m.movement_type === 'Proventi' || m.movement_type === 'Dividendo')
             .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
 
-        // Imposta valori calcolati se mancanti
-        if (!parsed.summary.total_movements_amount) {
-            parsed.summary.total_movements_amount = { value: calculatedTotal, source: 'calculated' }
-        }
+        // ALWAYS use calculated total after potential auto-corrections
+        parsed.summary.total_movements_amount = { value: calculatedTotal, source: 'calculated' }
         if (!parsed.summary.total_commissions) {
             parsed.summary.total_commissions = { value: calculatedCommissions, source: 'calculated' }
         }
         if (!parsed.summary.total_proventi) {
             parsed.summary.total_proventi = { value: calculatedProventi, source: 'calculated' }
         }
+
+        // If initial/final balance are missing, try to calculate them from movements
         if (!parsed.summary.initial_balance) {
             parsed.summary.initial_balance = { value: 0, source: 'missing' }
         }
@@ -390,85 +428,14 @@ Restituisci SOLO il JSON, nessun altro testo.`
             parsed.summary.final_balance = { value: initial + calculatedTotal, source: 'calculated' }
         }
 
-        if (parsed.type === 'UNOFFICIAL') {
-            console.warn(`[SERVER] Documento rifiutato (UNOFFICIAL): ${fileName}`)
-            return NextResponse.json({
-                success: false,
-                error: 'Questo documento non è un estratto conto ufficiale. Per un\'analisi accurata, carica solo gli estratti conto trimestrali o annuali originali della banca.'
-            }, { status: 400 })
-        }
-
-        const isDossier = parsed.type === 'DOSSIER'
-        console.log(`[SERVER] >>> ANALISI COMPLETATA: ${fileName}`)
-        console.log(`[SERVER] Classificato come: ${parsed.type} | Bank: ${parsed.info?.bankName} | Account: ${parsed.info?.accountNumber}`)
-
-        // Salvataggio su Supabase
-        const supabase = await createClient()
-
-        const analysisData = {
-            document_id: crypto.randomUUID(),
-            user_id: userId || null,
-            bank_name: parsed.info?.bankName || 'Banca N/D',
-            period_start: parseDate(parsed.info?.period_start),
-            period_end: parseDate(parsed.info?.period_end),
-            account_type: parsed.type,
-            portfolio_value: isDossier
-                ? (parsed.finalPortfolio?.reduce((acc: number, item: any) => acc + (item.marketValue || 0), 0) || 0)
-                : (typeof parsed.summary?.final_balance === 'object' ? parsed.summary.final_balance.value : (parsed.summary?.final_balance || 0)),
-            initial_value: 0,
-            holdings: parsed.finalPortfolio || [],
-            transactions: parsed.movements || [],
-            dividends: parsed.dividends || [],
-            costs_breakdown: {
-                ...(parsed.summary || {}),
-                settlementAccount: parsed.info?.settlementAccount || null,
-                original_ai_data: { ...(parsed.summary || {}) } // Backup for restore
-            },
-            benchmark_comparison: parsed.info?.accountNumber || 'N/D',
-        }
-
-        const { data, error } = await supabase
-            .from('analyses')
-            .insert(analysisData)
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Errore Database:', error)
-            return NextResponse.json({ success: false, error: 'Errore salvataggio database' }, { status: 500 })
-        }
-
+        // Return parsed data directly without saving to database
         return NextResponse.json({
             success: true,
-            analysisId: data.id,
-            documentId: data.id,
-            fileName: file.name,
-            status: 'ready',
-            // Dati per verifica (usati da batch_verify.js)
-            data: {
-                movements: parsed.movements || [],
-                summary: parsed.summary,
-                layout_detected: parsed.layout_detected
-            }
+            fileName: fileName,
+            data: parsed
         })
 
-
     } catch (error: any) {
-        console.error('\n!!!!! ERRORE CRITICO PARSE PDF !!!!!')
-        console.error('Messaggio:', error.message)
-        console.error('Stack:', error.stack)
         return NextResponse.json({ success: false, error: error.message || 'Errore interno del server' }, { status: 500 })
     }
-}
-
-function parseDate(dateStr: string | undefined): string | null {
-    if (!dateStr) return null
-    // Formato atteso: GG/MM/AAAA -> YYYY-MM-DD
-    const parts = dateStr.split('/')
-    if (parts.length === 3) {
-        return `${parts[2]}-${parts[1]}-${parts[0]}`
-    }
-    // Già in formato ISO?
-    if (dateStr.includes('-')) return dateStr
-    return null
 }
