@@ -89,6 +89,7 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - **Costo emissione comunicazione di legge** (tipicamente 0.42€) - NON SALTARE
 - Commissioni prelievo Bancocard
 - Commissioni bonifico
+- **Competenze Fruttifere / Competenze di chiusura** (→ "Commissioni" con importo POSITIVO)
 - Rimborso canone (positivo → "Commissioni", solo importi piccoli < 20€)
 - **Rimborso spese e commissioni** (positivo → "Commissioni", solo importi piccoli < 20€)
 
@@ -107,14 +108,13 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 **"Proventi"** - Cedole, dividendi
 **"Bonifico"** - Bonifici, stipendio, versamenti
 **"Altro"** - Tutto il resto:
-- **Competenze Fruttifere / Competenze di chiusura** (interessi creditori netti) → "Altro"
 - **Premio polizza** / Premio assicurazione → "Altro"
 - Prelievo contante (se non ha commissione separata)
 - Rimborsi di importo elevato (> 20€, es. "Rimborso spese e commissioni su errata applicazione") → "Altro"
 
 **ATTENZIONE**:
 - TUTTE le imposte di bollo (sia E/C che Prodotti Finanziari) → **Spesa**, NON Commissioni
-- **Competenze Fruttifere/di chiusura** → **Altro**, NON Commissioni (sono interessi creditori, non costi bancari)
+- Competenze Fruttifere/di chiusura → **Commissioni** (importo positivo, compensano le spese bancarie)
 - **Premio polizza** → **Altro**, MAI Commissioni
 - **Rimborsi > 20€** → **Altro** (sono rettifiche, non costi bancari regolari)
 
@@ -127,7 +127,7 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - Se il PDF ha più pagine di movimenti, estrai i movimenti da TUTTE le pagine.
 - NON estrarre lo stesso movimento con segni diversi.
 - Se la somma non torna, probabilmente stai sbagliando i segni, NON duplicando.
-- SEGNI: Commissioni, spese, canoni, imposte sono ADDEBITI → importo NEGATIVO. Rimborsi piccoli (< 20€) → importo POSITIVO.
+- SEGNI: Commissioni, spese, canoni, imposte sono ADDEBITI → importo NEGATIVO. Competenze Fruttifere e rimborsi → importo POSITIVO.
 
 1. **DESCRIZIONI MULTI-RIGA**:
    - Molte transazioni hanno descrizioni su più righe
