@@ -92,7 +92,6 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - **Competenze Fruttifere / Competenze di chiusura** (→ "Commissioni" con importo POSITIVO)
 - Rimborso canone (positivo → "Commissioni", solo importi piccoli < 20€)
 - **Rimborso spese e commissioni** (positivo → "Commissioni", solo importi piccoli < 20€)
-
 **IMPORTANTE**: Movimenti piccoli (0.42€, 0.70€, 1.00€, 1.50€) sono CRITICI per il calcolo delle commissioni totali. NON saltarli MAI.
 **VERIFICA**: Per un trimestre, aspettati almeno 3 canoni mensili (6€x3) e possibilmente 3 canoni carta debito (1.50€x3). Se ne trovi meno di 3, cerca meglio nel PDF.
 
@@ -730,6 +729,20 @@ Restituisci SOLO il JSON, nessun altro testo.`
                 ))
                 .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
             calculatedCommissions += bolloEC
+        }
+
+        // Per periodi Q4 (dicembre): escludi solo "Competenze di chiusura" (interessi creditori di fine anno)
+        // L'Excel NON le sottrae dal totale commissioni nei periodi di dicembre
+        // NOTA: "Competenze Fruttifere" restano incluse (l'Excel le include come offset positivo)
+        if (periodMonth === 12) {
+            const chiusuraAmount = movements
+                .filter((m: any) => m.movement_type === 'Commissioni' &&
+                    (m.amount || 0) > 0 &&
+                    m.description?.toLowerCase().includes('chiusura'))
+                .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+            if (chiusuraAmount > 0) {
+                calculatedCommissions += chiusuraAmount
+            }
         }
 
         const calculatedProventi = movements
