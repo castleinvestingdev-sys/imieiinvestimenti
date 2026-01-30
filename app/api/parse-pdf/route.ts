@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import * as https from 'https'
+
+// Allow up to 5 minutes for Gemini PDF processing
+export const maxDuration = 300
 
 // Funzione per riparare JSON troncato (spostata fuori per evitare errori strict mode)
 function repairTruncatedJson(jsonStr: string): string | null {
@@ -73,6 +76,58 @@ function repairTruncatedJson(jsonStr: string): string | null {
     return repaired
 }
 
+function callGeminiDirect(apiKey: string, model: string, prompt: string, pdfBase64: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const requestBody = JSON.stringify({
+            contents: [{
+                parts: [
+                    { text: prompt },
+                    { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
+                ]
+            }],
+            generationConfig: {
+                temperature: 0,
+                topP: 1,
+                topK: 1,
+                maxOutputTokens: 65536
+            }
+        })
+
+        const options = {
+            hostname: 'generativelanguage.googleapis.com',
+            port: 443,
+            path: `/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody)
+            },
+        }
+
+        const req = https.request(options, (res) => {
+            let data = ''
+            res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    try {
+                        const json = JSON.parse(data)
+                        const text = json.candidates?.[0]?.content?.parts?.[0]?.text || ''
+                        resolve(text)
+                    } catch (e: any) {
+                        reject(new Error(`JSON parse error: ${e.message}`))
+                    }
+                } else {
+                    reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 500)}`))
+                }
+            })
+        })
+
+        req.on('error', (e: Error) => reject(e))
+        req.write(requestBody)
+        req.end()
+    })
+}
+
 export async function POST(request: NextRequest) {
     const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
 
@@ -103,7 +158,6 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`API Key caricata (lunghezza: ${GEMINI_API_KEY.length})`)
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
         const fileBuffer = await file.arrayBuffer()
         const base64Data = Buffer.from(fileBuffer).toString('base64')
 
@@ -113,6 +167,15 @@ Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON
 ### FASE 1: CLASSIFICAZIONE DEL DOCUMENTO
 - "ESTRATTO CONTO", "CONTO CORRENTE", "E/C" → type = "LIQUIDITY"
 - "DOSSIER TITOLI", "ESTRATTO CONTO TITOLI" → type = "DOSSIER"
+
+### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
+Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
+- Layout: DUE COLONNE SEPARATE per DARE e AVERE
+- **DARE** (colonna sinistra degli importi) = USCITE = **NEGATIVO**
+- **AVERE** (colonna destra degli importi) = ENTRATE = **POSITIVO**
+- Un importo può apparire SOLO in una delle due colonne, mai in entrambe
+- Se l'importo è nella posizione sinistra → è un DARE → **NEGATIVO**
+- Se l'importo è nella posizione destra → è un AVERE → **POSITIVO**
 
 ### FASE 2: ANALISI DEL LAYOUT (CRITICA - NON SALTARE)
 **PRIMA di estrarre i movimenti, DEVI analizzare il layout del documento:**
@@ -150,7 +213,56 @@ Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON
 
 **MAI ASSUMERE UN SEGNO DI DEFAULT** - Usa sempre una delle 4 priorità sopra.
 
+### FASE 3.5: CLASSIFICAZIONE movement_type (REGOLE DETTAGLIATE)
+
+**"Commissioni"** - Spese bancarie e costi del conto:
+- Commissioni di gestione e amministrazione (tipicamente 45€/trimestre)
+- Spese rendiconto, spese E/C, spese emissione E/C (tipicamente 0.70€)
+- **Canone mensile / canone fisso mensile** (tipicamente 6€/mese) - CE NE SONO 3 PER TRIMESTRE (uno per mese!)
+- **Canone carta di debito** (tipicamente 1.50€/mese) - CE NE SONO 3 PER TRIMESTRE (uno per mese!)
+- **Invio rendicontazione/contabili titoli** (tipicamente 0.70€) - NON SALTARE, spesso su pagine successive
+- **Costo emissione comunicazione di legge** (tipicamente 0.42€) - NON SALTARE
+- Commissioni prelievo Bancocard
+- Commissioni bonifico
+- Rimborso canone (positivo → "Commissioni", solo importi piccoli < 20€)
+- **Rimborso spese e commissioni** (positivo → "Commissioni", solo importi piccoli < 20€)
+
+**IMPORTANTE**: Movimenti piccoli (0.42€, 0.70€, 1.00€, 1.50€) sono CRITICI per il calcolo delle commissioni totali. NON saltarli MAI.
+**VERIFICA**: Per un trimestre, aspettati almeno 3 canoni mensili (6€x3) e possibilmente 3 canoni carta debito (1.50€x3). Se ne trovi meno di 3, cerca meglio nel PDF.
+
+**"Spesa"** - Tasse e imposte:
+- **Imposta di bollo E/C e Rendiconto** (tipicamente 8.50€) - ESTRAI SEMPRE, NON SALTARE
+- **Imposta di bollo su Prodotti Finanziari** - ESTRAI SEMPRE, NON SALTARE
+- Ritenuta fiscale
+- F24, imposte varie
+- Imposta sulle transazioni finanziarie (Tobin Tax)
+
+**"Acquisto"** - Investimenti: sottoscrizione fondi, PAC, acquisto titoli/ETF
+**"Vendita"** - Disinvestimenti: riscatto fondi, vendita titoli
+**"Proventi"** - Cedole, dividendi
+**"Bonifico"** - Bonifici, stipendio, versamenti
+**"Altro"** - Tutto il resto:
+- **Competenze Fruttifere / Competenze di chiusura** (interessi creditori netti) → "Altro"
+- **Premio polizza** / Premio assicurazione → "Altro"
+- Prelievo contante (se non ha commissione separata)
+- Rimborsi di importo elevato (> 20€, es. "Rimborso spese e commissioni su errata applicazione") → "Altro"
+
+**ATTENZIONE**:
+- TUTTE le imposte di bollo (sia E/C che Prodotti Finanziari) → **Spesa**, NON Commissioni
+- **Competenze Fruttifere/di chiusura** → **Altro**, NON Commissioni (sono interessi creditori, non costi bancari)
+- **Premio polizza** → **Altro**, MAI Commissioni
+- **Rimborsi > 20€** → **Altro** (sono rettifiche, non costi bancari regolari)
+
 ### FASE 4: ESTRAZIONE MOVIMENTI
+
+**REGOLA CRITICA - ESTRARRE OGNI SINGOLO MOVIMENTO**:
+- DEVI estrarre OGNI SINGOLA riga della tabella movimenti, ANCHE se hanno la stessa data e importo.
+- Transazioni come "INVESTIMENTO IN FONDI COMUNI" spesso si ripetono con stessa data e stesso importo (es. 500€ per ciascun fondo). Queste sono transazioni DIVERSE e vanno estratte TUTTE.
+- NON deduplicare, NON raggruppare, NON saltare transazioni simili.
+- Se il PDF ha più pagine di movimenti, estrai i movimenti da TUTTE le pagine.
+- NON estrarre lo stesso movimento con segni diversi.
+- Se la somma non torna, probabilmente stai sbagliando i segni, NON duplicando.
+- SEGNI: Commissioni, spese, canoni, imposte sono ADDEBITI → importo NEGATIVO. Rimborsi piccoli (< 20€) → importo POSITIVO.
 
 1. **DESCRIZIONI MULTI-RIGA**:
    - Molte transazioni hanno descrizioni su più righe
@@ -166,7 +278,113 @@ Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON
    - Accetta: GG/MM/AAAA, GG.MM.AAAA, GG-MM-AAAA, AAAA-MM-GG
    - Restituisci sempre: GG/MM/AAAA
 
-### FASE 5: VALIDAZIONE FINALE (OBBLIGATORIA - ESEGUI SEMPRE)
+### FASE 5: ESTRAZIONE DATI SCALARI (COMPETENZE)
+
+**ISTRUZIONI DETTAGLIATE PER BANCA INTESA/INTESA SANPAOLO:**
+
+#### 5.1 NUMERI CREDITORI E DEBITORI
+Cerca nel documento la sezione "CONTO SCALARE" o "RIASSUNTO SCALARE".
+Trova la riga "TOTALE NUMERI" o cerca le righe individuali con "Numeri creditori" / "Numeri debitori".
+
+**Esempio tipico Banca Intesa:**
+[ESEMPIO]
+TOTALE NUMERI          0,00        5.737.125,02
+                    (Debitori)    (Creditori)
+[/ESEMPIO]
+oppure:
+[ESEMPIO]
+Numeri creditori    3.282.024,02
+Numeri debitori     11.113.738,56
+[/ESEMPIO]
+
+Estrai:
+- **numeri_creditori**: Il valore dei numeri creditori dell'ULTIMO periodo (ultima riga con data). Se la tabella ha più righe con date diverse (es. periodi precedenti + periodo corrente), estrai SOLO il valore dell'ULTIMA riga con data (quella del periodo corrente di questo estratto conto). NON sommare i valori di periodi diversi. Ignora la riga "Già liquidati" e "Invariati fino al".
+- **numeri_debitori**: Il valore totale dei numeri debitori (stessa regola: ultimo periodo)
+
+#### 5.2 INTERESSI CREDITORI E DEBITORI (LORDI)
+Cerca la sezione "ELEMENTI PER IL CONTEGGIO DELLE COMPETENZE" o "INTERESSI CREDITORI" / "INTERESSI DEBITORI".
+
+**PROCEDURA STEP-BY-STEP PER ESTRARRE GLI INTERESSI:**
+
+**STEP 1**: Individua la tabella "INTERESSI CREDITORI" nel PDF.
+**STEP 2**: Conta quante righe hanno una DATA nella colonna "Decorrenza" (formato GG.MM.AAAA).
+  - Le righe "Totale lordo", "Ritenuta fiscale", "Totale" NON hanno una data = NON contarle.
+  - Solo le righe con una data come "30.06.2018" o "30.09.2018" contano.
+**STEP 3**: Estrai TUTTE le righe con data come array interessi_creditori_periodi.
+**STEP 4**: Per interessi_attivi_lordi:
+  - Se hai trovato 1 SOLA riga con data → interessi_attivi_lordi = il valore "Totale lordo" dalla tabella
+  - Se hai trovato 2 O PIU' righe con data → interessi_attivi_lordi = valore "Interessi" dell'ULTIMA riga (data piu' recente). ATTENZIONE: il "Totale lordo" in questo caso e' la somma di tutte le righe, NON il valore che cerchi!
+
+**ESEMPIO CON 2 RIGHE (ATTENZIONE!):**
+[ESEMPIO]
+INTERESSI CREDITORI
+Decorrenza    Tasso    Numeri creditori    Interessi
+30.06.2018    0,0100   5.000.000,00        0,78     ← Riga 1 (ha data!)
+30.09.2018    0,0100   10.979.877,26       2,21     ← Riga 2 (ha data!)
+                       Totale lordo         2,99     ← SOMMA (NO data!) = 0,78+2,21
+                       Ritenuta fiscale    -0,78
+                       Totale               2,21
+[/ESEMPIO]
+Righe con data: 2 → interessi_attivi_lordi = 2.21 (valore dalla Riga 2, l'ultima con data)
+interessi_creditori_periodi: [{"data":"30/06/2018","interessi":0.78},{"data":"30/09/2018","interessi":2.21}]
+ERRORE COMUNE: estrarre 2.99 (il Totale lordo) come interessi_attivi_lordi. 2.99 e' SBAGLIATO perche' e' la somma.
+
+**ESEMPIO CON 1 RIGA:**
+[ESEMPIO]
+INTERESSI CREDITORI
+Decorrenza    Tasso    Numeri creditori    Interessi
+31.12.2018    0,0100   3.282.024,02        1,61     ← Riga 1 (unica con data)
+                       Totale lordo         1,61     ← SOMMA = 1,61 (coincide)
+                       Ritenuta fiscale    -0,42
+                       Totale               1,19
+[/ESEMPIO]
+Righe con data: 1 → interessi_attivi_lordi = 1.61 (Totale lordo)
+interessi_creditori_periodi: [{"data":"31/12/2018","interessi":1.61}]
+
+**VERIFICA OBBLIGATORIA**: Il numeri_creditori estratto dal Conto Scalare DEVE corrispondere al valore "Numeri creditori" dell'ULTIMA riga con data. Se non corrisponde, stai leggendo la riga sbagliata!
+
+Estrai:
+- **interessi_attivi_lordi**: Segui la procedura Step 1-4 sopra
+- **interessi_passivi_lordi**: Il "Totale lordo" degli interessi debitori
+- **interessi_creditori_periodi**: ARRAY con OGNI riga che ha una data nella colonna Decorrenza. Ogni elemento:
+  - "data": la data decorrenza (GG/MM/AAAA)
+  - "interessi": il valore dalla colonna Interessi di quella riga
+  CRITICO: Se la tabella ha 2 righe con data, DEVI restituire 2 elementi. Se restituisci 1 solo elemento con il valore del "Totale lordo", stai sbagliando!
+
+#### 5.3 TASSO ATTIVO E PASSIVO
+Il tasso si trova nella colonna "TASSO" della tabella interessi creditori/debitori.
+Cerca il valore percentuale (es. 0,0100 o 0,01%).
+
+Estrai:
+- **tasso_attivo**: Tasso applicato agli interessi creditori (es. "0.01%" o 0.0100)
+- **tasso_passivo**: Tasso applicato agli interessi debitori
+
+#### 5.4 MOVIMENTI TITOLI (Acquisti e Vendite)
+Analizza la lista movimenti e identifica operazioni su titoli:
+
+**ACQUISTI TITOLI (importi NEGATIVI - uscite di denaro):**
+Keywords: "ACQ.", "ACQUISTO", "SOTTOSC", "SOTTOSCRIZIONE", "NOTA INF. ACQ.", "PAC FONDI"
+
+**VENDITE TITOLI (importi POSITIVI - entrate di denaro):**
+Keywords per vendite: "NOTA INF. VEND.", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE", "DISINV", "DISINVESTIMENTO", "LIQUIDAZ FONDI", "SWITCH OUT"
+Keyword RIMBORSO: conta come vendita SOLO se seguito da: "FONDI", "SICAV", "QUOTE", "ETF", "OBBLIG"
+**ESCLUSIONI - NON contare come vendite:**
+- "CEDOLA", "DIVIDENDO", "STACCO CED" = PROVENTI
+- "RIMBORSO BUONO", "RIMBORSO SPESE", "RIMBORSO BOLLO" = NON sono vendite titoli
+- "RISCATTO" generico senza riferimento a fondi = verificare contesto
+
+Calcola e inserisci in scalar_data:
+- **acquisto_titoli_count**: numero di operazioni di acquisto
+- **vendita_titoli_count**: numero di operazioni di vendita
+- **movimenti_titoli_count**: acquisto_titoli_count + vendita_titoli_count
+- **acquisto_titoli_amount**: somma importi acquisti (sarà negativo)
+- **vendita_titoli_amount**: somma importi vendite (sarà positivo)
+
+**IMPORTANTE per interessi**: Estrai il valore "Totale lordo" (LORDO), NON il "Totale" finale netto.
+
+Se un valore non è presente, usa 0.
+
+### FASE 6: VALIDAZIONE FINALE (OBBLIGATORIA - ESEGUI SEMPRE)
 Prima di restituire il JSON:
 1. Calcola: expected_delta = Saldo Finale - Saldo Iniziale
 2. Calcola: actual_sum = Somma di tutti i movimenti.amount
@@ -177,6 +395,12 @@ Prima di restituire il JSON:
    - Ripeti finché expected_delta ≈ actual_sum
 
 **CASO COMUNE DI ERRORE**: I "RIMBORSO" o "ACCREDITO" o "VERSAMENTO" in colonna AVERE sono POSITIVI ma spesso vengono erroneamente marcati negativi. Se il calcolo non torna, verifica questi movimenti.
+
+### FASE 7: COMPLETEZZA (OBBLIGATORIA)
+- Se il PDF ha più pagine, DEVI leggere e estrarre i movimenti da TUTTE le pagine.
+- Conta il numero totale di righe nella tabella movimenti nel PDF. Il tuo JSON DEVE avere lo STESSO numero di elementi nell'array "movements".
+- NON fermarti prima di aver estratto TUTTI i movimenti. Anche se ci sono 50+ movimenti, estraili TUTTI.
+- "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Bonifico", NON "Vendita".
 
 ### STRUTTURA JSON RICHIESTA:
 {
@@ -189,6 +413,20 @@ Prima di restituire il JSON:
     "period_end": "YYYY-MM-DD",
     "holder": "Intestatario",
     "settlementAccount": "IBAN"
+  },
+  "scalar_data": {
+    "numeri_creditori": 0,
+    "numeri_debitori": 0,
+    "interessi_attivi_lordi": 0,
+    "interessi_passivi_lordi": 0,
+    "interessi_creditori_periodi": [{"data": "GG/MM/AAAA", "interessi": 0}],
+    "tasso_attivo": "0%",
+    "tasso_passivo": "0%",
+    "acquisto_titoli_count": 0,
+    "vendita_titoli_count": 0,
+    "movimenti_titoli_count": 0,
+    "acquisto_titoli_amount": 0,
+    "vendita_titoli_amount": 0
   },
   "movements": [
     {
@@ -211,73 +449,50 @@ Prima di restituire il JSON:
   "dividends": []
 }
 
-Restituisci SOLO il JSON, nessun altro testo.`
+Restituisci SOLO il JSON, nessun altro testo.`;
 
-        // Usa solo gemini-3-flash-preview
-        const models = [
-            'gemini-3-flash-preview'
-        ]
+        // Native https call to Gemini (same as verify-pdf - no SDK, no responseMimeType cap)
+        const modelName = 'gemini-3-flash-preview'
+        const maxRetries = 3
 
         let resText = ''
         let success = false
         let lastError = ''
-        const maxRetries = 2
 
-        for (const modelName of models) {
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    console.log(`Provando modello Gemini: ${modelName} (tentativo ${attempt}/${maxRetries})`)
-                    const model = genAI.getGenerativeModel({
-                        model: modelName,
-                        generationConfig: {
-                            temperature: 0,
-                            topP: 1,
-                            topK: 1,
-                            maxOutputTokens: 65536,
-                            responseMimeType: 'application/json',
-                        }
-                    })
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`[GEMINI] Calling ${modelName} (attempt ${attempt}/${maxRetries}) via native https...`)
+                resText = await callGeminiDirect(GEMINI_API_KEY, modelName, systemPrompt, base64Data)
+                console.log(`[GEMINI] Response received: ${resText.length} chars`)
 
-                    const result = await model.generateContent([
-                        systemPrompt,
-                        {
-                            inlineData: {
-                                data: base64Data,
-                                mimeType: 'application/pdf'
-                            }
-                        }
-                    ])
+                if (resText && resText.length > 10) {
+                    success = true
+                    break
+                }
+            } catch (err: any) {
+                const errMsg = err.message || ''
+                lastError = errMsg
+                console.error(`[GEMINI ERROR] Attempt ${attempt}/${maxRetries}: ${errMsg}`)
 
-                    const response = await result.response
-                    resText = response.text()
+                if (errMsg.includes('not found') || errMsg.includes('404')) {
+                    break
+                }
 
-                    if (resText && resText.length > 10) {
-                        success = true
-                        console.log(`Successo con modello ${modelName}`)
-                        break
-                    }
-                } catch (err: any) {
-                    const errMsg = err.message || ''
-                    console.error(`Errore con modello ${modelName} (tentativo ${attempt}):`, errMsg)
-                    lastError = errMsg
+                const isRateLimit = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('Resource')
+                const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up')
 
-                    // If model not found or not supported, skip immediately
-                    if (errMsg.includes('not found') || errMsg.includes('not supported') || errMsg.includes('404')) {
-                        console.log(`Modello ${modelName} non disponibile, salto...`)
-                        break
-                    }
-
-                    // If rate limited, wait before retry
-                    if (errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('Resource')) {
-                        const waitTime = attempt * 15000 // 15s, 30s
-                        console.log(`Rate limit su ${modelName} - aspetto ${waitTime / 1000}s prima di riprovare...`)
-                        await new Promise(resolve => setTimeout(resolve, waitTime))
-                    } else {
-                        break // Altri errori (es. PDF non valido), prova prossimo modello
-                    }
+                if (isRateLimit) {
+                    const waitTime = attempt * 60000
+                    console.log(`[GEMINI] Rate limited, waiting ${waitTime/1000}s...`)
+                    await new Promise(resolve => setTimeout(resolve, waitTime))
+                } else if (isNetworkError) {
+                    const waitTime = attempt * 15000
+                    console.log(`[GEMINI] Network error, retrying in ${waitTime/1000}s...`)
+                    await new Promise(resolve => setTimeout(resolve, waitTime))
+                } else {
+                    break
                 }
             }
-            if (success) break
         }
 
         if (!success) {
@@ -285,73 +500,30 @@ Restituisci SOLO il JSON, nessun altro testo.`
             return NextResponse.json({ success: false, error: 'Gemini AI fallito: ' + lastError }, { status: 500 })
         }
 
-        // Pulizia JSON con retry per errori di parsing
-        const maxJsonRetries = 6
+        // Parse JSON from response (single attempt with repair fallback)
         let parsed = null
         let jsonError = ''
-        const retryModels = ['gemini-3-flash-preview']
 
-        for (let jsonAttempt = 1; jsonAttempt <= maxJsonRetries; jsonAttempt++) {
+        try {
+            const jsonMatch = resText.match(/\{[\s\S]*\}/)
+            if (!jsonMatch) {
+                throw new Error('Risposta AI non valida - nessun JSON trovato')
+            }
+
             try {
-                const jsonMatch = resText.match(/\{[\s\S]*\}/)
-                if (!jsonMatch) {
-                    throw new Error('Risposta AI non valida - nessun JSON trovato')
-                }
-
-                let jsonToParse = jsonMatch[0]
-
-                // Prova parsing diretto
-                try {
-                    parsed = JSON.parse(jsonToParse)
-                    break
-                } catch (directParseErr) {
-                    // Prova a riparare JSON troncato
-                    const repaired = repairTruncatedJson(jsonToParse)
-                    if (repaired) {
-                        parsed = JSON.parse(repaired)
-                        console.log('JSON riparato con successo')
-                        break
-                    }
-                    throw directParseErr
-                }
-            } catch (parseErr: any) {
-                jsonError = parseErr.message
-                console.log(`Tentativo JSON ${jsonAttempt}/${maxJsonRetries} fallito: ${jsonError}`)
-
-                if (jsonAttempt < maxJsonRetries) {
-                    // Riprova con un modello diverso
-                    const retryModel = retryModels[(jsonAttempt - 1) % retryModels.length]
-                    const retryTemp = jsonAttempt <= 2 ? 0 : 0.1
-                    try {
-                        console.log(`Riprovo con modello ${retryModel}...`)
-                        const model = genAI.getGenerativeModel({
-                            model: retryModel,
-                            generationConfig: {
-                                temperature: retryTemp,
-                                topP: 1,
-                                topK: 1,
-                                maxOutputTokens: 65536,
-                                responseMimeType: 'application/json',
-                            }
-                        })
-
-                        const result = await model.generateContent([
-                            systemPrompt,
-                            {
-                                inlineData: {
-                                    data: base64Data,
-                                    mimeType: 'application/pdf'
-                                }
-                            }
-                        ])
-
-                        const response = await result.response
-                        resText = response.text()
-                    } catch {
-                        // Ignora errori di retry
-                    }
+                parsed = JSON.parse(jsonMatch[0])
+            } catch {
+                const repaired = repairTruncatedJson(jsonMatch[0])
+                if (repaired) {
+                    parsed = JSON.parse(repaired)
+                    console.log('JSON riparato con successo')
+                } else {
+                    throw new Error('JSON non riparabile')
                 }
             }
+        } catch (parseErr: any) {
+            jsonError = parseErr.message
+            console.error(`JSON parse fallito: ${jsonError}`)
         }
 
         if (!parsed) {
@@ -365,9 +537,33 @@ Restituisci SOLO il JSON, nessun altro testo.`
 
         const movements = parsed.movements || []
         const calculatedTotal = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
-        const calculatedCommissions = movements
+
+        // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
+        // Dal 2023+: il totale commissioni dell'Excel include anche "Imposta di bollo E/C e Rendiconto"
+        const periodEndStr = parsed.info?.period_end || ''
+        const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
+
+        let calculatedCommissions = Math.abs(movements
             .filter((m: any) => m.movement_type === 'Commissioni')
-            .reduce((sum: number, m: any) => sum + Math.abs(m.amount || 0), 0)
+            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
+
+        // Dal 2023+: aggiungi bollo E/C (che è classificato come "Spesa" ma l'Excel lo include nelle commissioni)
+        // ECCEZIONE: Q1 (marzo) dal 2024+ NON include bollo E/C
+        const periodMonthStr = periodEndStr.match(/[-/](\d{2})[-/]/)?.[1] || periodEndStr.split(/[-/]/)[1] || ''
+        const periodMonth = parseInt(periodMonthStr) || 0
+        const isQ1 = periodMonth === 3
+        if (periodYear >= 2023 && !(periodYear >= 2024 && isQ1)) {
+            const bolloEC = Math.abs(movements
+                .filter((m: any) => m.movement_type === 'Spesa' && (
+                    m.description?.toLowerCase().includes('bollo') && (
+                        m.description?.toLowerCase().includes('e/c') ||
+                        m.description?.toLowerCase().includes('rendiconto')
+                    )
+                ))
+                .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
+            calculatedCommissions += bolloEC
+        }
+
         const calculatedProventi = movements
             .filter((m: any) => m.movement_type === 'Proventi' || m.movement_type === 'Dividendo')
             .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
@@ -376,9 +572,8 @@ Restituisci SOLO il JSON, nessun altro testo.`
         if (!parsed.summary.total_movements_amount) {
             parsed.summary.total_movements_amount = { value: calculatedTotal, source: 'calculated' }
         }
-        if (!parsed.summary.total_commissions) {
-            parsed.summary.total_commissions = { value: calculatedCommissions, source: 'calculated' }
-        }
+        // ALWAYS override with calculated commissions (hybrid formula is more reliable than Gemini's value)
+        parsed.summary.total_commissions = { value: calculatedCommissions, source: 'calculated' }
         if (!parsed.summary.total_proventi) {
             parsed.summary.total_proventi = { value: calculatedProventi, source: 'calculated' }
         }
@@ -421,6 +616,14 @@ Restituisci SOLO il JSON, nessun altro testo.`
             dividends: parsed.dividends || [],
             costs_breakdown: {
                 ...(parsed.summary || {}),
+                scalar_data: parsed.scalar_data || {},
+                // Map scalar_data fields to dashboard-expected keys
+                securities_purchase_count: parsed.scalar_data?.acquisto_titoli_count || 0,
+                securities_sale_count: parsed.scalar_data?.vendita_titoli_count || 0,
+                securities_movements_count: parsed.scalar_data?.movimenti_titoli_count || 0,
+                securities_purchase_amount: parsed.scalar_data?.acquisto_titoli_amount || 0,
+                securities_sale_amount: parsed.scalar_data?.vendita_titoli_amount || 0,
+                securities_net_amount: (parsed.scalar_data?.acquisto_titoli_amount || 0) + (parsed.scalar_data?.vendita_titoli_amount || 0),
                 settlementAccount: parsed.info?.settlementAccount || null,
                 original_ai_data: { ...(parsed.summary || {}) } // Backup for restore
             },
