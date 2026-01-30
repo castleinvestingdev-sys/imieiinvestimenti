@@ -223,7 +223,7 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - **Invio rendicontazione/contabili titoli** (tipicamente 0.70€) - NON SALTARE, spesso su pagine successive
 - **Costo emissione comunicazione di legge** (tipicamente 0.42€) - NON SALTARE
 - Commissioni prelievo Bancocard
-- Commissioni bonifico
+- **Commissioni bonifico** (es. "Comm.ne bonifico", "Commissione bonifico" - la COMMISSIONE, NON il bonifico stesso)
 - **Competenze Fruttifere / Competenze di chiusura** (→ "Commissioni" con importo POSITIVO)
 - Rimborso canone (positivo → "Commissioni", solo importi piccoli < 20€)
 - **Rimborso spese e commissioni** (positivo → "Commissioni", solo importi piccoli < 20€)
@@ -251,6 +251,8 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - Competenze Fruttifere/di chiusura → **Commissioni** (importo positivo, compensano le spese bancarie)
 - **Premio polizza** → **Altro**, MAI Commissioni
 - **Rimborsi > 20€** → **Altro** (sono rettifiche, non costi bancari regolari)
+- **"Bonifico da Voi disposto"** / **"Bonifico a Vostro favore"** = il TRASFERIMENTO → **Bonifico**, NON Commissioni
+- **"Comm.ne bonifico"** / **"Commissioni bonifico"** = la COMMISSIONE sul bonifico → **Commissioni**
 
 ### FASE 4: ESTRAZIONE MOVIMENTI
 
@@ -563,17 +565,30 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             calculatedCommissions += bolloEC
         }
 
-        // Per periodi Q4 (dicembre): escludi solo "Competenze di chiusura" (interessi creditori di fine anno)
+        // Dal 2022+: aggiungi Tobin Tax (Imposta transazioni finanziarie) alle commissioni
+        // L'Excel la include nel totale commissioni dal 2022 in poi
+        if (periodYear >= 2022) {
+            const tobinTax = Math.abs(movements
+                .filter((m: any) => m.movement_type === 'Spesa' && (
+                    m.description?.toLowerCase().includes('transazioni finanziarie') ||
+                    m.description?.toLowerCase().includes('tobin')
+                ))
+                .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
+            calculatedCommissions += tobinTax
+        }
+
+        // Per periodi Q4 (dicembre): escludi "Competenze" (interessi creditori di fine anno)
+        // Il modello a volte usa "Competenze di chiusura", a volte "Competenze fruttifere"
         // L'Excel NON le sottrae dal totale commissioni nei periodi di dicembre
-        // NOTA: "Competenze Fruttifere" restano incluse (l'Excel le include come offset positivo)
+        // NOTA: In Q1/Q3, "Competenze" SONO incluse come offset positivo dall'Excel
         if (periodMonth === 12) {
-            const chiusuraAmount = movements
+            const competenzeAmount = movements
                 .filter((m: any) => m.movement_type === 'Commissioni' &&
                     (m.amount || 0) > 0 &&
-                    m.description?.toLowerCase().includes('chiusura'))
+                    m.description?.toLowerCase().includes('competenz'))
                 .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
-            if (chiusuraAmount > 0) {
-                calculatedCommissions += chiusuraAmount
+            if (competenzeAmount > 0) {
+                calculatedCommissions += competenzeAmount
             }
         }
 
