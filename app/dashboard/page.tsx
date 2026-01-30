@@ -60,12 +60,54 @@ export default function DashboardPage() {
   }
   const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
+
+  // Confirm modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+  } | null>(null)
   const fileQueueRef = useRef<{ id: string; file: File }[]>([])
   const totalFilesRef = useRef<number>(0)
   const currentFileIndexRef = useRef<number>(0)
   const dropzoneRef = useRef<HTMLDivElement>(null)
   const batchAccumulatorRef = useRef<File[]>([])
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Synchronization Refs
+  const timelineRefs = useRef<Set<HTMLDivElement>>(new Set())
+  const isSyncingRef = useRef(false)
+
+  const registerTimeline = useCallback((el: HTMLDivElement | null) => {
+    if (el) {
+      timelineRefs.current.add(el)
+    }
+  }, [])
+
+  const handleSyncScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (isSyncingRef.current) return
+    isSyncingRef.current = true
+
+    const target = e.currentTarget
+    const scrollLeft = target.scrollLeft
+
+    // Use requestAnimationFrame for smoother sync
+    requestAnimationFrame(() => {
+      timelineRefs.current.forEach(el => {
+        if (el !== target && Math.abs(el.scrollLeft - scrollLeft) > 2) {
+          // Direct assignment without smooth behavior for immediate sync
+          el.scrollLeft = scrollLeft
+        }
+      })
+
+      // Delay reset to prevent rapid re-triggering
+      setTimeout(() => {
+        isSyncingRef.current = false
+      }, 16) // ~1 frame at 60fps
+    })
+  }, [])
 
 
 
@@ -93,10 +135,39 @@ export default function DashboardPage() {
     setTrashedAnalyses(trashedData || [])
   }, [supabase])
 
+  // Show custom confirmation modal
+  const showConfirmModal = (title: string, message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setConfirmModal({
+        isOpen: true,
+        title,
+        message,
+        onConfirm: () => {
+          setConfirmModal(null)
+          resolve(true)
+        },
+        onCancel: () => {
+          setConfirmModal(null)
+          resolve(false)
+        }
+      })
+    })
+  }
+
   const handleDelete = async (analysisId: string) => {
     if (!user) return
-    const confirmed = window.confirm('Vuoi spostare questo documento nel cestino?')
+    const confirmed = await showConfirmModal(
+      'Sposta nel cestino',
+      'Vuoi spostare questo documento nel cestino?'
+    )
     if (!confirmed) return
+
+    // Save scroll positions before delete
+    const scrollPositions: { el: HTMLDivElement; left: number }[] = []
+    timelineRefs.current.forEach(el => {
+      scrollPositions.push({ el, left: el.scrollLeft })
+    })
+    const mainScrollY = window.scrollY
 
     const { error } = await supabase
       .from('analyses')
@@ -110,6 +181,52 @@ export default function DashboardPage() {
     }
 
     await fetchAnalyses(user.id)
+
+    // Restore scroll positions after re-render
+    requestAnimationFrame(() => {
+      window.scrollTo(0, mainScrollY)
+      scrollPositions.forEach(({ el, left }) => {
+        if (el && document.contains(el)) {
+          el.scrollLeft = left
+        }
+      })
+    })
+  }
+
+  // Delete multiple analyses at once (for section delete)
+  const handleDeleteMultiple = async (analysisIds: string[]) => {
+    if (!user || analysisIds.length === 0) return
+
+    // Save scroll positions before delete
+    const scrollPositions: { el: HTMLDivElement; left: number }[] = []
+    timelineRefs.current.forEach(el => {
+      scrollPositions.push({ el, left: el.scrollLeft })
+    })
+    const mainScrollY = window.scrollY
+
+    // Delete all in parallel
+    const { error } = await supabase
+      .from('analyses')
+      .update({ deleted_at: new Date().toISOString() })
+      .in('id', analysisIds)
+
+    if (error) {
+      console.error('Error deleting multiple:', error)
+      alert('Errore durante l\'eliminazione')
+      return
+    }
+
+    await fetchAnalyses(user.id)
+
+    // Restore scroll positions after re-render
+    requestAnimationFrame(() => {
+      window.scrollTo(0, mainScrollY)
+      scrollPositions.forEach(({ el, left }) => {
+        if (el && document.contains(el)) {
+          el.scrollLeft = left
+        }
+      })
+    })
   }
 
   const handleRestore = async (analysisId: string) => {
@@ -131,7 +248,10 @@ export default function DashboardPage() {
 
   const handlePermanentDelete = async (analysisId: string) => {
     if (!user) return
-    const confirmed = window.confirm('Vuoi eliminare definitivamente questo documento? Questa azione non può essere annullata.')
+    const confirmed = await showConfirmModal(
+      'Elimina definitivamente',
+      'Vuoi eliminare definitivamente questo documento? Questa azione non può essere annullata.'
+    )
     if (!confirmed) return
 
     const { error } = await supabase
@@ -292,11 +412,21 @@ export default function DashboardPage() {
         formData.append('file', file)
         formData.append('userId', user.id)
 
+        // AbortController with 5-minute timeout for Gemini processing
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000)
+
         console.log('Sending request for:', file.name)
-        const response = await fetch('/api/parse-pdf', {
-          method: 'POST',
-          body: formData,
-        })
+        let response: Response
+        try {
+          response = await fetch('/api/parse-pdf', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+          })
+        } finally {
+          clearTimeout(timeoutId)
+        }
         console.log('Response status:', response.status)
 
         clearInterval(progressInterval)
@@ -343,8 +473,11 @@ export default function DashboardPage() {
           }
         }
       } catch (error: any) {
+        const errorMsg = error.name === 'AbortError'
+          ? 'Timeout: l\'analisi ha superato 5 minuti. Riprova.'
+          : (error.message || 'Errore di rete')
         setUploadQueue(prev => prev.map(f =>
-          f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: error.message } : f
+          f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: errorMsg } : f
         ))
       }
 
@@ -378,10 +511,15 @@ export default function DashboardPage() {
     }
   }, [isProcessing, processQueue, uploadQueue])
 
-  // DEBUG EFFECT: Log uploadQueue changes
+  // DEBUG EFFECT: Log uploadQueue status changes only (not progress updates)
+  const prevStatusRef = useRef<string>('')
   useEffect(() => {
     if (uploadQueue.length > 0) {
-      console.log('[DEBUG-STATE] UploadQueue:', uploadQueue.map(f => `${f.name} (${f.status})`))
+      const statusKey = uploadQueue.map(f => `${f.name}:${f.status}`).join('|')
+      if (statusKey !== prevStatusRef.current) {
+        prevStatusRef.current = statusKey
+        console.log('[DEBUG-STATE] UploadQueue:', uploadQueue.map(f => `${f.name} (${f.status})`))
+      }
     }
   }, [uploadQueue])
 
@@ -673,17 +811,94 @@ export default function DashboardPage() {
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  const getYearFrequency = (accountAnalyses: Analysis[], year: number) => {
-    const yearAnalyses = accountAnalyses.filter(a => a.period_end && new Date(a.period_end).getFullYear() === year);
-    const hasMonthly = yearAnalyses.some(a => {
-      if (!a.period_start || !a.period_end) return false;
-      const start = new Date(a.period_start);
-      const end = new Date(a.period_end);
-      const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-      return diffDays < 45;
+  // Determine if a document is monthly (< 45 days) or quarterly/longer
+  const isDocMonthly = (a: Analysis) => {
+    if (!a.period_start || !a.period_end) return false;
+    const start = new Date(a.period_start);
+    const end = new Date(a.period_end);
+    const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+    return diffDays < 45;
+  };
+
+  // Build a frequency map for the year: for each month, determine expected frequency
+  const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): ('monthly' | 'quarterly')[] => {
+    // Array of 12 months, default to 'quarterly'
+    const freqMap: ('monthly' | 'quarterly')[] = Array(12).fill('quarterly');
+
+    // Get all documents for this year, sorted by end date
+    const yearDocs = accountAnalyses
+      .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year)
+      .sort((a, b) => new Date(a.period_end).getTime() - new Date(b.period_end).getTime());
+
+    let currentFreq: 'monthly' | 'quarterly' = 'quarterly';
+    let lastDocEndMonth = 0;
+
+    yearDocs.forEach(doc => {
+      const endMonth = new Date(doc.period_end).getMonth(); // 0-11
+      const docIsMonthly = isDocMonthly(doc);
+
+      // Fill from last document end to this document end with current frequency
+      for (let m = lastDocEndMonth; m < endMonth; m++) {
+        freqMap[m] = currentFreq;
+      }
+
+      // This document's month uses its own frequency
+      freqMap[endMonth] = docIsMonthly ? 'monthly' : 'quarterly';
+
+      // Update current frequency for future months
+      currentFreq = docIsMonthly ? 'monthly' : 'quarterly';
+      lastDocEndMonth = endMonth + 1;
     });
-    return hasMonthly ? 'monthly' : 'quarterly';
-  }
+
+    // Fill remaining months with current frequency
+    for (let m = lastDocEndMonth; m < 12; m++) {
+      freqMap[m] = currentFreq;
+    }
+
+    return freqMap;
+  };
+
+  // Build the slots to render based on frequency map
+  const buildYearSlots = (freqMap: ('monthly' | 'quarterly')[], accountAnalyses: Analysis[], year: number) => {
+    const slots: { type: 'monthly' | 'quarterly'; month: number; quarter?: number; file?: Analysis }[] = [];
+    let m = 0;
+
+    while (m < 12) {
+      const freq = freqMap[m];
+
+      if (freq === 'quarterly') {
+        // Find which quarter this month belongs to
+        const quarter = Math.floor(m / 3) + 1; // 1-4
+        const quarterEndMonth = quarter * 3 - 1; // 2, 5, 8, 11 (0-indexed)
+
+        // Find document for this quarter
+        const file = accountAnalyses.find(a => {
+          if (!a.period_end) return false;
+          const d = new Date(a.period_end);
+          const docMonth = d.getMonth();
+          const docYear = d.getFullYear();
+          return docYear === year && docMonth >= (quarter - 1) * 3 && docMonth <= quarterEndMonth;
+        });
+
+        slots.push({ type: 'quarterly', month: quarterEndMonth, quarter, file });
+
+        // Skip to next quarter
+        m = quarterEndMonth + 1;
+      } else {
+        // Monthly slot
+        const file = accountAnalyses.find(a => {
+          if (!a.period_end) return false;
+          const d = new Date(a.period_end);
+          return d.getFullYear() === year && d.getMonth() === m;
+        });
+
+        slots.push({ type: 'monthly', month: m, file });
+        m++;
+      }
+    }
+
+    return slots;
+  };
 
   const findAnalysisInSlot = (entries: Analysis[], year: number, slotIndex: number, frequency: 'monthly' | 'quarterly') => {
     return entries.find(a => {
@@ -1021,6 +1236,9 @@ export default function DashboardPage() {
                       {group.dossiers.length} Dossier Titoli | {group.liquidityAccounts.length} Conti Correnti
                     </div>
                   </div>
+                  <Link href={`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`} className={styles.btnAnalysisPremium}>
+                    VEDI ANALISI <span>→</span>
+                  </Link>
                 </div>
 
                 <div className={styles.accountsContainer}>
@@ -1035,117 +1253,65 @@ export default function DashboardPage() {
                             Rendicontazione: <strong>Variabile</strong>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/analisi/${dossier.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                            VEDI ANALISI <span>→</span>
-                          </Link>
-                          <button
-                            onClick={async () => {
-                              if (!window.confirm(`Vuoi spostare nel cestino il Dossier ${dossier.identifier}?`)) return;
-                              for (const a of dossier.analyses) await handleDelete(a.id);
-                            }}
-                            className={styles.deleteSectionBtn}
-                            style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                        <button
+                          onClick={async () => {
+                            const confirmed = await showConfirmModal(
+                              'Elimina sezione Dossier',
+                              `Vuoi spostare nel cestino tutti i ${dossier.analyses.length} documenti del Dossier ${dossier.identifier}?`
+                            );
+                            if (!confirmed) return;
+                            handleDeleteMultiple(dossier.analyses.map(a => a.id));
+                          }}
+                          className={styles.deleteSectionBtn}
+                          style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
+                        >
+                          🗑️
+                        </button>
                       </div>
 
                       <div className={styles.timelineNavigation}>
-                        <div className={styles.scrollIndicator + ' ' + styles.leftIndicator}
-                          onClick={(e) => {
-                            const grid = e.currentTarget.nextElementSibling as HTMLDivElement;
-                            scrollTimeline('left', grid);
-                          }}>←</div>
-                        <div className={styles.timelineGrid}>
+
+                        <div className={styles.timelineGrid} ref={registerTimeline} onScroll={handleSyncScroll}>
                           {years.map(year => {
-                            // Always use 12 slots if there is ANY monthly logic involved
-                            const slots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
-                            // Track covered months to skip rendering
-                            const coveredMonths = new Set<number>();
-
-                            // Pre-calculate coverage to know what to skip
-                            dossier.analyses.forEach(a => {
-                              if (a.period_end && a.period_start && new Date(a.period_end).getFullYear() === year) {
-                                const start = new Date(a.period_start);
-                                const end = new Date(a.period_end);
-                                const startMonth = start.getMonth() + 1;
-                                const endMonth = end.getMonth() + 1;
-
-                                // Skip all months between start (exclusive) and end (exclusive) if they are in the same year
-                                // Actually, we render the card at the END month slot. So we should skip everything BEFORE the end month, starting from start month.
-                                // Example: Annual (Jan-Dec). Render at Dec (12). Skip 1..11.
-                                // Example: Q1 (Jan-Mar). Render at Mar (3). Skip 1, 2.
-
-                                if (endMonth > startMonth) {
-                                  for (let m = startMonth; m < endMonth; m++) {
-                                    coveredMonths.add(m);
-                                  }
-                                }
-                              }
-                            });
+                            // Build dynamic frequency map and slots
+                            const freqMap = buildYearFrequencyMap(dossier.analyses, year);
+                            const slots = buildYearSlots(freqMap, dossier.analyses, year);
 
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={`${styles.slotsRow} ${styles.grid12}`}>
-                                  {slots.map(slotIdx => {
-                                    // If this slot is covered by a previous quarterly doc, SKIP IT entirely
-                                    if (coveredMonths.has(slotIdx)) return null;
+                                <div className={styles.slotsRow} style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(100px, 140px))` }}>
+                                  {slots.map((slot, idx) => {
+                                    const isPresent = !!slot.file;
+                                    const isMonthly = slot.type === 'monthly';
 
-                                    // Find if there is a doc ending in this month (Quarterly docs match their END month)
-                                    // Modified find logic: check for monthly OR quarterly ending here
-                                    const file = dossier.analyses.find(a => {
-                                      if (!a.period_end) return false;
-                                      const d = new Date(a.period_end);
-                                      return d.getFullYear() === year && (d.getMonth() + 1) === slotIdx;
-                                    });
+                                    // Get display label and dates
+                                    let displayLabel: string;
+                                    let dates: { start: string; end: string };
 
-                                    const isPresent = !!file;
-                                    const dates = getSlotDates(year, slotIdx, 'monthly'); // Always get standard dates first
-
-                                    // Calculate duration for labeling
-                                    let frequencyLabel = 'MENSILE';
-                                    let displayLabel = dates.label;
-
-                                    if (isPresent && file.period_start) {
-                                      const s = new Date(file.period_start);
-                                      const e = new Date(file.period_end);
-                                      const diffDays = (e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24);
-
-                                      if (diffDays > 300) {
-                                        frequencyLabel = 'ANNUALE';
-                                        displayLabel = 'YEAR';
-                                      } else if (diffDays > 150) {
-                                        frequencyLabel = 'SEMESTRALE';
-                                        displayLabel = 'SEM';
-                                      } else if (diffDays > 45) {
-                                        frequencyLabel = 'TRIMESTRALE';
-                                        displayLabel = `Q${Math.ceil(slotIdx / 3)}`;
-                                      }
+                                    if (isMonthly) {
+                                      const monthNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
+                                      displayLabel = monthNames[slot.month];
+                                      dates = getSlotDates(year, slot.month + 1, 'monthly');
+                                    } else {
+                                      displayLabel = `Q${slot.quarter}`;
+                                      dates = getSlotDates(year, slot.quarter!, 'quarterly');
                                     }
 
                                     return (
-                                      <div key={slotIdx}
+                                      <div key={idx}
                                         className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
-                                        data-analysis-id={isPresent ? file.id : undefined}
-                                        onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+                                        data-analysis-id={isPresent ? slot.file!.id : undefined}
+                                        onClick={() => isPresent && router.push(`/analisi/${slot.file!.id}`)}>
 
                                         <div className={styles.tileDates}>
-                                          {isPresent && (
-                                            <div className={styles.freqBadge}>
-                                              {frequencyLabel}
-                                            </div>
-                                          )}
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
                                           {isPresent ? (
                                             <>
-                                              {new Date(file.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
+                                              {new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
                                               <span className={styles.arrowIconSmall}>↓</span>
-                                              {new Date(file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                              {new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                             </>
                                           ) : (
                                             <>
@@ -1157,9 +1323,10 @@ export default function DashboardPage() {
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Rendimento</span>
-                                            <div className={styles.valueDataLarge}>{file.forensic_summary?.performance_pct || 'N/D'}</div>
+                                            <div className={styles.valueDataLarge}>{slot.file!.forensic_summary?.performance_pct || 'N/D'}</div>
                                             <div className={styles.tileActions}>
-                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(file); }}>🔍 DATA</button>
+                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
+                                              <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
                                             </div>
                                           </div>
                                         ) : (
@@ -1173,11 +1340,7 @@ export default function DashboardPage() {
                             )
                           })}
                         </div>
-                        <div className={styles.scrollIndicator + ' ' + styles.rightIndicator}
-                          onClick={(e) => {
-                            const grid = e.currentTarget.previousElementSibling as HTMLDivElement;
-                            scrollTimeline('right', grid);
-                          }}>→</div>
+
                       </div>
                     </div>
                   ))}
@@ -1190,94 +1353,66 @@ export default function DashboardPage() {
                           <span className={styles.accBadge} style={{ background: 'rgba(59,130,246,0.08)', color: '#3b82f6' }}>LIQUIDITÀ</span>
                           <div className={styles.accDetailsText}>
                             Conto corrente: <strong>{liquidity.identifier}</strong><br />
-                            Rendicontazione: <strong>Varabile</strong>
+                            Rendicontazione: <strong>Variabile</strong>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <Link href={`/analisi/${liquidity.analyses[0]?.id}`} className={styles.btnAnalysisPremium}>
-                            VEDI ANALISI <span>→</span>
-                          </Link>
-                          <button
-                            onClick={async () => {
-                              if (!window.confirm(`Vuoi spostare nel cestino il Conto ${liquidity.identifier}?`)) return;
-                              for (const a of liquidity.analyses) await handleDelete(a.id);
-                            }}
-                            style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                        <button
+                          onClick={async () => {
+                            const confirmed = await showConfirmModal(
+                              'Elimina sezione Liquidità',
+                              `Vuoi spostare nel cestino tutti i ${liquidity.analyses.length} documenti del Conto ${liquidity.identifier}?`
+                            );
+                            if (!confirmed) return;
+                            handleDeleteMultiple(liquidity.analyses.map(a => a.id));
+                          }}
+                          style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
+                        >
+                          🗑️
+                        </button>
                       </div>
 
                       <div className={styles.timelineNavigation}>
-                        <div className={styles.timelineGrid}>
+                        <div className={styles.timelineGrid} ref={registerTimeline} onScroll={handleSyncScroll}>
                           {years.map(year => {
-                            // Always use 12 slots if there is ANY monthly logic involved
-                            const slots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
-                            // Track covered months to skip rendering
-                            const coveredMonths = new Set<number>();
-
-                            // Pre-calculate coverage to know what to skip
-                            liquidity.analyses.forEach(a => { // USING LIQUIDITY ANALYSES HERE
-                              if (a.period_end && a.period_start && new Date(a.period_end).getFullYear() === year) {
-                                const start = new Date(a.period_start);
-                                const end = new Date(a.period_end);
-                                const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-                                if (diff > 45) { // It's quarterly
-                                  const endMonth = end.getMonth() + 1;
-                                  coveredMonths.add(endMonth - 1);
-                                  coveredMonths.add(endMonth - 2);
-                                }
-                              }
-                            });
+                            // Build dynamic frequency map and slots
+                            const freqMap = buildYearFrequencyMap(liquidity.analyses, year);
+                            const slots = buildYearSlots(freqMap, liquidity.analyses, year);
 
                             return (
                               <div key={year} className={styles.yearBlock}>
                                 <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={`${styles.slotsRow} ${styles.grid12}`}>
-                                  {slots.map(slotIdx => {
-                                    // If this slot is covered by a previous quarterly doc, SKIP IT entirely
-                                    if (coveredMonths.has(slotIdx)) return null;
+                                <div className={styles.slotsRow} style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(100px, 140px))` }}>
+                                  {slots.map((slot, idx) => {
+                                    const isPresent = !!slot.file;
+                                    const isMonthly = slot.type === 'monthly';
 
-                                    // Find if there is a doc ending in this month
-                                    const file = liquidity.analyses.find(a => {
-                                      if (!a.period_end) return false;
-                                      const d = new Date(a.period_end);
-                                      return d.getFullYear() === year && (d.getMonth() + 1) === slotIdx;
-                                    });
+                                    // Get display label and dates
+                                    let displayLabel: string;
+                                    let dates: { start: string; end: string };
 
-                                    const isPresent = !!file;
-                                    const dates = getSlotDates(year, slotIdx, 'monthly');
-
-                                    const isQuarterlyDoc = isPresent && file.period_start &&
-                                      ((new Date(file.period_end).getTime() - new Date(file.period_start).getTime()) / (1000 * 60 * 60 * 24)) > 45;
-
-                                    let displayLabel = dates.label;
-                                    if (isQuarterlyDoc) {
-                                      const qNum = Math.ceil(slotIdx / 3);
-                                      displayLabel = `Q${qNum}`;
+                                    if (isMonthly) {
+                                      const monthNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
+                                      displayLabel = monthNames[slot.month];
+                                      dates = getSlotDates(year, slot.month + 1, 'monthly');
+                                    } else {
+                                      displayLabel = `Q${slot.quarter}`;
+                                      dates = getSlotDates(year, slot.quarter!, 'quarterly');
                                     }
 
                                     return (
-                                      <div key={slotIdx}
+                                      <div key={idx}
                                         className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
-                                        data-analysis-id={isPresent ? file.id : undefined}
-                                        onClick={() => isPresent && router.push(`/analisi/${file.id}`)}>
+                                        data-analysis-id={isPresent ? slot.file!.id : undefined}
+                                        onClick={() => isPresent && router.push(`/analisi/${slot.file!.id}`)}>
 
                                         <div className={styles.tileDates}>
-                                          {isPresent && (
-                                            <div className={styles.freqBadge}>
-                                              {isQuarterlyDoc ? 'TRIMESTRALE' : 'MENSILE'}
-                                            </div>
-                                          )}
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
                                           {isPresent ? (
                                             <>
-                                              {new Date(file.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
+                                              {new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
                                               <span className={styles.arrowIconSmall}>↓</span>
-                                              {new Date(file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                              {new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                             </>
                                           ) : (
                                             <>
@@ -1288,9 +1423,10 @@ export default function DashboardPage() {
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Saldo</span>
-                                            <div className={styles.valueDataLarge}>€{(file.portfolio_value || 0).toLocaleString('it-IT')}</div>
+                                            <div className={styles.valueDataLarge}>€{(slot.file!.portfolio_value || 0).toLocaleString('it-IT')}</div>
                                             <div className={styles.tileActions}>
-                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(file); }}>🔍 DATA</button>
+                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
+                                              <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
                                             </div>
                                           </div>
                                         ) : (
@@ -1347,6 +1483,13 @@ export default function DashboardPage() {
                       { label: 'Movimenti titoli:', key: 'securities_net_amount', type: 'currency' },
                       { label: 'Acquisto titoli:', key: 'securities_purchase_amount', type: 'currency', negativeColor: true },
                       { label: 'Vendita titoli:', key: 'securities_sale_amount', type: 'currency', positiveColor: true },
+                      // Dati Scalari (Competenze)
+                      { label: 'Numeri Creditori:', key: 'scalar_data.numeri_creditori', type: 'number', isScalar: true },
+                      { label: 'Numeri Debitori:', key: 'scalar_data.numeri_debitori', type: 'number', isScalar: true },
+                      { label: 'Interessi Attivi Lordi:', key: 'scalar_data.interessi_attivi_lordi', type: 'currency', isScalar: true, positiveColor: true },
+                      { label: 'Interessi Passivi Lordi:', key: 'scalar_data.interessi_passivi_lordi', type: 'currency', isScalar: true, negativeColor: true },
+                      { label: 'Tasso Attivo:', key: 'scalar_data.tasso_attivo', type: 'text', isScalar: true },
+                      { label: 'Tasso Passivo:', key: 'scalar_data.tasso_passivo', type: 'text', isScalar: true },
                     ].map((item) => {
                       // Calculate "Totale movimenti liquidità" (Final - Initial)
                       let balanceDelta = null;
@@ -1389,6 +1532,12 @@ export default function DashboardPage() {
                           if (diff < 0.01) verificationStatus = 'ok';
                           else verificationStatus = 'error';
                         }
+                      } else if (item.key.startsWith('scalar_data.')) {
+                        // Scalar data fields (nested in costs_breakdown.scalar_data)
+                        const scalarKey = item.key.replace('scalar_data.', '')
+                        const scalarData = editingValues.scalar_data || {}
+                        val = scalarData[scalarKey]
+                        displaySource = 'extracted'
                       } else {
                         // Standard fields
                         const entry = editingValues[item.key]
@@ -1400,7 +1549,9 @@ export default function DashboardPage() {
                       }
 
                       const isModified = editingValues[`${item.key}_is_modified`]
-                      const isNotFound = (val === 'non trovato' || val === undefined) && !isVerification
+                      const isScalar = (item as any).isScalar || false
+                      const isNotFound = (val === 'non trovato' || val === undefined || val === null || val === 'assenti' || val === 0) && !isVerification && !isScalar
+                      const scalarNotFound = isScalar && (val === undefined || val === null || val === 'assenti' || val === 0 || val === '0%')
 
                       const formulaMap: Record<string, string> = {
                         'total_movements_amount': 'Saldo finale - Saldo iniziale',
@@ -1431,17 +1582,20 @@ export default function DashboardPage() {
                           </div>
 
                           <div className={styles.summaryValueContainer}>
-                            {isNotFound ? (
+                            {isNotFound || scalarNotFound ? (
                               <span className={styles.missingValue}>non trovato</span>
                             ) : (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
                                 <input
                                   type="text"
-                                  readOnly={isVerification} // Verification field is read-only
-                                  className={`${styles.summaryInput} ${item.positiveColor && val > 0 ? styles.positiveValue : ''} ${item.negativeColor && val < 0 ? styles.negativeValue : ''}`}
-                                  value={`${item.type === 'currency' && typeof val === 'number' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`}
+                                  readOnly={isVerification || isScalar} // Verification and scalar fields are read-only
+                                  className={`${styles.summaryInput} ${(item as any).positiveColor && typeof val === 'number' && val > 0 ? styles.positiveValue : ''} ${(item as any).negativeColor && typeof val === 'number' && val < 0 ? styles.negativeValue : ''}`}
+                                  value={
+                                    item.type === 'text' ? (val || '') :
+                                    `${item.type === 'currency' && typeof val === 'number' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`
+                                  }
                                   onChange={(e) => {
-                                    if (isVerification) return;
+                                    if (isVerification || isScalar) return;
                                     const raw = e.target.value.replace('+', '').replace(' €', '').replace('.', '').replace(',', '.')
                                     const num = parseFloat(raw)
                                     handleUpdateValue(item.key, isNaN(num) ? e.target.value : num)
@@ -1562,6 +1716,31 @@ export default function DashboardPage() {
                   {isSaving ? 'Salvataggio...' : 'Salva Modifiche'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Modal */}
+      {confirmModal && confirmModal.isOpen && (
+        <div className={styles.confirmModalOverlay} onClick={confirmModal.onCancel}>
+          <div className={styles.confirmModalContent} onClick={e => e.stopPropagation()}>
+            <div className={styles.confirmModalIcon}>🗑️</div>
+            <h3 className={styles.confirmModalTitle}>{confirmModal.title}</h3>
+            <p className={styles.confirmModalMessage}>{confirmModal.message}</p>
+            <div className={styles.confirmModalActions}>
+              <button
+                className={styles.confirmModalCancelBtn}
+                onClick={confirmModal.onCancel}
+              >
+                Annulla
+              </button>
+              <button
+                className={styles.confirmModalConfirmBtn}
+                onClick={confirmModal.onConfirm}
+              >
+                Conferma
+              </button>
             </div>
           </div>
         </div>

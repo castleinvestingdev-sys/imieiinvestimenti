@@ -39,3 +39,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code config
+.claude/
+
+# test/debug scripts and data
+*.py
+debug_*.json
+extraction_test_results.json
+full_test_results.json
+system_prompt_bancario.md
+ESTRAZIONE_LIQUIDITA_GUIDA.md
+RALPH_LOOP_INSTRUCTIONS.md
+RALPH_LOOP_PROMPT.md
+RALPH_PROMPT_TUNING.md
+nul
+tmpclaude-*

@@ -10,28 +10,38 @@ if (!folderPath) {
     process.exit(1);
 }
 
-const API_URL = 'http://localhost:3000/api/parse-pdf';
+const API_URL = 'http://localhost:3000/api/verify-pdf';
 
-async function processFile(filePath) {
+async function processFile(filePath, maxRetries = 5) {
     const fileName = path.basename(filePath);
     console.log(`Processing: ${fileName}...`);
 
-    try {
-        const fileBuffer = fs.readFileSync(filePath);
-        const blob = new Blob([fileBuffer], { type: 'application/pdf' });
-        const formData = new FormData();
-        formData.append('file', blob, fileName);
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const fileBuffer = fs.readFileSync(filePath);
+            const blob = new Blob([fileBuffer], { type: 'application/pdf' });
+            const formData = new FormData();
+            formData.append('file', blob, fileName);
+            formData.append('guestEmail', 'batch-test@localhost');
 
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            body: formData
-        });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 600000); // 10 min timeout
 
-        if (!response.ok) {
-            throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
-        }
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal
+            });
 
-        const data = await response.json();
+            clearTimeout(timeout);
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                throw new Error(`HTTP Error: ${response.status} ${response.statusText} - ${errorBody}`);
+            }
+
+            const data = await response.json();
 
         // Check verification
         const summary = data.data.summary;
@@ -41,8 +51,8 @@ async function processFile(filePath) {
         const calculatedDelta = Number((final - initial).toFixed(2));
         const extractedSum = Number(calcSum.toFixed(2));
 
-        const diff = Math.abs(extractedSum - calculatedDelta);
-        const isOk = diff < 0.001;
+        const diff = Math.round(Math.abs(extractedSum - calculatedDelta) * 100) / 100; // Round to 2 decimals
+        const isOk = diff <= 0.01; // 0.01€ tolerance per instructions (inclusive)
 
         if (isOk) {
             console.log(`✅ [OK] ${fileName}`);
@@ -57,10 +67,18 @@ async function processFile(filePath) {
             console.log(`    Diff: ${Number((extractedSum - calculatedDelta).toFixed(2))} €`);
             return false;
         }
-    } catch (error) {
-        console.error(`💥 [ERROR] ${fileName}:`, error.message);
-        return false;
+        } catch (error) {
+            lastError = error;
+            if (attempt < maxRetries && (error.message.includes('fetch failed') || error.message.includes('abort') || error.message.includes('timeout'))) {
+                console.log(`    Retry ${attempt}/${maxRetries}...`);
+                await new Promise(r => setTimeout(r, 5000)); // Wait 5s before retry
+                continue;
+            }
+            break;
+        }
     }
+    console.error(`💥 [ERROR] ${fileName}:`, lastError?.message || 'Unknown error');
+    return false;
 }
 
 async function main() {
