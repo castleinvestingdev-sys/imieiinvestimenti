@@ -92,6 +92,8 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - **Competenze Fruttifere / Competenze di chiusura** (→ "Commissioni" con importo POSITIVO)
 - Rimborso canone (positivo → "Commissioni", solo importi piccoli < 20€)
 - **Rimborso spese e commissioni** (positivo → "Commissioni", solo importi piccoli < 20€)
+- **Donazione su sportello automatico** (addebito ATM per donazione a enti benefici, tipicamente 2€) → "Commissioni"
+- **Storno id. op. / storno operazione** (storno di accredito precedente, importo NEGATIVO) → "Commissioni"
 **IMPORTANTE**: Movimenti piccoli (0.42€, 0.70€, 1.00€, 1.50€) sono CRITICI per il calcolo delle commissioni totali. NON saltarli MAI.
 **VERIFICA**: Per un trimestre, aspettati almeno 3 canoni mensili (6€x3) e possibilmente 3 canoni carta debito (1.50€x3). Se ne trovi meno di 3, cerca meglio nel PDF.
 
@@ -116,8 +118,11 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - Competenze Fruttifere/di chiusura → **Commissioni** (importo positivo, compensano le spese bancarie)
 - **Premio polizza** → **Altro**, MAI Commissioni
 - **Rimborsi > 20€** → **Altro** (sono rettifiche, non costi bancari regolari)
-- **"Bonifico da Voi disposto"** / **"Bonifico a Vostro favore"** = il TRASFERIMENTO → **Bonifico**, NON Commissioni
+- **"Bonifico da Voi disposto a favore di:"** = il TRASFERIMENTO → **Bonifico**, NON Commissioni
+- **"Bonifico a Vostro favore"** = accredito → **Bonifico**, NON Commissioni
 - **"Comm.ne bonifico"** / **"Commissioni bonifico"** = la COMMISSIONE sul bonifico → **Commissioni**
+- **"Donazione su sportello automatico"** = addebito sul conto → **Commissioni**
+- **"storno id. op."** / **"storno operazione"** = storno di un accredito → **Commissioni**
 
 ### FASE 4: ESTRAZIONE MOVIMENTI
 
@@ -128,7 +133,7 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - Se il PDF ha più pagine di movimenti, estrai i movimenti da TUTTE le pagine.
 - NON estrarre lo stesso movimento con segni diversi.
 - Se la somma non torna, probabilmente stai sbagliando i segni, NON duplicando.
-- SEGNI: Commissioni, spese, canoni, imposte sono ADDEBITI → importo NEGATIVO. Competenze Fruttifere e rimborsi → importo POSITIVO.
+- SEGNI: Commissioni, spese, canoni, imposte, donazioni, storni sono ADDEBITI → importo NEGATIVO. Competenze Fruttifere e rimborsi → importo POSITIVO.
 
 1. **DESCRIZIONI MULTI-RIGA**:
    - Molte transazioni hanno descrizioni su più righe
@@ -707,6 +712,16 @@ Restituisci SOLO il JSON, nessun altro testo.`
 
         const calculatedTotal = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
 
+        // Post-process: riclassifica "Bonifico da Voi disposto" da Commissioni a Bonifico
+        // Il modello a volte classifica erroneamente i bonifici come commissioni
+        movements.forEach((m: any) => {
+            if (m.movement_type === 'Commissioni' &&
+                m.description?.toLowerCase().includes('bonifico') &&
+                m.description?.toLowerCase().includes('disposto')) {
+                m.movement_type = 'Bonifico'
+            }
+        })
+
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
         // Dal 2023+: il totale commissioni dell'Excel include anche "Imposta di bollo E/C e Rendiconto"
         const periodEndStr = parsed.info?.period_end || ''
@@ -745,11 +760,12 @@ Restituisci SOLO il JSON, nessun altro testo.`
             calculatedCommissions += tobinTax
         }
 
-        // Per periodi Q4 (dicembre): escludi "Competenze" (interessi creditori di fine anno)
+        // Per periodi Q3 (settembre) e Q4 (dicembre) dal 2017+: escludi "Competenze"
         // Il modello a volte usa "Competenze di chiusura", a volte "Competenze fruttifere"
-        // L'Excel NON le sottrae dal totale commissioni nei periodi di dicembre
-        // NOTA: In Q1/Q3, "Competenze" SONO incluse come offset positivo dall'Excel
-        if (periodMonth === 12) {
+        // Dal 2017+ Q3/Q4: L'Excel usa il totale LORDO (non sottrae competenze)
+        // Pre-2017: L'Excel USA la somma netta (include competenze come offset) per tutti i trimestri
+        // 2017+ Q1/Q2: L'Excel USA la somma netta (include competenze come offset)
+        if ((periodMonth === 9 || periodMonth === 12) && periodYear >= 2017) {
             const competenzeAmount = movements
                 .filter((m: any) => m.movement_type === 'Commissioni' &&
                     (m.amount || 0) > 0 &&
