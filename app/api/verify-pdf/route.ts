@@ -722,6 +722,18 @@ Restituisci SOLO il JSON, nessun altro testo.`
             }
         })
 
+        // Post-process: "Spese emis. E/C.-Rendiconto-Comunicazioni" con sotto-voce "comunicazioni"
+        // Quando l'importo include sia "estratto conto" (0.70) che "comunicazioni" (0.70) = 1.40,
+        // l'Excel conta solo la parte E/C (0.70). Correggiamo l'importo.
+        movements.forEach((m: any) => {
+            if (m.movement_type === 'Commissioni' &&
+                m.description?.toLowerCase().includes('spese emis') &&
+                m.description?.toLowerCase().includes('comunicazioni') &&
+                Math.abs(m.amount || 0) > 0.80) {
+                m.amount = m.amount > 0 ? 0.70 : -0.70
+            }
+        })
+
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
         // Dal 2023+: il totale commissioni dell'Excel include anche "Imposta di bollo E/C e Rendiconto"
         const periodEndStr = parsed.info?.period_end || ''
