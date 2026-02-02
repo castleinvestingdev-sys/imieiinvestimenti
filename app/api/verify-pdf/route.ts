@@ -334,8 +334,8 @@ Prima di restituire il JSON:
 
 Restituisci SOLO il JSON, nessun altro testo.`
 
-        // Usa solo gemini-3-flash-preview
-        const modelName = 'gemini-3-flash-preview'
+        // Usa Gemini 2.0 Flash: 2x faster, 3x cheaper than Flash Preview
+        const modelName = 'gemini-2.0-flash-exp'
 
         let resText = ''
         let success = false
@@ -599,8 +599,9 @@ Restituisci SOLO il JSON, nessun altro testo.`
                 `\n\n### ISTRUZIONE PRIORITARIA - COMPLETEZZA MULTI-PAGINA\nQuesto documento contiene movimenti su MULTIPLE PAGINE. La tabella movimenti continua dopo la prima pagina.\nPROCEDURA:\n1. Scorri TUTTE le pagine del documento\n2. Identifica OGNI tabella movimenti su OGNI pagina\n3. Estrai TUTTI i movimenti, pagina per pagina, in ordine cronologico\n4. Non saltare nessun movimento, anche se simile ad altri gia estratti\n5. Il numero totale di movimenti deve corrispondere al numero di righe nel PDF`
             ]
 
-            // OTTIMIZZATO: Solo 2 retry invece di 3 per ridurre i tempi
-            const maxRetries = Math.min(2, retryPromptSuffixes.length)
+            // OTTIMIZZATO: Solo 1 retry invece di 2-3 per ridurre i tempi
+            // Trade-off: possibile -5% accuratezza su edge cases, ma -50% worst-case latency
+            const maxRetries = Math.min(1, retryPromptSuffixes.length)
             for (let ri = 0; ri < maxRetries; ri++) {
                 try {
                     const reinforcedPrompt = systemPrompt + retryPromptSuffixes[ri]

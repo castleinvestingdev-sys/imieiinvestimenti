@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import * as https from 'https'
+import * as crypto from 'crypto'
 
 // Allow up to 5 minutes for Gemini PDF processing
 export const maxDuration = 300
@@ -167,8 +168,91 @@ export async function POST(request: NextRequest) {
 
         logProgress('CONVERSIONE PDF', 'Encoding file in base64...')
         const fileBuffer = await file.arrayBuffer()
-        const base64Data = Buffer.from(fileBuffer).toString('base64')
+        const pdfBuffer = Buffer.from(fileBuffer)
+        const base64Data = pdfBuffer.toString('base64')
         logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
+
+        // Check cache first: compute SHA-256 hash of PDF
+        const pdfHash = crypto.createHash('sha256').update(pdfBuffer).digest('hex')
+        logProgress('CACHE CHECK', `Hash: ${pdfHash.substring(0, 16)}...`)
+
+        const supabase = await createClient()
+        const { data: cachedResult, error: cacheError } = await supabase
+            .from('pdf_cache')
+            .select('parsed_data, model_used, created_at')
+            .eq('pdf_hash', pdfHash)
+            .gt('expires_at', new Date().toISOString())
+            .single()
+
+        if (cachedResult && !cacheError) {
+            logProgress('✅ CACHE HIT', `Salvati ${((Date.now() - startTime) / 1000).toFixed(1)}s di elaborazione`)
+
+            // Increment hit counter (fire-and-forget, ignore errors)
+            supabase.rpc('increment_cache_hit', { cache_hash: pdfHash })
+
+            const parsed = cachedResult.parsed_data
+
+            // Save to analyses table
+            const isDossier = parsed.type === 'DOSSIER'
+            const analysisData = {
+                document_id: crypto.randomUUID(),
+                user_id: userId || null,
+                bank_name: parsed.info?.bankName || 'Banca N/D',
+                period_start: parseDate(parsed.info?.period_start),
+                period_end: parseDate(parsed.info?.period_end),
+                account_type: parsed.type,
+                portfolio_value: isDossier
+                    ? (parsed.finalPortfolio?.reduce((acc: number, item: any) => acc + (item.marketValue || 0), 0) || 0)
+                    : (typeof parsed.summary?.final_balance === 'object' ? parsed.summary.final_balance.value : (parsed.summary?.final_balance || 0)),
+                initial_value: 0,
+                holdings: parsed.finalPortfolio || [],
+                transactions: parsed.movements || [],
+                dividends: parsed.dividends || [],
+                costs_breakdown: {
+                    ...(parsed.summary || {}),
+                    scalar_data: parsed.scalar_data || {},
+                    securities_purchase_count: parsed.scalar_data?.acquisto_titoli_count || 0,
+                    securities_sale_count: parsed.scalar_data?.vendita_titoli_count || 0,
+                    securities_movements_count: parsed.scalar_data?.movimenti_titoli_count || 0,
+                    securities_purchase_amount: parsed.scalar_data?.acquisto_titoli_amount || 0,
+                    securities_sale_amount: parsed.scalar_data?.vendita_titoli_amount || 0,
+                    securities_net_amount: (parsed.scalar_data?.acquisto_titoli_amount || 0) + (parsed.scalar_data?.vendita_titoli_amount || 0),
+                    settlementAccount: parsed.info?.settlementAccount || null,
+                    original_ai_data: { ...(parsed.summary || {}) }
+                },
+                benchmark_comparison: parsed.info?.accountNumber || 'N/D',
+            }
+
+            const { data, error } = await supabase
+                .from('analyses')
+                .insert(analysisData)
+                .select()
+                .single()
+
+            if (error) {
+                logProgress('❌ ERRORE DATABASE', error.message)
+                return NextResponse.json({ success: false, error: 'Errore salvataggio database' }, { status: 500 })
+            }
+
+            logProgress('✅ COMPLETATO DA CACHE', `ID: ${data.id}`)
+            console.log(`⏱️ Tempo totale (cache): ${((Date.now() - startTime) / 1000).toFixed(1)}s\n`)
+
+            return NextResponse.json({
+                success: true,
+                analysisId: data.id,
+                documentId: data.id,
+                fileName: file.name,
+                status: 'ready',
+                cached: true,
+                data: {
+                    movements: parsed.movements || [],
+                    summary: parsed.summary,
+                    layout_detected: parsed.layout_detected
+                }
+            })
+        }
+
+        logProgress('CACHE MISS', 'Procedo con analisi AI completa')
 
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
 Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON rigoroso.
@@ -466,8 +550,8 @@ Prima di restituire il JSON:
 
 Restituisci SOLO il JSON, nessun altro testo.`;
 
-        // Native https call to Gemini (same as verify-pdf - no SDK, no responseMimeType cap)
-        const modelName = 'gemini-3-flash-preview'
+        // Native https call to Gemini 2.0 Flash (2x faster, 3x cheaper than Flash Preview)
+        const modelName = 'gemini-2.0-flash-exp'
         const maxRetries = 3
 
         let resText = ''
@@ -667,9 +751,24 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         logProgress('✅ ANALISI COMPLETATA', fileName)
         console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
 
+        // Save to cache for future requests
+        logProgress('SALVATAGGIO CACHE', 'Memorizzo risultato per future richieste')
+        try {
+            await supabase.from('pdf_cache').insert({
+                pdf_hash: pdfHash,
+                parsed_data: parsed,
+                file_size_kb: Math.round(file.size / 1024),
+                model_used: modelName,
+                expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days
+            })
+            logProgress('✅ CACHE SALVATA', 'Prossimo caricamento sarà istantaneo')
+        } catch (cacheErr: any) {
+            // Non-critical error, just log it
+            console.warn('⚠️ Cache save failed (non-critical):', cacheErr.message)
+        }
+
         // Salvataggio su Supabase
         logProgress('SALVATAGGIO DATABASE', 'Inserimento dati in Supabase')
-        const supabase = await createClient()
 
         const analysisData = {
             document_id: crypto.randomUUID(),
