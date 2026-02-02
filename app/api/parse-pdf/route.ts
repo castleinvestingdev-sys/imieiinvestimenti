@@ -469,8 +469,9 @@ Prima di restituire il JSON:
 
 Restituisci SOLO il JSON, nessun altro testo.`;
 
-        // Gemini 3 Flash: Latest model (Dec 2025) with Pro-level intelligence at Flash speed
-        const modelName = 'gemini-3-flash-preview'
+        // Gemini 2.5 Flash: Stable, fast (10-15s), production-ready
+        // Note: gemini-3-flash-preview is too slow (5+ min) - rolled back
+        const modelName = 'gemini-2.5-flash'
         const maxRetries = 3
 
         let resText = ''
