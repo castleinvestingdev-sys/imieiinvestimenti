@@ -334,8 +334,8 @@ Prima di restituire il JSON:
 
 Restituisci SOLO il JSON, nessun altro testo.`
 
-        // Usa Gemini 2.0 Flash: 2x faster, 3x cheaper than Flash Preview
-        const modelName = 'gemini-2.0-flash-exp'
+        // Gemini 3 Flash: Latest model (Dec 2025) with Pro-level intelligence at Flash speed
+        const modelName = 'gemini-3-flash-preview'
 
         let resText = ''
         let success = false

@@ -483,8 +483,59 @@ export default function DashboardPage() {
           }, 500)
 
         } else {
+          // Check if it's a duplicate period - ask user to confirm
+          if (result.isDuplicate && response.status === 409) {
+            clearInterval(progressInterval)
+
+            // Show confirmation modal
+            const shouldProceed = await new Promise<boolean>((resolve) => {
+              setConfirmModal({
+                isOpen: true,
+                title: '⚠️ Periodo Già Caricato',
+                message: `${result.message}\n\nVuoi ricalcolare comunque questo periodo? I dati precedenti verranno sostituiti.`,
+                onConfirm: () => {
+                  setConfirmModal(null)
+                  resolve(true)
+                },
+                onCancel: () => {
+                  setConfirmModal(null)
+                  resolve(false)
+                }
+              })
+            })
+
+            if (shouldProceed) {
+              // User confirmed - re-upload with force flag
+              setUploadQueue(prev => prev.map(f =>
+                f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, stage: 'Ricalcolo forzato...' } : f
+              ))
+
+              formData.append('force', 'true') // Signal to API to skip duplicate check
+
+              const retryResponse = await fetch('/api/parse-pdf', {
+                method: 'POST',
+                body: formData,
+              })
+
+              const retryResult = await retryResponse.json()
+
+              if (retryResult.success) {
+                setUploadQueue(prev => prev.map(f =>
+                  f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
+                ))
+                await fetchAnalyses(user.id)
+              } else {
+                setUploadQueue(prev => prev.map(f =>
+                  f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
+                ))
+              }
+            } else {
+              // User cancelled - remove from queue
+              setUploadQueue(prev => prev.filter(f => f.id !== fileId))
+            }
+          }
           // Check if it's a rate limit error - retry after delay
-          if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
+          else if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
             setUploadQueue(prev => prev.map(f =>
               f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
             ))
