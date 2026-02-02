@@ -45,6 +45,8 @@ export default function DashboardPage() {
   const [inspectorData, setInspectorData] = useState<Analysis | null>(null)
   const [editingValues, setEditingValues] = useState<any>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [commissionsModalData, setCommissionsModalData] = useState<any>(null)
+  const [editingTransactions, setEditingTransactions] = useState<any[]>([])
   const router = useRouter()
   const supabase = createClient()
 
@@ -57,6 +59,8 @@ export default function DashboardPage() {
     error?: string;
     index?: number;
     total?: number;
+    stage?: string; // Detailed stage description
+    startTime?: number; // Track upload start time
   }
   const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -271,8 +275,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (inspectorData) {
       setEditingValues(JSON.parse(JSON.stringify(inspectorData.costs_breakdown || {})))
+      setEditingTransactions(JSON.parse(JSON.stringify(inspectorData.transactions || [])))
     } else {
       setEditingValues(null)
+      setEditingTransactions([])
     }
   }, [inspectorData])
 
@@ -303,27 +309,21 @@ export default function DashboardPage() {
   }
 
   const handleSaveInspector = async () => {
-    if (!user || !inspectorData || !editingValues) return
+    if (!user || !inspectorData) return
     setIsSaving(true)
 
     try {
-      // Calculate new totals if balances changed
-      const updatedData = { ...editingValues }
-
       const { error } = await supabase
         .from('analyses')
         .update({
-          costs_breakdown: updatedData,
-          portfolio_value: typeof updatedData.final_balance === 'object'
-            ? updatedData.final_balance.value
-            : (typeof updatedData.final_balance === 'number' ? updatedData.final_balance : inspectorData.portfolio_value)
+          transactions: editingTransactions
         })
         .eq('id', inspectorData.id)
 
       if (error) throw error
 
       await fetchAnalyses(user.id)
-      setInspectorData(prev => prev ? { ...prev, costs_breakdown: updatedData } : null)
+      setInspectorData(prev => prev ? { ...prev, transactions: editingTransactions } : null)
       alert('Dati aggiornati con successo')
     } catch (err: any) {
       console.error('Error saving inspector data:', err)
@@ -386,27 +386,52 @@ export default function DashboardPage() {
 
 
       try {
-        // Progress animation that continues throughout the process
+        // Track start time for detailed progress messages
+        const uploadStartTime = Date.now()
+
+        // Progress animation with detailed stage updates
         let currentProgress = 5
         const progressInterval = setInterval(() => {
           setUploadQueue(prev => prev.map(f => {
             if (f.id === fileId && (f.status === 'uploading' || f.status === 'analyzing')) {
+              const elapsed = Math.floor((Date.now() - uploadStartTime) / 1000)
+              let stage = 'Inizializzazione...'
+
+              // Detailed stage messages based on elapsed time
+              if (elapsed < 2) {
+                stage = 'Caricamento PDF...'
+              } else if (elapsed < 5) {
+                stage = 'Conversione documento...'
+              } else if (elapsed < 10) {
+                stage = 'Invio a Gemini AI...'
+              } else if (elapsed < 30) {
+                stage = 'Analisi con AI in corso...'
+              } else if (elapsed < 60) {
+                stage = 'Estrazione movimenti...'
+              } else if (elapsed < 90) {
+                stage = 'Validazione dati...'
+              } else if (elapsed < 120) {
+                stage = 'Completamento analisi...'
+              } else {
+                stage = `Analisi approfondita... (${elapsed}s)`
+              }
+
               // Slow down as we approach 90%
               const maxProgress = 90
               const increment = Math.max(0.5, (maxProgress - currentProgress) / 20)
               currentProgress = Math.min(maxProgress, currentProgress + increment)
-              return { ...f, progress: Math.round(currentProgress) }
+              return { ...f, progress: Math.round(currentProgress), stage, startTime: uploadStartTime }
             }
             return f
           }))
-        }, 300)
+        }, 1000) // Update every second for time-based messages
 
-        // Update to analyzing after 1 second
+        // Update to analyzing after 3 seconds
         setTimeout(() => {
           setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'analyzing' as const } : f
+            f.id === fileId ? { ...f, status: 'analyzing' as const, stage: 'Analisi AI avviata...' } : f
           ))
-        }, 1000)
+        }, 3000)
 
         const formData = new FormData()
         formData.append('file', file)
@@ -1049,11 +1074,15 @@ export default function DashboardPage() {
                       <span style={{
                         fontWeight: 600,
                         fontSize: '0.8rem',
-                        color: '#64748b'
+                        color: '#64748b',
+                        maxWidth: '200px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
                       }}>
                         {file.status === 'queued' && 'In attesa'}
-                        {file.status === 'uploading' && 'Caricamento'}
-                        {file.status === 'analyzing' && 'Analisi AI'}
+                        {file.status === 'uploading' && (file.stage || 'Caricamento')}
+                        {file.status === 'analyzing' && (file.stage || 'Analisi AI')}
                         {file.status === 'done' && 'Completato'}
                         {file.status === 'error' && 'Errore'}
                       </span>
@@ -1562,13 +1591,37 @@ export default function DashboardPage() {
                       };
                       const formula = formulaMap[item.key] || 'Valore calcolato automaticamente dal sistema';
 
+                      const isCommissionsField = item.key === 'total_commissions'
+
                       return (
                         <div key={item.key} className={styles.summaryCard}
-                          style={isVerification ? { border: verificationStatus === 'error' ? '2px solid #ef4444' : (verificationStatus === 'ok' ? '2px solid #22c55e' : undefined) } : undefined}>
+                          style={{
+                            ...(isVerification ? { border: verificationStatus === 'error' ? '2px solid #ef4444' : (verificationStatus === 'ok' ? '2px solid #22c55e' : undefined) } : undefined),
+                            ...(isCommissionsField ? { cursor: 'pointer' } : {})
+                          }}
+                          onClick={isCommissionsField ? () => {
+                            // Open commissions detail modal
+                            const transactions = inspectorData.transactions || []
+                            const periodEndStr = inspectorData.period_end || ''
+                            const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
+                            const periodMonthStr = periodEndStr.match(/[-/](\d{2})[-/]/)?.[1] || periodEndStr.split(/[-/]/)[1] || ''
+                            const periodMonth = parseInt(periodMonthStr) || 0
+                            const isQ1 = periodMonth === 3
+
+                            setCommissionsModalData({
+                              transactions,
+                              periodYear,
+                              periodMonth,
+                              isQ1,
+                              totalCommissions: val
+                            })
+                          } : undefined}
+                        >
                           <div className={styles.labelLine}>
                             <span className={styles.labelText}>
                               {item.label}
                               {isModified && <span className={styles.modifiedBadge}>(Modificato)</span>}
+                              {isCommissionsField && <span style={{ marginLeft: '8px', fontSize: '0.9rem', color: '#64748b' }}>🔍</span>}
                             </span>
                             {displaySource && (
                               <span
@@ -1588,18 +1641,12 @@ export default function DashboardPage() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
                                 <input
                                   type="text"
-                                  readOnly={isVerification || isScalar} // Verification and scalar fields are read-only
+                                  readOnly={true} // All fields are now read-only
                                   className={`${styles.summaryInput} ${(item as any).positiveColor && typeof val === 'number' && val > 0 ? styles.positiveValue : ''} ${(item as any).negativeColor && typeof val === 'number' && val < 0 ? styles.negativeValue : ''}`}
                                   value={
                                     item.type === 'text' ? (val || '') :
                                     `${item.type === 'currency' && typeof val === 'number' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`
                                   }
-                                  onChange={(e) => {
-                                    if (isVerification || isScalar) return;
-                                    const raw = e.target.value.replace('+', '').replace(' €', '').replace('.', '').replace(',', '.')
-                                    const num = parseFloat(raw)
-                                    handleUpdateValue(item.key, isNaN(num) ? e.target.value : num)
-                                  }}
                                 />
                                 {isVerification && (
                                   <>
@@ -1611,9 +1658,6 @@ export default function DashboardPage() {
                               </div>
                             )}
                           </div>
-                          {isModified && !isVerification && (
-                            <button className={styles.restoreBtn} onClick={() => handleRestoreValue(item.key)}>Ripristina</button>
-                          )}
                         </div>
                       )
                     })}
@@ -1671,19 +1715,37 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {inspectorData.transactions?.map((t: any, i: number) => {
+                      {editingTransactions.map((t: any, i: number) => {
                         const typeClass = styles[`type${t.movement_type || 'Altro'}`] || styles.typeAltro;
                         const amount = t.amount !== undefined ? t.amount : t.exchangeValue;
                         const amountClass = amount < 0 ? styles.amountNegative : (amount > 0 ? styles.amountPositive : '');
+                        const movementTypes = ['Commissioni', 'Spesa', 'Acquisto', 'Vendita', 'Proventi', 'Dividendo', 'Bonifico', 'Altro'];
 
                         return (
                           <tr key={i}>
                             <td>{renderVal(t.date)}</td>
                             <td style={{ fontSize: '0.75rem', maxWidth: '300px' }}>{renderVal(t.description || 'N/D')}</td>
                             <td>
-                              <span className={`${styles.typeBadge} ${typeClass}`}>
-                                {t.movement_type || 'Altro'}
-                              </span>
+                              <select
+                                value={t.movement_type || 'Altro'}
+                                onChange={(e) => {
+                                  const newTransactions = [...editingTransactions];
+                                  newTransactions[i] = { ...newTransactions[i], movement_type: e.target.value };
+                                  setEditingTransactions(newTransactions);
+                                }}
+                                className={`${styles.typeBadge} ${typeClass}`}
+                                style={{
+                                  border: 'none',
+                                  background: 'transparent',
+                                  cursor: 'pointer',
+                                  fontWeight: '500',
+                                  padding: '4px 8px'
+                                }}
+                              >
+                                {movementTypes.map(type => (
+                                  <option key={type} value={type}>{type}</option>
+                                ))}
+                              </select>
                             </td>
                             <td className={amountClass}>
                               {amount !== undefined ? `€ ${amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : 'N/D'}
@@ -1716,6 +1778,263 @@ export default function DashboardPage() {
                   {isSaving ? 'Salvataggio...' : 'Salva Modifiche'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Commissions Detail Modal */}
+      {commissionsModalData && (
+        <div className={styles.modalOverlay} onClick={() => setCommissionsModalData(null)}>
+          <div className={styles.modalContent} onClick={e => e.stopPropagation()} style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }}>
+            <div className={styles.modalHeader}>
+              <div>
+                <h3>Dettaglio Calcolo Commissioni</h3>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>
+                  Anno: {commissionsModalData.periodYear} | Trimestre: Q{Math.ceil(commissionsModalData.periodMonth / 3)}
+                </p>
+              </div>
+              <button className={styles.closeBtn} onClick={() => setCommissionsModalData(null)}>×</button>
+            </div>
+            <div className={styles.modalBody}>
+              {(() => {
+                const { transactions, periodYear, periodMonth, isQ1, totalCommissions } = commissionsModalData;
+
+                // 1. Movimenti classificati come "Commissioni"
+                const commissioniMovements = transactions.filter((m: any) => m.movement_type === 'Commissioni');
+                const commissioniSum = Math.abs(commissioniMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
+
+                // 2. Bollo E/C (dal 2023+, escluso Q1 dal 2024+)
+                const shouldIncludeBollo = periodYear >= 2023 && !(periodYear >= 2024 && isQ1);
+                const bolloMovements = shouldIncludeBollo ? transactions.filter((m: any) =>
+                  m.movement_type === 'Spesa' && (
+                    m.description?.toLowerCase().includes('bollo') && (
+                      m.description?.toLowerCase().includes('e/c') ||
+                      m.description?.toLowerCase().includes('rendiconto')
+                    )
+                  )
+                ) : [];
+                const bolloSum = Math.abs(bolloMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
+
+                // 3. Tobin Tax (dal 2022+)
+                const shouldIncludeTobin = periodYear >= 2022;
+                const tobinMovements = shouldIncludeTobin ? transactions.filter((m: any) =>
+                  m.movement_type === 'Spesa' && (
+                    m.description?.toLowerCase().includes('transazioni finanziarie') ||
+                    m.description?.toLowerCase().includes('tobin')
+                  )
+                ) : [];
+                const tobinSum = Math.abs(tobinMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
+
+                // 4. Competenze (dal 2017+, escluso Q1)
+                const shouldIncludeCompetenzeGross = periodYear >= 2017 && periodMonth !== 3;
+                const competenzeMovements = shouldIncludeCompetenzeGross ? commissioniMovements.filter((m: any) =>
+                  (m.amount || 0) > 0 && m.description?.toLowerCase().includes('competenz')
+                ) : [];
+                const competenzeSum = competenzeMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0);
+
+                // 5. Calcolo finale
+                let calculatedTotal = commissioniSum;
+                if (shouldIncludeBollo) calculatedTotal += bolloSum;
+                if (shouldIncludeTobin) calculatedTotal += tobinSum;
+                if (shouldIncludeCompetenzeGross) calculatedTotal += competenzeSum;
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {/* Step 1: Commissioni Base */}
+                    <div className={styles.inspectorSection}>
+                      <h4>1️⃣ Movimenti classificati come "Commissioni" ({commissioniMovements.length})</h4>
+                      <table className={styles.inspectorTable}>
+                        <thead>
+                          <tr>
+                            <th>Data</th>
+                            <th>Descrizione</th>
+                            <th>Importo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {commissioniMovements.map((m: any, i: number) => (
+                            <tr key={i}>
+                              <td>{renderVal(m.date)}</td>
+                              <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
+                              <td className={m.amount < 0 ? styles.amountNegative : styles.amountPositive}>
+                                € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
+                            <td colSpan={2}>Totale (valore assoluto)</td>
+                            <td>€ {commissioniSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Step 2: Bollo E/C */}
+                    {shouldIncludeBollo && (
+                      <div className={styles.inspectorSection}>
+                        <h4>2️⃣ Imposta di Bollo E/C (dal 2023+{periodYear >= 2024 ? ', escluso Q1' : ''})</h4>
+                        {bolloMovements.length > 0 ? (
+                          <table className={styles.inspectorTable}>
+                            <thead>
+                              <tr>
+                                <th>Data</th>
+                                <th>Descrizione</th>
+                                <th>Importo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {bolloMovements.map((m: any, i: number) => (
+                                <tr key={i}>
+                                  <td>{renderVal(m.date)}</td>
+                                  <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
+                                  <td className={styles.amountNegative}>
+                                    € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))}
+                              <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
+                                <td colSpan={2}>Totale (valore assoluto)</td>
+                                <td>€ {bolloSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p style={{ color: '#64748b', fontStyle: 'italic' }}>Nessun movimento trovato</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Step 3: Tobin Tax */}
+                    {shouldIncludeTobin && (
+                      <div className={styles.inspectorSection}>
+                        <h4>3️⃣ Tobin Tax (dal 2022+)</h4>
+                        {tobinMovements.length > 0 ? (
+                          <table className={styles.inspectorTable}>
+                            <thead>
+                              <tr>
+                                <th>Data</th>
+                                <th>Descrizione</th>
+                                <th>Importo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {tobinMovements.map((m: any, i: number) => (
+                                <tr key={i}>
+                                  <td>{renderVal(m.date)}</td>
+                                  <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
+                                  <td className={styles.amountNegative}>
+                                    € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))}
+                              <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
+                                <td colSpan={2}>Totale (valore assoluto)</td>
+                                <td>€ {tobinSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p style={{ color: '#64748b', fontStyle: 'italic' }}>Nessun movimento trovato</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Step 4: Competenze */}
+                    {shouldIncludeCompetenzeGross && (
+                      <div className={styles.inspectorSection}>
+                        <h4>4️⃣ Competenze Fruttifere/Chiusura (dal 2017+, escluso Q1)</h4>
+                        <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '10px' }}>
+                          Le competenze positive compensano le commissioni nel calcolo netto. Per ottenere il totale LORDO,
+                          vengono aggiunte nuovamente al calcolo.
+                        </p>
+                        {competenzeMovements.length > 0 ? (
+                          <table className={styles.inspectorTable}>
+                            <thead>
+                              <tr>
+                                <th>Data</th>
+                                <th>Descrizione</th>
+                                <th>Importo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {competenzeMovements.map((m: any, i: number) => (
+                                <tr key={i}>
+                                  <td>{renderVal(m.date)}</td>
+                                  <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
+                                  <td className={styles.amountPositive}>
+                                    € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))}
+                              <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
+                                <td colSpan={2}>Totale</td>
+                                <td>€ {competenzeSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p style={{ color: '#64748b', fontStyle: 'italic' }}>Nessun movimento trovato</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Calcolo Finale */}
+                    <div className={styles.inspectorSection} style={{ backgroundColor: '#f1f5f9', padding: '20px', borderRadius: '8px' }}>
+                      <h4>📊 Calcolo Finale</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.95rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Commissioni base:</span>
+                          <span>€ {commissioniSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        {shouldIncludeBollo && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>+ Bollo E/C:</span>
+                            <span>€ {bolloSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        )}
+                        {shouldIncludeTobin && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>+ Tobin Tax:</span>
+                            <span>€ {tobinSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        )}
+                        {shouldIncludeCompetenzeGross && competenzeSum > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>+ Competenze (lordo):</span>
+                            <span>€ {competenzeSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1.1rem', borderTop: '2px solid #94a3b8', paddingTop: '10px', marginTop: '10px' }}>
+                          <span>TOTALE COMMISSIONI:</span>
+                          <span style={{ color: '#ef4444' }}>€ {calculatedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#64748b', marginTop: '5px' }}>
+                          <span>Valore da costs_breakdown:</span>
+                          <span>€ {(totalCommissions || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        {Math.abs(calculatedTotal - (totalCommissions || 0)) > 0.01 && (
+                          <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderLeft: '4px solid #ef4444', marginTop: '10px' }}>
+                            <strong style={{ color: '#dc2626' }}>⚠️ Attenzione:</strong> Differenza di €{Math.abs(calculatedTotal - (totalCommissions || 0)).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Regole Applicate */}
+                    <div className={styles.inspectorSection}>
+                      <h4>📜 Regole Applicate</h4>
+                      <ul style={{ fontSize: '0.9rem', color: '#64748b', lineHeight: '1.6' }}>
+                        <li><strong>2024+:</strong> Normalizzazione spese E/C-Comunicazioni a €0.70 (solo E/C)</li>
+                        <li><strong>2023+:</strong> Inclusione Imposta di Bollo E/C{periodYear >= 2024 && ' (escluso Q1)'}</li>
+                        <li><strong>2022+:</strong> Inclusione Tobin Tax (Imposta transazioni finanziarie)</li>
+                        <li><strong>2017+:</strong> Calcolo LORDO con riaggiunta competenze positive (escluso Q1)</li>
+                        <li><strong>Pre-2017 o Q1:</strong> Calcolo NETTO (competenze come offset)</li>
+                      </ul>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

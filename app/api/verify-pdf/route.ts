@@ -7,10 +7,20 @@ export const maxDuration = 300
 export async function POST(request: NextRequest) {
     const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
 
+    const startTime = Date.now()
+    const logProgress = (stage: string, details?: string) => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+        console.log(`[${elapsed}s] 🔍 ${stage}${details ? ` - ${details}` : ''}`)
+    }
+
     try {
+        logProgress('VERIFICA PDF INIZIATA')
+
         const formData = await request.formData()
         const file = formData.get('file') as File
         const fileName = file?.name || 'documento.pdf'
+
+        logProgress('FILE RICEVUTO', `${fileName} (${(file?.size / 1024).toFixed(0)}KB)`)
 
         if (!file) {
             return NextResponse.json({ success: false, error: 'File mancante' }, { status: 400 })
@@ -23,8 +33,10 @@ export async function POST(request: NextRequest) {
             }, { status: 500 })
         }
 
+        logProgress('CONVERSIONE PDF', 'Encoding file in base64...')
         const fileBuffer = await file.arrayBuffer()
         const base64Data = Buffer.from(fileBuffer).toString('base64')
+        logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
 
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
 Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON rigoroso.
@@ -386,9 +398,9 @@ Restituisci SOLO il JSON, nessun altro testo.`
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                console.log(`[GEMINI] Calling ${modelName} (attempt ${attempt}/${maxRetries}) via native https...`)
+                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName}`)
                 resText = await callGeminiDirect(GEMINI_API_KEY, modelName, systemPrompt, base64Data)
-                console.log(`[GEMINI] Response received: ${resText.length} chars`)
+                logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da Gemini`)
 
                 if (resText && resText.length > 10) {
                     success = true
@@ -408,10 +420,10 @@ Restituisci SOLO il JSON, nessun altro testo.`
 
                 if (isRateLimit) {
                     const waitTime = attempt * 60000
-                    console.log(`[GEMINI] Rate limited, waiting ${waitTime/1000}s...`)
+                    logProgress('⏳ RATE LIMIT', `Attendo ${waitTime/1000}s prima del prossimo tentativo`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isNetworkError) {
-                    console.log(`[GEMINI] Network error, retrying in 5s...`)
+                    logProgress('🔌 ERRORE RETE', 'Riprovo tra 5s')
                     await new Promise(resolve => setTimeout(resolve, 5000))
                 } else {
                     // Unknown error, wait briefly and retry
@@ -558,36 +570,41 @@ Restituisci SOLO il JSON, nessun altro testo.`
         const actualSumCheck = movs.reduce((s: number, m: any) => s + (m.amount || 0), 0)
         const mathError = Math.abs(actualSumCheck - expectedDeltaCheck)
 
-        console.log(`[VALIDATION] First extraction: ${movs.length} movements, balance ${initBal}->${finBal}, sum=${actualSumCheck.toFixed(2)}, mathError=${mathError.toFixed(2)}`)
+        logProgress('PRIMA ESTRAZIONE', `${movs.length} movimenti estratti`)
+        console.log(`📊 Saldo: ${initBal.toFixed(2)} → ${finBal.toFixed(2)} | Somma: ${actualSumCheck.toFixed(2)} | Errore: ${mathError.toFixed(2)}€`)
 
-        // Retry if extraction seems incomplete:
-        // - Both balances are 0 (model didn't extract balance info at all)
-        // - Initial balance missing but final present
-        // - Math doesn't verify (sum ≠ delta)
-        const needsRetry = (initBal === 0 && finBal === 0 && movs.length > 0) || (initBal === 0 && finBal !== 0) || (mathError > 1.0 && initBal !== 0 && finBal !== 0)
+        // CRITERI OTTIMIZZATI: Retry solo se l'estrazione è CHIARAMENTE incompleta
+        // - Entrambi i saldi sono 0 E ci sono movimenti (modello non ha estratto i saldi)
+        // - Saldo iniziale mancante MA saldo finale presente (estrazione parziale)
+        // - Errore matematico SIGNIFICATIVO (>5€) e movimenti < 10 (probabilmente incompleto)
+        // NON facciamo retry per piccoli errori di arrotondamento (<5€) o se ci sono molti movimenti (>10)
+        const needsRetry = (
+            (initBal === 0 && finBal === 0 && movs.length > 0) ||
+            (initBal === 0 && finBal !== 0) ||
+            (mathError > 5.0 && movs.length < 10 && initBal !== 0 && finBal !== 0)
+        )
         if (!needsRetry) {
-            console.log(`[VALIDATION] Extraction looks good, no retry needed`)
+            logProgress('✅ VALIDAZIONE OK', 'Estrazione accettata, nessun retry necessario')
         } else {
-            console.log(`[VALIDATION] Extraction may be incomplete (${movs.length} movements), retrying with reinforced prompt (temperature=0)...`)
+            logProgress('⚠️ ESTRAZIONE INCOMPLETA', `Solo ${movs.length} movimenti, avvio retry con prompt rinforzato`)
 
             let bestParsed = parsed
             let bestMovCount = movs.length
             let bestMathError = mathError
 
-            // Retry prompts: each adds a different emphasis to force complete extraction
-            // All at temperature=0 to ensure deterministic, faithful extraction
+            // Retry prompts ottimizzati: massimo 2 tentativi invece di 3
             const retryPromptSuffixes = [
                 `\n\n### ATTENZIONE CRITICA - ESTRAZIONE INCOMPLETA RILEVATA\nLa prima estrazione ha trovato solo ${movs.length} movimenti. Questo PDF ha SICURAMENTE piu movimenti su PIU PAGINE.\nDEVI:\n1. Leggere OGNI PAGINA del PDF dall'inizio alla fine\n2. Estrarre OGNI SINGOLA riga dalla tabella movimenti\n3. NON fermarti dopo la prima pagina di movimenti\n4. Conta le righe nel PDF e assicurati che il tuo array "movements" abbia lo STESSO numero di elementi`,
 
-                `\n\n### ISTRUZIONE PRIORITARIA - COMPLETEZZA MULTI-PAGINA\nQuesto documento contiene movimenti su MULTIPLE PAGINE. La tabella movimenti continua dopo la prima pagina.\nPROCEDURA:\n1. Scorri TUTTE le pagine del documento\n2. Identifica OGNI tabella movimenti su OGNI pagina\n3. Estrai TUTTI i movimenti, pagina per pagina, in ordine cronologico\n4. Non saltare nessun movimento, anche se simile ad altri gia estratti\n5. Il numero totale di movimenti deve corrispondere al numero di righe nel PDF`,
-
-                `\n\n### VERIFICA COMPLETEZZA - OBBLIGO ASSOLUTO\nPRIMA di generare il JSON, DEVI:\n1. Contare il numero TOTALE di pagine che contengono la tabella movimenti\n2. Per OGNI pagina con movimenti, estrarre TUTTE le righe\n3. Verificare di aver estratto movimenti da TUTTE le pagine\n4. Il PDF ha movimenti su almeno 2-3 pagine. Se hai estratto meno di 25 movimenti, probabilmente hai saltato una pagina.\nNON inventare dati. Estrai SOLO quello che e scritto nel PDF, ma assicurati di leggere TUTTO il PDF.`
+                `\n\n### ISTRUZIONE PRIORITARIA - COMPLETEZZA MULTI-PAGINA\nQuesto documento contiene movimenti su MULTIPLE PAGINE. La tabella movimenti continua dopo la prima pagina.\nPROCEDURA:\n1. Scorri TUTTE le pagine del documento\n2. Identifica OGNI tabella movimenti su OGNI pagina\n3. Estrai TUTTI i movimenti, pagina per pagina, in ordine cronologico\n4. Non saltare nessun movimento, anche se simile ad altri gia estratti\n5. Il numero totale di movimenti deve corrispondere al numero di righe nel PDF`
             ]
 
-            for (let ri = 0; ri < retryPromptSuffixes.length; ri++) {
+            // OTTIMIZZATO: Solo 2 retry invece di 3 per ridurre i tempi
+            const maxRetries = Math.min(2, retryPromptSuffixes.length)
+            for (let ri = 0; ri < maxRetries; ri++) {
                 try {
                     const reinforcedPrompt = systemPrompt + retryPromptSuffixes[ri]
-                    console.log(`[VALIDATION] Retry ${ri + 1}/3 with reinforced prompt (temperature=0)...`)
+                    logProgress('🔄 RETRY GEMINI', `Tentativo ${ri + 1}/${maxRetries} con prompt rinforzato`)
                     const retryText = await callGeminiDirect(GEMINI_API_KEY, modelName, reinforcedPrompt, base64Data)
                     const retryJsonMatch = retryText.match(/\{[\s\S]*\}/)
                     if (retryJsonMatch) {
@@ -605,29 +622,32 @@ Restituisci SOLO il JSON, nessun altro testo.`
                             const retrySum = retryMovs.reduce((s: number, m: any) => s + (m.amount || 0), 0)
                             const retryMathError = Math.abs(retrySum - (retryFin - retryInit))
 
-                            console.log(`[VALIDATION] Retry ${ri + 1}: ${retryMovs.length} movements (best so far: ${bestMovCount}), mathError=${retryMathError.toFixed(2)}`)
+                            logProgress('RETRY RESULT', `${retryMovs.length} movimenti (best: ${bestMovCount}), errore: ${retryMathError.toFixed(2)}€`)
 
                             if (retryMovs.length > bestMovCount || (retryMovs.length === bestMovCount && retryMathError < bestMathError)) {
-                                console.log(`[VALIDATION] New best: ${retryMovs.length} movements (was ${bestMovCount})`)
+                                logProgress('✅ NUOVO BEST', `${retryMovs.length} movimenti (era ${bestMovCount})`)
                                 bestParsed = retryParsed
                                 bestMovCount = retryMovs.length
                                 bestMathError = retryMathError
                             }
 
-                            // If we found more movements, stop retrying
-                            if (retryMovs.length > movs.length) break
+                            // Se abbiamo trovato più movimenti, fermiamo i retry
+                            if (retryMovs.length > movs.length) {
+                                logProgress('✅ MIGLIORAMENTO TROVATO', 'Interrompo retry anticipato')
+                                break
+                            }
                         }
                     }
                 } catch (retryErr: any) {
-                    console.log(`[VALIDATION] Retry ${ri + 1} failed: ${retryErr.message}`)
+                    logProgress('❌ RETRY FALLITO', retryErr.message)
                 }
             }
 
             if (bestParsed !== parsed) {
-                console.log(`[VALIDATION] Using best retry: ${bestMovCount} movements (original: ${movs.length})`)
+                logProgress('✅ RETRY COMPLETATO', `Uso il migliore: ${bestMovCount} movimenti (originale: ${movs.length})`)
                 parsed = bestParsed
             } else {
-                console.log(`[VALIDATION] All retries returned same or fewer movements, keeping original`)
+                logProgress('⚠️ RETRY INUTILE', 'Mantengo estrazione originale')
             }
         } // end needsRetry
 
@@ -722,22 +742,24 @@ Restituisci SOLO il JSON, nessun altro testo.`
             }
         })
 
-        // Post-process: "Spese emis. E/C.-Rendiconto-Comunicazioni" con sotto-voce "comunicazioni"
-        // Quando l'importo include sia "estratto conto" (0.70) che "comunicazioni" (0.70) = 1.40,
-        // l'Excel conta solo la parte E/C (0.70). Correggiamo l'importo.
-        movements.forEach((m: any) => {
-            if (m.movement_type === 'Commissioni' &&
-                m.description?.toLowerCase().includes('spese emis') &&
-                m.description?.toLowerCase().includes('comunicazioni') &&
-                Math.abs(m.amount || 0) > 0.80) {
-                m.amount = m.amount > 0 ? 0.70 : -0.70
-            }
-        })
-
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
         // Dal 2023+: il totale commissioni dell'Excel include anche "Imposta di bollo E/C e Rendiconto"
         const periodEndStr = parsed.info?.period_end || ''
         const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
+
+        // Post-process: "Spese emis. E/C.-Rendiconto-Comunicazioni" con sotto-voce "comunicazioni"
+        // Dal 2024+: l'Excel conta solo la parte E/C (0.70), non le comunicazioni.
+        // Pre-2024: l'Excel conta entrambe (estratto conto + comunicazioni = 1.40).
+        if (periodYear >= 2024) {
+            movements.forEach((m: any) => {
+                if (m.movement_type === 'Commissioni' &&
+                    m.description?.toLowerCase().includes('spese emis') &&
+                    m.description?.toLowerCase().includes('comunicazioni') &&
+                    Math.abs(m.amount || 0) > 0.80) {
+                    m.amount = m.amount > 0 ? 0.70 : -0.70
+                }
+            })
+        }
 
         let calculatedCommissions = Math.abs(movements
             .filter((m: any) => m.movement_type === 'Commissioni')
@@ -772,12 +794,12 @@ Restituisci SOLO il JSON, nessun altro testo.`
             calculatedCommissions += tobinTax
         }
 
-        // Per periodi Q3 (settembre) e Q4 (dicembre) dal 2017+: escludi "Competenze"
-        // Il modello a volte usa "Competenze di chiusura", a volte "Competenze fruttifere"
-        // Dal 2017+ Q3/Q4: L'Excel usa il totale LORDO (non sottrae competenze)
-        // Pre-2017: L'Excel USA la somma netta (include competenze come offset) per tutti i trimestri
-        // 2017+ Q1/Q2: L'Excel USA la somma netta (include competenze come offset)
-        if ((periodMonth === 9 || periodMonth === 12) && periodYear >= 2017) {
+        // Dal 2017+ (escluso Q1/marzo): l'Excel usa il totale LORDO delle commissioni (non sottrae competenze)
+        // Quando Gemini classifica "Competenze Fruttifere/di chiusura" come Commissioni (positive),
+        // queste riducono abs(net sum). Aggiungiamo indietro per ottenere il lordo.
+        // Q1 (marzo): l'Excel usa la somma NETTA (competenze restano come offset)
+        // Pre-2017: l'Excel usa la somma netta (include competenze come offset)
+        if (periodYear >= 2017 && periodMonth !== 3) {
             const competenzeAmount = movements
                 .filter((m: any) => m.movement_type === 'Commissioni' &&
                     (m.amount || 0) > 0 &&
@@ -814,6 +836,8 @@ Restituisci SOLO il JSON, nessun altro testo.`
         const periodEnd = parsed.info?.period_end || ''
 
         // Return parsed data directly without saving to database
+        logProgress('✅ VERIFICA COMPLETATA', `Tempo totale: ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
+
         return NextResponse.json({
             success: true,
             fileName: fileName,

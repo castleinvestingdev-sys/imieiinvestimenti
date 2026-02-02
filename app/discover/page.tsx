@@ -12,6 +12,7 @@ export default function DiscoverPage() {
     const [isDragging, setIsDragging] = useState(false)
     const [fullPageDragCounter, setFullPageDragCounter] = useState(0)
     const [isUploading, setIsUploading] = useState(false)
+    const [uploadStage, setUploadStage] = useState<string>('') // Detailed progress message
     const [isSuccess, setIsSuccess] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -94,12 +95,32 @@ export default function DiscoverPage() {
         formData.append('file', file)
         formData.append('guestEmail', email)
 
+        // Progress indicator with time-based messages
+        const startTime = Date.now()
+        const progressInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000)
+            if (elapsed < 5) {
+                setUploadStage('Caricamento documento...')
+            } else if (elapsed < 10) {
+                setUploadStage('Conversione PDF...')
+            } else if (elapsed < 30) {
+                setUploadStage('Analisi AI in corso...')
+            } else if (elapsed < 60) {
+                setUploadStage('Estrazione movimenti...')
+            } else if (elapsed < 90) {
+                setUploadStage('Validazione dati...')
+            } else {
+                setUploadStage(`Analisi approfondita... (${elapsed}s)`)
+            }
+        }, 1000)
+
         try {
             const response = await fetch('/api/parse-pdf', {
                 method: 'POST',
                 body: formData,
             })
 
+            clearInterval(progressInterval)
             const result = await response.json()
 
             if (result.success) {
@@ -108,9 +129,11 @@ export default function DiscoverPage() {
                 setError(result.error || 'Si è verificato un errore durante l\'analisi.')
             }
         } catch (err) {
+            clearInterval(progressInterval)
             setError('Errore di connessione al server. Riprova più tardi.')
         } finally {
             setIsUploading(false)
+            setUploadStage('')
         }
     }
 
@@ -249,8 +272,21 @@ export default function DiscoverPage() {
                                 className="submit-btn"
                                 disabled={!file || !email || isUploading}
                             >
-                                {isUploading ? 'Analisi in corso...' : 'Richiedi Analisi Gratuita →'}
+                                {isUploading ? (uploadStage || 'Analisi in corso...') : 'Richiedi Analisi Gratuita →'}
                             </button>
+
+                            {isUploading && uploadStage && (
+                                <p style={{
+                                    textAlign: 'center',
+                                    fontSize: '0.9rem',
+                                    color: '#10b981',
+                                    marginTop: '8px',
+                                    fontWeight: 600,
+                                    animation: 'pulse 1.5s ease-in-out infinite'
+                                }}>
+                                    {uploadStage}
+                                </p>
+                            )}
                         </form>
 
                         <div className="secondary-cta">

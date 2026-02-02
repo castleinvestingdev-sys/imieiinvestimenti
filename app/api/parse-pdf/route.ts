@@ -131,9 +131,15 @@ function callGeminiDirect(apiKey: string, model: string, prompt: string, pdfBase
 export async function POST(request: NextRequest) {
     const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
 
+    const startTime = Date.now()
+    const logProgress = (stage: string, details?: string) => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+        console.log(`[${elapsed}s] 📊 ${stage}${details ? ` - ${details}` : ''}`)
+    }
+
     try {
         console.log('\n========== NUOVA RICHIESTA PARSE PDF ==========')
-        console.log('Timestamp:', new Date().toISOString())
+        console.log('⏰ Timestamp:', new Date().toISOString())
 
         const formData = await request.formData()
         const file = formData.get('file') as File
@@ -141,8 +147,8 @@ export async function POST(request: NextRequest) {
         const guestEmail = formData.get('guestEmail') as string
         const fileName = file?.name || 'documento.pdf'
 
-        console.log(`\n[SERVER] >>> RICEVUTA RICHIESTA DI ANALISI: ${fileName}`)
-        console.log(`[SERVER] UserID: ${userId} | GuestEmail: ${guestEmail} | Size: ${file?.size} bytes`)
+        logProgress('RICHIESTA RICEVUTA', `${fileName} (${(file?.size / 1024).toFixed(0)}KB)`)
+        console.log(`👤 UserID: ${userId || 'Guest'} | Email: ${guestEmail || 'N/A'}`)
 
         if (!file || (!userId && !guestEmail)) {
             console.error('[SERVER] ERRORE: File, UserId o Email mancante')
@@ -157,9 +163,12 @@ export async function POST(request: NextRequest) {
             }, { status: 500 })
         }
 
-        console.log(`API Key caricata (lunghezza: ${GEMINI_API_KEY.length})`)
+        logProgress('API KEY CARICATA', `Lunghezza: ${GEMINI_API_KEY.length}`)
+
+        logProgress('CONVERSIONE PDF', 'Encoding file in base64...')
         const fileBuffer = await file.arrayBuffer()
         const base64Data = Buffer.from(fileBuffer).toString('base64')
+        logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
 
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
 Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON rigoroso.
@@ -467,9 +476,9 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                console.log(`[GEMINI] Calling ${modelName} (attempt ${attempt}/${maxRetries}) via native https...`)
+                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName}`)
                 resText = await callGeminiDirect(GEMINI_API_KEY, modelName, systemPrompt, base64Data)
-                console.log(`[GEMINI] Response received: ${resText.length} chars`)
+                logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da Gemini`)
 
                 if (resText && resText.length > 10) {
                     success = true
@@ -489,11 +498,11 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
                 if (isRateLimit) {
                     const waitTime = attempt * 60000
-                    console.log(`[GEMINI] Rate limited, waiting ${waitTime/1000}s...`)
+                    logProgress('⏳ RATE LIMIT', `Attendo ${waitTime/1000}s prima del prossimo tentativo`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isNetworkError) {
                     const waitTime = attempt * 15000
-                    console.log(`[GEMINI] Network error, retrying in ${waitTime/1000}s...`)
+                    logProgress('🔌 ERRORE RETE', `Riprovo tra ${waitTime/1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else {
                     break
@@ -507,6 +516,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         }
 
         // Parse JSON from response (single attempt with repair fallback)
+        logProgress('PARSING JSON', 'Estrazione dati dalla risposta AI')
         let parsed = null
         let jsonError = ''
 
@@ -518,11 +528,13 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
             try {
                 parsed = JSON.parse(jsonMatch[0])
+                logProgress('✅ JSON PARSED', 'Parsing completato')
             } catch {
+                logProgress('🔧 RIPARAZIONE JSON', 'Tentativo di riparazione JSON troncato')
                 const repaired = repairTruncatedJson(jsonMatch[0])
                 if (repaired) {
                     parsed = JSON.parse(repaired)
-                    console.log('JSON riparato con successo')
+                    logProgress('✅ JSON RIPARATO', 'Riparazione completata con successo')
                 } else {
                     throw new Error('JSON non riparabile')
                 }
@@ -554,22 +566,24 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             }
         })
 
-        // Post-process: "Spese emis. E/C.-Rendiconto-Comunicazioni" con sotto-voce "comunicazioni"
-        // Quando l'importo include sia "estratto conto" (0.70) che "comunicazioni" (0.70) = 1.40,
-        // l'Excel conta solo la parte E/C (0.70). Correggiamo l'importo.
-        movements.forEach((m: any) => {
-            if (m.movement_type === 'Commissioni' &&
-                m.description?.toLowerCase().includes('spese emis') &&
-                m.description?.toLowerCase().includes('comunicazioni') &&
-                Math.abs(m.amount || 0) > 0.80) {
-                m.amount = m.amount > 0 ? 0.70 : -0.70
-            }
-        })
-
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
         // Dal 2023+: il totale commissioni dell'Excel include anche "Imposta di bollo E/C e Rendiconto"
         const periodEndStr = parsed.info?.period_end || ''
         const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
+
+        // Post-process: "Spese emis. E/C.-Rendiconto-Comunicazioni" con sotto-voce "comunicazioni"
+        // Dal 2024+: l'Excel conta solo la parte E/C (0.70), non le comunicazioni.
+        // Pre-2024: l'Excel conta entrambe (estratto conto + comunicazioni = 1.40).
+        if (periodYear >= 2024) {
+            movements.forEach((m: any) => {
+                if (m.movement_type === 'Commissioni' &&
+                    m.description?.toLowerCase().includes('spese emis') &&
+                    m.description?.toLowerCase().includes('comunicazioni') &&
+                    Math.abs(m.amount || 0) > 0.80) {
+                    m.amount = m.amount > 0 ? 0.70 : -0.70
+                }
+            })
+        }
 
         let calculatedCommissions = Math.abs(movements
             .filter((m: any) => m.movement_type === 'Commissioni')
@@ -604,12 +618,12 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             calculatedCommissions += tobinTax
         }
 
-        // Per periodi Q3 (settembre) e Q4 (dicembre) dal 2017+: escludi "Competenze"
-        // Il modello a volte usa "Competenze di chiusura", a volte "Competenze fruttifere"
-        // Dal 2017+ Q3/Q4: L'Excel usa il totale LORDO (non sottrae competenze)
-        // Pre-2017: L'Excel USA la somma netta (include competenze come offset) per tutti i trimestri
-        // 2017+ Q1/Q2: L'Excel USA la somma netta (include competenze come offset)
-        if ((periodMonth === 9 || periodMonth === 12) && periodYear >= 2017) {
+        // Dal 2017+ (escluso Q1/marzo): l'Excel usa il totale LORDO delle commissioni (non sottrae competenze)
+        // Quando Gemini classifica "Competenze Fruttifere/di chiusura" come Commissioni (positive),
+        // queste riducono abs(net sum). Aggiungiamo indietro per ottenere il lordo.
+        // Q1 (marzo): l'Excel usa la somma NETTA (competenze restano come offset)
+        // Pre-2017: l'Excel usa la somma netta (include competenze come offset)
+        if (periodYear >= 2017 && periodMonth !== 3) {
             const competenzeAmount = movements
                 .filter((m: any) => m.movement_type === 'Commissioni' &&
                     (m.amount || 0) > 0 &&
@@ -650,10 +664,11 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         }
 
         const isDossier = parsed.type === 'DOSSIER'
-        console.log(`[SERVER] >>> ANALISI COMPLETATA: ${fileName}`)
-        console.log(`[SERVER] Classificato come: ${parsed.type} | Bank: ${parsed.info?.bankName} | Account: ${parsed.info?.accountNumber}`)
+        logProgress('✅ ANALISI COMPLETATA', fileName)
+        console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
 
         // Salvataggio su Supabase
+        logProgress('SALVATAGGIO DATABASE', 'Inserimento dati in Supabase')
         const supabase = await createClient()
 
         const analysisData = {
@@ -693,9 +708,12 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             .single()
 
         if (error) {
-            console.error('Errore Database:', error)
+            logProgress('❌ ERRORE DATABASE', error.message)
             return NextResponse.json({ success: false, error: 'Errore salvataggio database' }, { status: 500 })
         }
+
+        logProgress('✅ COMPLETATO', `Documento salvato con ID: ${data.id}`)
+        console.log(`⏱️ Tempo totale: ${((Date.now() - startTime) / 1000).toFixed(1)}s\n`)
 
         return NextResponse.json({
             success: true,
