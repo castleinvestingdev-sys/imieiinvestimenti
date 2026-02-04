@@ -74,7 +74,7 @@ export default function Header() {
     { href: '/reati', label: 'Attenzione ai rebates' },
   ]
 
-  const isFullscreenPage = pathname === '/login' || pathname === '/register' || pathname === '/consulente' || pathname?.startsWith('/dashboard')
+  const isFullscreenPage = pathname === '/login' || pathname === '/register' || pathname === '/consulente' || pathname?.startsWith('/dashboard') || pathname?.startsWith('/analisi')
 
   if (isFullscreenPage) return null
 
