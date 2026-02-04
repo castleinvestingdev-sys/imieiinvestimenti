@@ -1,0 +1,171 @@
+{
+  "summary": {
+    "total_pdfs": 40,
+    "processed": 0,
+    "perfect_matches": 0,
+    "with_discrepancies": 0,
+    "errors": 39,
+    "match_rate": 0
+  },
+  "results": [],
+  "errors": [
+    {
+      "file": "20150930_Estratto_conto__S-1198694239.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20151231_Estratto_conto__Z1883245157.pdf",
+      "error": "HTTPConnectionPool(host='localhost', port=3000): Read timed out. (read timeout=120)"
+    },
+    {
+      "file": "20160331_Estratto_conto__S-463363095.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20160630_Estratto_conto__S-1527078258.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20160930_Estratto_conto__S728393780.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20161231_Estratto_conto__S1959492322.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20170331_Estratto_conto__S871949053.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20170630_Estratto_conto__S-457191439.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20170930_Estratto_conto__S1499981500.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20171231_Estratto_conto__S262410048.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20180331_Estratto_conto__S374329599.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20180630_Estratto_conto__S1196603916.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20180930_Estratto_conto__S276287649.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20181231_Estratto_conto__S1098561966.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20190331_Estratto_conto__S172882929.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20190630_Estratto_conto__S-1339395643.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20190930_Estratto_conto__S-635513787.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20191231_Estratto_conto__S713977216.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20200331_Estratto_conto__S-94419500.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20200630_Estratto_conto__S-1740815177.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20200930_Estratto_conto__S1633835852.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20201231_Estratto_conto__S-1838857127.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20210331_Estratto_conto__S416614911.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20210630_Estratto_conto__S424477233.pdf",
+      "error": "HTTPConnectionPool(host='localhost', port=3000): Read timed out. (read timeout=120)"
+    },
+    {
+      "file": "20210930_Estratto_conto__S-1615018025.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20211231_Estratto_conto__S1759633004.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20220331_Estratto_conto__S438354834.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20220630_Estratto_conto__S1661591054.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20220930_Estratto_conto__S-1283885239.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20221231_Estratto_conto__S929238599.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20230331_Estratto_conto__S831196649.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20230630_Estratto_conto__S-1208298609.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20230930_Estratto_conto__S22799933.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20231231_Estratto_conto__S-779123873.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20240331_Estratto_conto_trimestrale.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20240630 Estratto conto.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20240930 Estratto conto trimestrale.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20241231 Estratto conto.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    },
+    {
+      "file": "20250331 31-03-2025_Estratto conto.pdf",
+      "error": "HTTP 500: {\"success\":false,\"error\":\"Errore salvataggio database\"}"
+    }
+  ],
+  "field_errors": {},
+  "year_stats": {}
+}

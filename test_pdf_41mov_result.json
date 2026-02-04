@@ -1,0 +1,361 @@
+{
+  "success": true,
+  "fileName": "20231231_Estratto_conto.pdf",
+  "data": {
+    "type": "LIQUIDITY",
+    "layout_detected": "two_columns_dare_avere",
+    "info": {
+      "bankName": "INTESA SANPAOLO",
+      "accountNumber": "19812/0000/00038973",
+      "period_start": "2023-09-30",
+      "period_end": "2023-12-31",
+      "holder": "FRIGERI MARIA CRISTINA",
+      "settlementAccount": "IT34 Q030 6912 7650 0000 0038 973"
+    },
+    "scalar_data": {
+      "numeri_creditori": 13286167.45,
+      "numeri_debitori": 14395636.58,
+      "interessi_attivi_lordi": 0,
+      "interessi_passivi_lordi": 0,
+      "interessi_creditori_periodi": [
+        {
+          "data": "28/02/2022",
+          "interessi": 0
+        },
+        {
+          "data": "28/02/2022",
+          "interessi": 0
+        },
+        {
+          "data": "31/12/2022",
+          "interessi": 0
+        }
+      ],
+      "tasso_attivo": "0%",
+      "tasso_passivo": "0%",
+      "acquisto_titoli_count": 6,
+      "vendita_titoli_count": 0,
+      "movimenti_titoli_count": 6,
+      "acquisto_titoli_amount": -3000,
+      "vendita_titoli_amount": 0
+    },
+    "movements": [
+      {
+        "date": "02/10/2023",
+        "description": "Costo emissione comunicazione di legge AL 03.10.2023 DEL CONTRATTO MYKEY RAPPORTO N.01025/0000/33670450",
+        "amount": -0.7,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "03/10/2023",
+        "description": "Spese emis. E/C.-Rendiconto-Comunicazioni N. 1 A Euro 0,70 per estratto conto",
+        "amount": -0.7,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "03/10/2023",
+        "description": "Imposta di bollo E/C e Rendiconto per supero giacenza media nei periodi rendicontati al: 30.09.2023",
+        "amount": -8.6,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "05/10/2023",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "05/10/2023",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "11/10/2023",
+        "description": "Imposta di bollo su Prodotti Finanziari IMPOSTA DI BOLLO SU D.A. 19812/000001000811 REL. AL PERIODO DAL 01.07.2023 AL 30.09.2023 PER UN IMPONIBILE DI EURO 616.721,90 (NDG 3716465373000)",
+        "amount": -310.9,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "23/10/2023",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "31/10/2023",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI OTTOBRE",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "02/11/2023",
+        "description": "Cedole o Dividendi",
+        "amount": 373.93,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "06/11/2023",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/11/2023",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "17/11/2023",
+        "description": "Pagamento su POS COIN 15840 16/11-10:21 Carta n.5167 XXXX XXXX XX05",
+        "amount": -35.7,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "20/11/2023",
+        "description": "Pagamento Tramite POS FARMACIA FORNARI SNC DI STR17/11-10:15 - Carta n.5167 XXXX XXXX XX05ABI: 03268 COD.6008849/000015",
+        "amount": -93,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "22/11/2023",
+        "description": "Cedole o Dividendi",
+        "amount": 639.36,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "22/11/2023",
+        "description": "Pagamento POS EFFETTUATO IL 19/11/2023 ALLE ORE 11:45 MEDIANTE LA CARTA 5167 XXXX XXXX XX05 PRESSO MANGO PARMA CAVOUR 21 PARMA",
+        "amount": -120.09,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "23/11/2023",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "24/11/2023",
+        "description": "Pagamento Tramite POS ZARA 9107 STRADA CAVOUR, 16723/11-10:59 - Carta n.5167 XXXX XXXX XX05ABI: 01005 COD.3574495/002875",
+        "amount": -60.1,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "28/11/2023",
+        "description": "Prelievo presso cAssa Self stessa banca EFFETTUATO PRESSO:19812-PARMA BATTISTI ALLE ORE 10:41",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "28/11/2023",
+        "description": "Pagamento Tramite POS CARTA N.5167XXXXXXXXX205 SP.0035 UFFICIO POSTALE P.27/11-10:31 - Carta n.5167 XXXX XXXX XX05ABI: 09509 COD.3513110/068825",
+        "amount": -52.71,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "28/11/2023",
+        "description": "Pagamento Tramite POS MEDI-MARKET ITALIA S.R PIAZ27/11-11:00 - Carta n.5167 XXXX XXXX XX05ABI: 06230 COD.3856406/000315",
+        "amount": -71.7,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "30/11/2023",
+        "description": "Ricarica VODAFONE su sportello automatico dell'utenza N. 3482443874 Carta 5167 XXXX XXXX XX05-29/11/2023 11.31",
+        "amount": -30,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "30/11/2023",
+        "description": "Cedole o Dividendi",
+        "amount": 111.89,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "30/11/2023",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI NOVEMBRE",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "01/12/2023",
+        "description": "Pagamento Tramite POS UFFICIO POSTALE P.30/11-10:52 - Carta n.5167 XXXX XXXX XX05ABI: 09509 COD.3513110/068825",
+        "amount": -185.68,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "04/12/2023",
+        "description": "Prelievo sportello banca del gruppo CON CARTA N. 5167 XXXX XXXX XX05 EFFETTUATO IL 02/12/2023 ALLE ORE 10:35 PRESSO ABI 1025 SPORTELLO 7952 IN PIAZZALE CESARE BATTISTI 1 PARMA PR",
+        "amount": -250,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "04/12/2023",
+        "description": "Pagamento Tramite POS RISTORANTE PIZZERIA SA VIAL03/12-20:50 - Carta n.5167 XXXX XXXX XX05ABI: 06230 COD.4965100/000015",
+        "amount": -36,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "04/12/2023",
+        "description": "Pagamento Tramite POS LINCONTRO DEI SAPORI.. VIA03/12-14:23 - Carta n.5167 XXXX XXXX XX05ABI: 09512 COD.4439131/000015",
+        "amount": -81.5,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "06/12/2023",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/12/2023",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/12/2023",
+        "description": "Prelievo presso cAssa Self stessa banca EFFETTUATO PRESSO:19812-PARMA BATTISTI ALLE ORE 10:39 CARTA N.5167XXXXXXXXX205 SP.8428",
+        "amount": -160,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "11/12/2023",
+        "description": "Pagamento su POS BATA 09/12-17:07 Carta n.5167 XXXX XXXX XX05",
+        "amount": -50.07,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "12/12/2023",
+        "description": "Ricarica VODAFONE su sportello automatico dell'utenza N. 3408065502 Carta 5167 XXXX XXXX XX05-06/12/2023 10.38",
+        "amount": -60,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "14/12/2023",
+        "description": "Pagamento Tramite POS UFFICIO POSTALE P. 13/12-11:48 - Carta n.5167 XXXX XXXX XX05ABI: 09509 COD.3513110/068825",
+        "amount": -216.98,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "18/12/2023",
+        "description": "Prelievo sportello banca del gruppo CON CARTA N. 5167 XXXX XXXX XX05 EFFETTUATO IL 16/12/2023 ALLE ORE 16:47 PRESSO ABI 1025SPORTELLO 7952 IN PIAZZALE CESARE BATTISTI 1 PARMA PR",
+        "amount": -160,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "21/12/2023",
+        "description": "Pagamento Tramite POS CAPAGIO SRL STRADA LUIGI CA20/12-17:43 -",
+        "amount": -45,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "21/12/2023",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "22/12/2023",
+        "description": "Pagamento su POS BATA 21/12-10:55 Carta n.5167 XXXX XXXX XX05",
+        "amount": -40.07,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "22/12/2023",
+        "description": "Pagamento Tramite POS IPERSOAP SRL STRADA VENTIDU21/12-16:44 Carta n.5167 XXXX XXXX XX05ABI: 09517 COD.3106936/000025",
+        "amount": -39.36,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "28/12/2023",
+        "description": "Pagamento POS EFFETTUATO IL 24/12/2023 ALLE ORE 10:50 MEDIANTE LA CARTA 5167 XXXX XXXX XX05 PRESSO SumUp *Trocchi Giorgi Cento",
+        "amount": -70,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "28/12/2023",
+        "description": "Pagamento Tramite POS ZARA 9107 STRADA CAVOUR, 16727/12-17:23 - Carta n.5167 XXXX XXXX XX05ABI: 01005 COD.3574495/002875",
+        "amount": -90.1,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "31/12/2023",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI DICEMBRE",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      }
+    ],
+    "summary": {
+      "initial_balance": {
+        "value": 58805.93,
+        "source": "extracted"
+      },
+      "final_balance": {
+        "value": 54131.91,
+        "source": "extracted"
+      },
+      "total_movements_amount": {
+        "value": -4674.0199999999995,
+        "source": "calculated"
+      },
+      "total_commissions": {
+        "value": 28,
+        "source": "calculated"
+      },
+      "total_proventi": {
+        "value": 1125.18,
+        "source": "calculated"
+      },
+      "math_verification": {
+        "expected_delta": -4674.02,
+        "actual_sum": -4674.02,
+        "matches": true
+      }
+    },
+    "finalPortfolio": [],
+    "dividends": []
+  }
+}

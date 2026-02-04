@@ -1,0 +1,171 @@
+{
+  "success": true,
+  "fileName": "20150930_Estratto_conto__S-1198694239.pdf",
+  "data": {
+    "type": "LIQUIDITY",
+    "layout_detected": "two_columns_dare_avere",
+    "info": {
+      "bankName": "INTESA SANPAOLO",
+      "accountNumber": "0000/38973",
+      "period_start": "2015-06-30",
+      "period_end": "2015-09-30",
+      "holder": "FRIGERI MARIA CRISTINA",
+      "settlementAccount": "IT34 Q030 6912 7650 0000 0038 973"
+    },
+    "scalar_data": {
+      "numeri_creditori": 5875588.04,
+      "numeri_debitori": 0,
+      "interessi_attivi_lordi": 1.59,
+      "interessi_passivi_lordi": 0,
+      "interessi_creditori_periodi": [
+        {
+          "data": "30/06/2015",
+          "interessi": 1.59
+        }
+      ],
+      "tasso_attivo": "0.01%",
+      "tasso_passivo": "0.00%",
+      "acquisto_titoli_count": 2,
+      "vendita_titoli_count": 1,
+      "movimenti_titoli_count": 3,
+      "acquisto_titoli_amount": -61417.25,
+      "vendita_titoli_amount": 51591
+    },
+    "movements": [
+      {
+        "date": "03/07/2015",
+        "description": "Competenze di Chiusura",
+        "amount": 1.89,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "03/07/2015",
+        "description": "Spese emis. E/C.-Rendiconto-Comunicazioni",
+        "amount": -0.7,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "03/07/2015",
+        "description": "Imposta di bollo E/C e Rendiconto per supero giacenza media nei periodi rendicontati al: 30.06.2015",
+        "amount": -8.5,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "14/07/2015",
+        "description": "Imposta di bollo su Prodotti Finanziari IMPOSTA DI BOLLO SU D.A. 00003/000001000811 REL. AL PERIODO DAL 01.01.2015 AL 30.06.2015 PER UN IMPONIBILE DI EURO 256.426,33 (NDG 0005291954000)",
+        "amount": -254.3,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "16/07/2015",
+        "description": "Invio rendicontazione/contabili titoli relative al D.A. n. 00003/900001000811 NR 0001 A EURO 0,70 PER RENDICONTO POSTALE NR 0000 A EURO 0,00 PER RENDICONTO ON LINE",
+        "amount": -0.7,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "16/07/2015",
+        "description": "Commissione di gestione e amministrazione relative al D.A. n. 00003/900001000811",
+        "amount": -45,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "31/07/2015",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI LUGLIO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "13/08/2015",
+        "description": "Bonifico a Vostro favore disposto da: MITT.: EPSILON EPSILON FL. FOREX COUP DIC 2018 COD. DISP.: 011508120PXG8Z SECU BON.EUR.UNICO VS.FAV. CON CONTAB. NOTPROVIDED DIST PROV ELNJH POS 0007883655 BENEF.: FRIGERI MARIA CRISTINA BIC. ORD.: SBOSITMMXXX",
+        "amount": 67.24,
+        "sign_source": "column_position",
+        "movement_type": "Bonifico"
+      },
+      {
+        "date": "31/08/2015",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI AGOSTO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "24/09/2015",
+        "description": "Premio polizza POLIZZA N.000681447/00 ABITAZIONE & FAMIGLIA",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "24/09/2015",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - EN7G - DEPOSITO 19812/310001000811",
+        "amount": -52000,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "25/09/2015",
+        "description": "Cedole o Dividendi",
+        "amount": 89.92,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "28/09/2015",
+        "description": "ACQUISTO DI STMICROELECTRONIC Q.TA' 1.600,000 A 5,860000 EUR ID.OP.WRKT09241511228466900001",
+        "amount": -9417.25,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "30/09/2015",
+        "description": "Bonifico n. 007784449381682 Disposto da: EURIZON CAPITAL SA CRO: 24284256403 RISCATTO DEL 25.09.2015 POS 3320001278 FONDO 00182 RISCATTO DEL 25.09.2015 POS 3320001278 FONDO 00182 EURIZON EASYFUND DATA ORDINE: 20150929 BENEF: FRIGERI MARIA CRISTINA",
+        "amount": 51591,
+        "sign_source": "column_position",
+        "movement_type": "Vendita"
+      },
+      {
+        "date": "30/09/2015",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI SETTEMBRE",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      }
+    ],
+    "summary": {
+      "initial_balance": {
+        "value": 67734.16,
+        "source": "extracted"
+      },
+      "final_balance": {
+        "value": 57735.68,
+        "source": "extracted"
+      },
+      "total_movements_amount": {
+        "value": -9998.480000000003,
+        "source": "calculated"
+      },
+      "total_commissions": {
+        "value": 62.51,
+        "source": "calculated"
+      },
+      "total_proventi": {
+        "value": 89.92,
+        "source": "calculated"
+      },
+      "math_verification": {
+        "expected_delta": -9998.48,
+        "actual_sum": -9998.48,
+        "matches": true
+      }
+    },
+    "finalPortfolio": [],
+    "dividends": []
+  }
+}

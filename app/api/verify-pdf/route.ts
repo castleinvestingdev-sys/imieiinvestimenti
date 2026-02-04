@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import https from 'https'
 
-// Allow up to 5 minutes for Gemini PDF processing
-export const maxDuration = 300
+// Allow up to 10 minutes for Gemini PDF processing (some complex PDFs need more time)
+export const maxDuration = 600
 
 export async function POST(request: NextRequest) {
     const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
@@ -38,7 +38,9 @@ export async function POST(request: NextRequest) {
         const base64Data = Buffer.from(fileBuffer).toString('base64')
         logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
 
-        const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
+        const systemPrompt = `CRITICAL: Your response must contain ONLY valid JSON, no explanations, no markdown, no extra text before or after.
+
+Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
 Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON rigoroso.
 
 ### FASE 1: CLASSIFICAZIONE DEL DOCUMENTO
@@ -116,10 +118,33 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 - F24, imposte varie
 - Imposta sulle transazioni finanziarie (Tobin Tax)
 
-**"Acquisto"** - Investimenti: sottoscrizione fondi, PAC, acquisto titoli/ETF
-**"Vendita"** - Disinvestimenti: riscatto fondi, vendita titoli
+**"Acquisto"** - Investimenti in titoli (azioni, ETF, obbligazioni, certificates):
+- ACQ., ACQUISTO di titoli/ETF/azioni/obbligazioni
+- SOTTOSCRIZIONE di certificates/structured products (es. "SOTTOSCRIZIONE DI 24.000 CITIGROUP")
+- Investimento in fondi comuni (es. "Investimento in fondi comuni FONDO SOTTO")
+- PAC FONDI
+**ESCLUSIONI da Acquisto:**
+- **Conferimenti su GPM/GPF** (Gestioni Patrimoniali) → "Altro"
+- **Accensione buono di risparmio** → "Altro"
+- **Buoni di risparmio** → "Altro"
+- Bonifici, versamenti generici → "Bonifico"
+
+**"Vendita"** - Disinvestimenti e vendite titoli:
+- **VENDITA**, **VEND.** (keyword critica!)
+- NOTA INF. VEND., riscatto fondi
+- RISCATTO QUOTE, RISCATTO TOTALE, RISCATTO PARZIALE, **REDEMP** (redemption)
+- DISINV, DISINVESTIMENTO
+- LIQUIDAZ FONDI, SWITCH OUT
+- **Rimborso fondi comuni** (es. "Rimborso da fondi comuni")
+- Rimborso seguito da: FONDI, SICAV, QUOTE, ETF, OBBLIG, TITOLI
+- **"Bonifico a Vostro favore" - Regole speciali:**
+  - Se mittente contiene "SICAV" (es. "EAST CAPITAL(LUX) SICAV") → Vendita
+  - Se descrizione contiene "REDEMP", "RISCATTO", "DISINV", "LIQUIDAZ" → Vendita
+  - Se mittente è SGR/fondo E importo > 1000€ E contiene nome fondo (AZION, OBBLIG, BILANC, etc.) → Vendita
+  - Se mittente è SGR E importo < 200€ → probabilmente dividendi (Proventi), NON vendita
+
 **"Proventi"** - Cedole, dividendi
-**"Bonifico"** - Bonifici, stipendio, versamenti
+**"Bonifico"** - Bonifici, stipendio, versamenti (ESCLUSI i bonifici da SICAV/Fondi che sono vendite - vedi sopra)
 **"Altro"** - Tutto il resto:
 - **Premio polizza** / Premio assicurazione → "Altro"
 - Prelievo contante (se non ha commissione separata)
@@ -246,15 +271,20 @@ Estrai:
 Analizza la lista movimenti e identifica operazioni su titoli:
 
 **ACQUISTI TITOLI (importi NEGATIVI - uscite di denaro):**
-Keywords: "ACQ.", "ACQUISTO", "SOTTOSC", "SOTTOSCRIZIONE", "NOTA INF. ACQ.", "PAC FONDI"
+Keywords: "ACQ.", "ACQUISTO", "SOTTOSC", "SOTTOSCRIZIONE", "NOTA INF. ACQ.", "PAC FONDI", "Investimento in fondi comuni"
+**ESCLUDERE dagli acquisti:**
+- "Conferimenti su GPM" o "Conferimenti su GPF" → NON sono acquisti titoli (gestioni patrimoniali)
+- "Accensione buono di risparmio" o "Buoni di risparmio" → NON sono acquisti titoli
+- Se la descrizione contiene "GPM" o "GPF" insieme a "conferiment" → NON contare
 
 **VENDITE TITOLI (importi POSITIVI - entrate di denaro):**
-Keywords per vendite: "NOTA INF. VEND.", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE", "DISINV", "DISINVESTIMENTO", "LIQUIDAZ FONDI", "SWITCH OUT"
-Keyword RIMBORSO: conta come vendita SOLO se seguito da: "FONDI", "SICAV", "QUOTE", "ETF", "OBBLIG"
+Keywords per vendite: **"VENDITA"**, **"VEND."**, "NOTA INF. VEND.", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE", "DISINV", "DISINVESTIMENTO", "LIQUIDAZ FONDI", "SWITCH OUT", "Rimborso da fondi comuni", "Rimborso fondi comuni"
+Keyword RIMBORSO: conta come vendita se seguito da: "FONDI", "SICAV", "QUOTE", "ETF", "OBBLIG", "TITOLI", "COMUNI"
 **ESCLUSIONI - NON contare come vendite:**
 - "CEDOLA", "DIVIDENDO", "STACCO CED" = PROVENTI
-- "RIMBORSO BUONO", "RIMBORSO SPESE", "RIMBORSO BOLLO" = NON sono vendite titoli
-- "RISCATTO" generico senza riferimento a fondi = verificare contesto
+- "RIMBORSO BUONO" (buoni di risparmio) = NON sono vendite titoli
+- "RIMBORSO SPESE", "RIMBORSO BOLLO", "RIMBORSO CANONE" = NON sono vendite titoli
+- "RISCATTO" generico senza riferimento a fondi/titoli = verificare contesto
 
 Calcola e inserisci in scalar_data:
 - **acquisto_titoli_count**: numero di operazioni di acquisto
@@ -283,7 +313,83 @@ Prima di restituire il JSON:
 - Se il PDF ha più pagine, DEVI leggere e estrarre i movimenti da TUTTE le pagine.
 - Conta il numero totale di righe nella tabella movimenti nel PDF. Il tuo JSON DEVE avere lo STESSO numero di elementi nell'array "movements".
 - NON fermarti prima di aver estratto TUTTI i movimenti. Anche se ci sono 50+ movimenti, estraili TUTTI.
-- "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Bonifico", NON "Vendita".
+- **BONIFICO A VOSTRO FAVORE - Regola di classificazione**:
+  - Se il mittente contiene "SICAV" (es. "EAST CAPITAL(LUX) SICAV") → classificare come **"Vendita"** (rimborso fondo)
+  - Se la descrizione contiene "REDEMP", "RISCATTO", "DISINV", "LIQUIDAZ" → classificare come **"Vendita"** (rimborso/disinvestimento)
+  - Se il mittente è "Eurizon Capital SGR" o simile E il bonifico è di importo elevato (> 1000€) E contiene nome fondo (es. "AZION", "OBBLIG", "BILANC") → probabilmente rimborso fondo, classificare come **"Vendita"**
+  - Se il mittente è una SGR per importi piccoli (< 200€) → probabilmente dividendi/proventi, classificare come "Proventi" o "Bonifico"
+  - Altri bonifici generici → "Bonifico"
+
+### FASE 8: ESTRAZIONE PORTAFOGLIO TITOLI (SOLO PER type="DOSSIER")
+Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio:
+
+**8.1 CONTROVALORE TOTALE**
+Cerca nel PDF il valore "CONTROVALORE TOTALE APPARENTE" o "CONTROVALORE TOTALE" o simile.
+Esempio: "CONTROVALORE TOTALE APPARENTE AL 31/03/2019 Euro 527.413,10"
+Estrai:
+- Il valore numerico → summary.portfolio_total_extracted (es. 527413.10)
+- La valuta → summary.portfolio_currency (es. "EUR" se dice "Euro", "USD" se dice "Dollar", ecc.)
+
+**8.2 SINGOLI TITOLI**
+Per OGNI titolo nella sezione "CONSISTENZA" (AZIONI, OBBLIGAZIONI, FONDI, SICAV, ETF):
+- **isin**: Codice ISIN del titolo (es. "FR0010245514", "IT0001047437")
+- **name**: Nome/Descrizione del titolo ESATTAMENTE come appare nel PDF (es. "LYXOR JAPAN (TOPIX)D", "EURIZON BREVE TERM $", "CARMIGNAC PATRIMOINE")
+- **currency**: Divisa/Valuta (es. "EUR", "USD") - dalla colonna "Divisa"
+- **exchangeRate**: Tasso di cambio (es. 1.1235) - dalla colonna "Cambio". Se vuoto o EUR, usa 1
+- **quantity**: Quantità/Consistenza (numero di quote/azioni)
+- **price**: Quotazione/Prezzo unitario - dalla colonna "Quotazione"
+- **marketValue**: Controvalore in Euro - dalla colonna "Controvalore Euro"
+
+IMPORTANTE:
+- Estrai il nome del titolo dalla colonna "Descrizione" del PDF
+- Il nome può essere abbreviato nel PDF (es. "ANIMA FONDO TRADING" o "LYXOR COMMOD. THOM.R")
+- NON inventare nomi - usa ESATTAMENTE quello che appare nel PDF
+- Per titoli in default (es. "Titolo in default"), metti marketValue = 0
+- I titoli in default NON contribuiscono al controvalore totale
+- Se la quotazione non è disponibile ("Non dispon."), metti price = 0
+
+### FASE 9: ESTRAZIONE MOVIMENTI TITOLI (SOLO PER type="DOSSIER")
+Se il documento è un DOSSIER TITOLI, estrai TUTTI i movimenti di acquisto/vendita titoli.
+
+**9.1 IDENTIFICAZIONE OPERAZIONI**
+Le banche usano terminologie diverse per indicare acquisti e vendite:
+
+**ACQUISTO (Carico titoli)** - Keywords:
+- "ACQUISTO", "ACQ.", "ACQ", "CARICO", "CARICO TITOLI"
+- "SOTTOSCRIZIONE", "SOTTOSC.", "SOTTOSCR."
+- "VERSAMENTO QUOTE", "CONFERIMENTO"
+- "PAC" (Piano Accumulo Capitale)
+- "NOTA INF. ACQ.", "SWITCH IN"
+- "INVESTIMENTO", "INV."
+
+**VENDITA (Scarico titoli)** - Keywords:
+- "VENDITA", "VEND.", "SCARICO", "SCARICO TITOLI"
+- "RISCATTO", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE"
+- "RIMBORSO", "RIMB.", "LIQUIDAZIONE", "LIQUIDAZ."
+- "DISINVESTIMENTO", "DISINV."
+- "NOTA INF. VEND.", "SWITCH OUT"
+- "PRELIEVO QUOTE"
+
+**9.2 STRUTTURA MOVIMENTI**
+Per OGNI movimento titoli estrai:
+- **isin**: Codice ISIN del titolo (se presente)
+- **date**: Data operazione (formato "DD/MM/YYYY")
+- **name**: Nome/Descrizione del titolo
+- **operationType**: "Acquisto" o "Vendita" (normalizza sempre a questi due valori)
+- **quantity**: Quantità/Numero quote (positivo)
+- **price**: Prezzo/Quotazione unitario
+- **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
+- **currency**: Valuta/Divisa (EUR, USD, etc.)
+- **fees**: Spese/Commissioni dell'operazione
+- **taxes**: Imposte, bolli, ritenute
+- **netAmount**: Importo netto totale dell'operazione
+
+**9.3 NOTE IMPORTANTI**
+- La sezione movimenti può essere chiamata: "MOVIMENTI", "OPERAZIONI", "LISTA OPERAZIONI", "DETTAGLIO MOVIMENTI"
+- Alcune banche mostrano solo il totale, altre mostrano il dettaglio per ogni titolo
+- Se non ci sono movimenti nel periodo, lascia l'array vuoto
+- Il netAmount per acquisti è l'importo pagato (positivo), per vendite è l'importo ricevuto (positivo)
+- fees e taxes potrebbero essere inclusi nel netAmount o mostrati separatamente
 
 ### STRUTTURA JSON RICHIESTA:
 {
@@ -291,11 +397,11 @@ Prima di restituire il JSON:
   "layout_detected": "two_columns_dare_avere" | "single_column_with_sign" | "single_column_no_sign" | "other",
   "info": {
     "bankName": "Nome Banca",
-    "accountNumber": "Numero Conto",
+    "accountNumber": "Numero Conto o Dossier Titoli (es. 445/0000004742990)",
     "period_start": "YYYY-MM-DD",
     "period_end": "YYYY-MM-DD",
     "holder": "Intestatario",
-    "settlementAccount": "IBAN"
+    "settlementAccount": "Per DOSSIER: cerca 'Conto di Regolamento', 'Conto Regolamento', 'Conto di appoggio', 'Conto corrente tecnico', 'Cash account', 'C/C Regolamento', 'Conto Corrente', 'N. Conto Corrente', 'C/EURO' (es. C/EURO 00445/00035652638). Per LIQUIDITY: IBAN"
   },
   "scalar_data": {
     "numeri_creditori": 0,
@@ -326,16 +432,44 @@ Prima di restituire il JSON:
     "total_movements_amount": { "value": 0, "source": "calculated" },
     "total_commissions": { "value": 0, "source": "calculated" },
     "total_proventi": { "value": 0, "source": "calculated" },
-    "math_verification": { "expected_delta": 0, "actual_sum": 0, "matches": true }
+    "math_verification": { "expected_delta": 0, "actual_sum": 0, "matches": true },
+    "portfolio_total_extracted": 0,
+    "portfolio_currency": "EUR"
   },
-  "finalPortfolio": [],
+  "finalPortfolio": [
+    {
+      "isin": "CODICE_ISIN",
+      "name": "Nome del titolo dal PDF",
+      "currency": "EUR",
+      "exchangeRate": 1,
+      "quantity": 0,
+      "price": 0,
+      "marketValue": 0
+    }
+  ],
+  "securityMovements": [
+    {
+      "isin": "CODICE_ISIN",
+      "date": "DD/MM/YYYY",
+      "name": "Nome del titolo",
+      "operationType": "Acquisto" | "Vendita",
+      "quantity": 0,
+      "price": 0,
+      "exchangeRate": 1,
+      "currency": "EUR",
+      "fees": 0,
+      "taxes": 0,
+      "netAmount": 0
+    }
+  ],
   "dividends": []
 }
 
-Restituisci SOLO il JSON, nessun altro testo.`
+CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown formatting (no \`\`\`json), NO additional text whatsoever. Start your response with { and end with }. Nothing else.`
 
-        // Gemini 2.5 Flash: Stable, fast (10-15s), production-ready
-        // Note: gemini-3-flash-preview is too slow (5+ min) - rolled back
+        // Gemini 2.5 Flash: Fast and cost-effective
+        // Tested: 15s processing time vs 15+ min for Pro models
+        // Note: Gemini 1.5 Pro is 60x slower (timeout after 15 min)
         const modelName = 'gemini-2.5-flash'
 
         let resText = ''
@@ -357,7 +491,7 @@ Restituisci SOLO il JSON, nessun altro testo.`
                         temperature: 0,
                         topP: 1,
                         topK: 1,
-                        maxOutputTokens: 65536
+                        maxOutputTokens: 200000  // Increased from 65536 to handle complex PDFs (PDF #35 was truncated at 81,220 chars)
                     }
                 })
 
@@ -519,17 +653,40 @@ Restituisci SOLO il JSON, nessun altro testo.`
         }
 
         // Pulizia JSON con retry per errori di parsing
-        const maxJsonRetries = 6
+        // OPTIMIZED: Reduced from 6 to 2 retries to avoid 24+ minute timeouts
+        const maxJsonRetries = 2
         let parsed = null
         let jsonError = ''
         for (let jsonAttempt = 1; jsonAttempt <= maxJsonRetries; jsonAttempt++) {
             try {
-                const jsonMatch = resText.match(/\{[\s\S]*\}/)
-                if (!jsonMatch) {
-                    throw new Error('Risposta AI non valida - nessun JSON trovato')
+                // IMPROVED: Try multiple extraction strategies
+                let jsonToParse = null
+
+                // Strategy 1: Look for JSON starting with expected structure
+                const structuredMatch = resText.match(/\{\s*"type"\s*:\s*"(LIQUIDITY|DOSSIER)"[\s\S]*\}/)
+                if (structuredMatch) {
+                    jsonToParse = structuredMatch[0]
                 }
 
-                let jsonToParse = jsonMatch[0]
+                // Strategy 2: Fallback to basic greedy match
+                if (!jsonToParse) {
+                    const jsonMatch = resText.match(/\{[\s\S]*\}/)
+                    if (jsonMatch) {
+                        jsonToParse = jsonMatch[0]
+                    }
+                }
+
+                // Strategy 3: If response has markdown code blocks, extract from them
+                if (!jsonToParse) {
+                    const codeBlockMatch = resText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
+                    if (codeBlockMatch) {
+                        jsonToParse = codeBlockMatch[1]
+                    }
+                }
+
+                if (!jsonToParse) {
+                    throw new Error('Risposta AI non valida - nessun JSON trovato')
+                }
 
                 // Try direct parse first
                 try {
@@ -547,9 +704,9 @@ Restituisci SOLO il JSON, nessun altro testo.`
             } catch (parseErr: any) {
                 jsonError = parseErr.message
                 if (jsonAttempt < maxJsonRetries) {
-                    // Retry extraction via native https
+                    // Only retry once with reinforced prompt
                     try {
-                        console.log(`[GEMINI] JSON parse failed, retrying extraction (attempt ${jsonAttempt + 1}/${maxJsonRetries})...`)
+                        console.log(`[GEMINI] JSON parse failed (${parseErr.message.substring(0, 50)}), retrying extraction (attempt ${jsonAttempt + 1}/${maxJsonRetries})...`)
                         resText = await callGeminiDirect(GEMINI_API_KEY, modelName, systemPrompt, base64Data)
                     } catch {
                         // Ignore retry errors, will fail on next parse attempt
@@ -578,11 +735,15 @@ Restituisci SOLO il JSON, nessun altro testo.`
         // - Entrambi i saldi sono 0 E ci sono movimenti (modello non ha estratto i saldi)
         // - Saldo iniziale mancante MA saldo finale presente (estrazione parziale)
         // - Errore matematico SIGNIFICATIVO (>5€) e movimenti < 10 (probabilmente incompleto)
+        // - PDF complesso (base64 > 600KB) con pochi movimenti (< 40) E errore matematico > 0.5€
         // NON facciamo retry per piccoli errori di arrotondamento (<5€) o se ci sono molti movimenti (>10)
+        // IMPORTANTE: Se mathError < 0.5€, l'estrazione è perfetta → NO retry anche per PDF grandi!
+        const pdfSizeKB = base64Data.length / 1024
         const needsRetry = (
             (initBal === 0 && finBal === 0 && movs.length > 0) ||
             (initBal === 0 && finBal !== 0) ||
-            (mathError > 5.0 && movs.length < 10 && initBal !== 0 && finBal !== 0)
+            (mathError > 5.0 && movs.length < 10 && initBal !== 0 && finBal !== 0) ||
+            (pdfSizeKB > 600 && movs.length < 40 && mathError > 0.5 && initBal !== 0 && finBal !== 0)
         )
         if (!needsRetry) {
             logProgress('✅ VALIDAZIONE OK', 'Estrazione accettata, nessun retry necessario')
@@ -593,16 +754,16 @@ Restituisci SOLO il JSON, nessun altro testo.`
             let bestMovCount = movs.length
             let bestMathError = mathError
 
-            // Retry prompts ottimizzati: massimo 2 tentativi invece di 3
+            // Retry prompts ottimizzati con strategia progressiva
             const retryPromptSuffixes = [
-                `\n\n### ATTENZIONE CRITICA - ESTRAZIONE INCOMPLETA RILEVATA\nLa prima estrazione ha trovato solo ${movs.length} movimenti. Questo PDF ha SICURAMENTE piu movimenti su PIU PAGINE.\nDEVI:\n1. Leggere OGNI PAGINA del PDF dall'inizio alla fine\n2. Estrarre OGNI SINGOLA riga dalla tabella movimenti\n3. NON fermarti dopo la prima pagina di movimenti\n4. Conta le righe nel PDF e assicurati che il tuo array "movements" abbia lo STESSO numero di elementi`,
+                `\n\n### ATTENZIONE CRITICA - ESTRAZIONE INCOMPLETA RILEVATA\nLa prima estrazione ha trovato solo ${movs.length} movimenti. Questo PDF ha SICURAMENTE piu movimenti su PIU PAGINE.\nDEVI:\n1. Leggere OGNI PAGINA del PDF dall'inizio alla fine\n2. Estrarre OGNI SINGOLA riga dalla tabella movimenti\n3. NON fermarti dopo la prima pagina di movimenti\n4. Conta le righe nel PDF e assicurati che il tuo array "movements" abbia lo STESSO numero di elementi\n5. PRIORITÀ ASSOLUTA: vendite titoli ("VENDITA", "VEND.", "RISCATTO", "DISINV") - NON saltarle mai`,
 
-                `\n\n### ISTRUZIONE PRIORITARIA - COMPLETEZZA MULTI-PAGINA\nQuesto documento contiene movimenti su MULTIPLE PAGINE. La tabella movimenti continua dopo la prima pagina.\nPROCEDURA:\n1. Scorri TUTTE le pagine del documento\n2. Identifica OGNI tabella movimenti su OGNI pagina\n3. Estrai TUTTI i movimenti, pagina per pagina, in ordine cronologico\n4. Non saltare nessun movimento, anche se simile ad altri gia estratti\n5. Il numero totale di movimenti deve corrispondere al numero di righe nel PDF`
+                `\n\n### ISTRUZIONE PRIORITARIA - OUTPUT COMPATTO E COMPLETO\nQuesto PDF è complesso (${pdfSizeKB.toFixed(0)}KB). Per evitare troncamento JSON:\n1. USA DESCRIZIONI BREVI (max 50 caratteri per movimento)\n2. ESTRAI TUTTI I MOVIMENTI da TUTTE le pagine\n3. PRIORITÀ: "Vendita" movements con keyword VEND/VENDITA/RISCATTO/DISINV\n4. Riduci dettagli verbosi ma mantieni amount/date/category/description essenziali\n5. Il JSON finale deve contenere TUTTI i movimenti, anche a costo di descrizioni più brevi`
             ]
 
-            // OTTIMIZZATO: Solo 1 retry invece di 2-3 per ridurre i tempi
-            // Trade-off: possibile -5% accuratezza su edge cases, ma -50% worst-case latency
-            const maxRetries = Math.min(1, retryPromptSuffixes.length)
+            // EDGE CASE: Per PDF complessi (>600KB con <40 movimenti), usiamo entrambi i retry
+            // Per altri casi, manteniamo solo 1 retry per efficienza
+            const maxRetries = (pdfSizeKB > 600 && movs.length < 40) ? 2 : 1
             for (let ri = 0; ri < maxRetries; ri++) {
                 try {
                     const reinforcedPrompt = systemPrompt + retryPromptSuffixes[ri]

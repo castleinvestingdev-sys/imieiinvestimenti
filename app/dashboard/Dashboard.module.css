@@ -20,12 +20,50 @@
   z-index: 0;
 }
 
+/* Client Header for consultant view */
+.clientHeader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  padding: 0.75rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  z-index: 100;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+}
+
+.backToConsulente {
+  color: white;
+  text-decoration: none;
+  font-size: 0.9rem;
+  opacity: 0.9;
+  transition: opacity 0.2s;
+}
+
+.backToConsulente:hover {
+  opacity: 1;
+}
+
+.clientName {
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
 .dashHero {
   position: relative;
   background: white;
-  padding: 10rem 0 1.5rem;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 1.5rem 0;
+  border-bottom: 1px solid #e2e8f0;
   z-index: 1;
+}
+
+.dashHero.withClientHeader {
+  padding-top: 4rem;
 }
 
 .dashHeroInner {
@@ -136,9 +174,8 @@
 }
 
 .dragging {
-  background: rgba(16, 185, 129, 0.05);
+  background: #f0fdf4 !important;
   border-color: #10b981 !important;
-  transform: scale(1.01);
 }
 
 .dragOverlay {
@@ -797,7 +834,11 @@
 
 @media (max-width: 768px) {
   .dashHero {
-    padding: 7.5rem 0 1rem;
+    padding: 2rem 0 1rem;
+  }
+
+  .dashHero.withClientHeader {
+    padding-top: 4rem;
   }
 
   .dashHeroInner {
@@ -995,7 +1036,7 @@
   background: white;
   border-radius: 24px;
   width: 100%;
-  max-width: clamp(320px, 90vw, 800px);
+  max-width: clamp(320px, 95vw, 1400px);
   max-height: 90vh;
   display: flex;
   flex-direction: column;

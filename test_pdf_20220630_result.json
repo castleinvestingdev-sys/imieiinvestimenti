@@ -1,0 +1,269 @@
+{
+  "success": true,
+  "fileName": "20220630_Estratto.pdf",
+  "data": {
+    "type": "LIQUIDITY",
+    "layout_detected": "two_columns_dare_avere",
+    "info": {
+      "bankName": "INTESA SANPAOLO",
+      "accountNumber": "0000/38973",
+      "period_start": "2022-03-31",
+      "period_end": "2022-06-30",
+      "holder": "FRIGERI MARIA CRISTINA",
+      "settlementAccount": "IT34 Q030 6912 7650 0000 0038 973"
+    },
+    "scalar_data": {
+      "numeri_creditori": 9725593.69,
+      "numeri_debitori": 0,
+      "interessi_attivi_lordi": 0,
+      "interessi_passivi_lordi": 0,
+      "interessi_creditori_periodi": [
+        {
+          "data": "31/12/2021",
+          "interessi": 0
+        }
+      ],
+      "tasso_attivo": "0%",
+      "tasso_passivo": "0%",
+      "acquisto_titoli_count": 15,
+      "vendita_titoli_count": 0,
+      "movimenti_titoli_count": 15,
+      "acquisto_titoli_amount": -22247.44,
+      "vendita_titoli_amount": 0
+    },
+    "movements": [
+      {
+        "date": "04/04/2022",
+        "description": "Spese emis. E/C.-Rendiconto-Comunicazioni N. 1 A Euro 0,70 per estratto conto N. 1 A Euro 0,70 per comunicazioni",
+        "amount": -1.4,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "04/04/2022",
+        "description": "Imposta di bollo E/C e Rendiconto per supero giacenza media nei periodi rendicontati al: 31.03.2022",
+        "amount": -8.4,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "06/04/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/04/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "15/04/2022",
+        "description": "Invio rendicontazione/contabili titoli relative al D.A. n. 19812/000001000811 NR 0001 A EURO 0,70 PER RENDICONTO POSTALE NR 0000 A EURO 0,00 PER RENDICONTO ON LINE",
+        "amount": -0.7,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "15/04/2022",
+        "description": "Imposta di bollo su Prodotti Finanziari IMPOSTA DI BOLLO SU D.A. 19812/000001000811 REL. AL PERIODO DAL 01.01.2022 AL 31.03.2022 PER UN IMPONIBILE DI EURO 681.537,79 (NDG 3716465373000)",
+        "amount": -336.1,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "21/04/2022",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "25/04/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - SPFP DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "25/04/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO SP9FN - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "30/04/2022",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI APRILE",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "05/05/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "05/05/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "23/05/2022",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "25/05/2022",
+        "description": "Cedole o Dividendi",
+        "amount": 350.32,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "25/05/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - SPFP DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "25/05/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO SP9FN - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "27/05/2022",
+        "description": "Cedole o Dividendi",
+        "amount": 107.18,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "31/05/2022",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI MAGGIO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "06/06/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/06/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "23/06/2022",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "27/06/2022",
+        "description": "ACQUISTO DI SAIPEM RAGGR ORD Q.TA' 42,000 A 31,400000 EUR ID.OP.WRKT06232211477999600001",
+        "amount": -1334.8,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "27/06/2022",
+        "description": "ACQUISTO DI BTP 15GN29 2.80% Q.TA' 15.000,000 A 98,790000 EUR ID.OP.WRKT06232211477991200001",
+        "amount": -14912.64,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "27/06/2022",
+        "description": "Pagamento Imposte IMPOSTA SULLE TRANSAZIONI FINANZIARIE N. 42 AZIONI SAIPEM RAGGR ORD AL PREZZO MEDIO EUR 31,400000 ALIQ. MEDIA 0,1000% SU DA N. 1000811 C.F. FRGMCR50P42G337H CAMBIO 1,000000",
+        "amount": -1.32,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "27/06/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO SPFP - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "27/06/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO SP9FN - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "28/06/2022",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO LUTI - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "29/06/2022",
+        "description": "Imposta su Int. Obbligazionari movimentazione N. 15.000,000 ID.OP.GIRIDYNG220000036980",
+        "amount": -2.01,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "30/06/2022",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI GIUGNO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      }
+    ],
+    "summary": {
+      "initial_balance": {
+        "value": 55321.36,
+        "source": "extracted"
+      },
+      "final_balance": {
+        "value": 32651.25,
+        "source": "extracted"
+      },
+      "total_movements_amount": {
+        "value": -22670.109999999997,
+        "source": "calculated"
+      },
+      "total_commissions": {
+        "value": 21.42,
+        "source": "calculated"
+      },
+      "total_proventi": {
+        "value": 457.5,
+        "source": "calculated"
+      },
+      "math_verification": {
+        "expected_delta": -22670.11,
+        "actual_sum": -22670.11,
+        "matches": true
+      }
+    },
+    "finalPortfolio": [],
+    "dividends": []
+  }
+}

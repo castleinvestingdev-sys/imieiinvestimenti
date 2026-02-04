@@ -1,0 +1,266 @@
+{
+  "success": true,
+  "fileName": "20240331_Estratto_conto_trimestrale.pdf",
+  "data": {
+    "type": "LIQUIDITY",
+    "layout_detected": "two_columns_dare_avere",
+    "info": {
+      "bankName": "INTESA SANPAOLO",
+      "accountNumber": "19812/0000/00038973",
+      "period_start": "2024-01-01",
+      "period_end": "2024-03-31",
+      "holder": "FRIGERI MARIA CRISTINA",
+      "settlementAccount": "IT34 Q030 6912 7650 0000 0038 973"
+    },
+    "scalar_data": {
+      "numeri_creditori": 4688597.88,
+      "numeri_debitori": 0,
+      "interessi_attivi_lordi": 0,
+      "interessi_passivi_lordi": 0,
+      "interessi_creditori_periodi": [
+        {
+          "data": "30/11/2023",
+          "interessi": 0
+        },
+        {
+          "data": "31/12/2023",
+          "interessi": 0
+        }
+      ],
+      "tasso_attivo": "0%",
+      "tasso_passivo": "0%",
+      "acquisto_titoli_count": 6,
+      "vendita_titoli_count": 0,
+      "movimenti_titoli_count": 6,
+      "acquisto_titoli_amount": -3000,
+      "vendita_titoli_amount": 0
+    },
+    "movements": [
+      {
+        "date": "02/01/2024",
+        "description": "Prelievo sportello banca del gruppo CON CARTA N. 5167 XXXX XXXX XX05 EFFETTUATO IL 29/12/2023 ALLE ORE 16:12 PRESSO ABI 1025 - SPORTELLO 7952 IN PIAZZALE CESARE BATTISTI 1 PARMA PR",
+        "amount": -250,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "04/01/2024",
+        "description": "Spese emis. E/C.-Rendiconto-Comunicazioni N. 1 A Euro 0,70 per estratto conto",
+        "amount": -0.7,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "04/01/2024",
+        "description": "Imposta di bollo E/C e Rendiconto per supero giacenza media nei periodi rendicontati al: 31.12.2023",
+        "amount": -8.7,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "05/01/2024",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "05/01/2024",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "18/01/2024",
+        "description": "Imposta di bollo su Prodotti Finanziari IMPOSTA DI BOLLO SU D.A. 19812/000001000811 REL. AL PERIODO DAL 01.10.2023 AL 31.12.2023 PER UN IMPONIBILE DI EURO 647.692,64 (NDG 3716465373000)",
+        "amount": -326.5,
+        "sign_source": "column_position",
+        "movement_type": "Spesa"
+      },
+      {
+        "date": "19/01/2024",
+        "description": "Commissione di gestione e amministrazione relative al D.A. n. 19812/000001000811",
+        "amount": -45,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "23/01/2024",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "30/01/2024",
+        "description": "Pagamento Tramite POS MONTACCHINI & PARTNERS VIA 29/01-11:05 - Carta n.5167 XXXX XXXX XX05ABI: 09515 COD.5106123/000055",
+        "amount": -120,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "31/01/2024",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI GENNAIO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "05/02/2024",
+        "description": "Pagamento Tramite POS ZARA 9107 STRADA CAVOUR, 16704/02-11:30 - Carta n.5167 XXXX XXXX XX05ABI: 01005 COD.3574495/002875",
+        "amount": -60.1,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "06/02/2024",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/02/2024",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/02/2024",
+        "description": "Pagamento POS EFFETTUATO IL 02/02/2024 ALLE ORE 15:59 MEDIANTE LA CARTA 5167 XXXX XXXX XX05 PRESSO SumUp * Alberto Pieve di Cent",
+        "amount": -60,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "16/02/2024",
+        "description": "Prelievo sportello banca del gruppo CON CARTA N. 5167 XXXX XXXX XX05 EFFETTUATO IL 15/02/2024 ALLE ORE 11:45 PRESSO ABI 1025 - SPORTELLO 7952 IN PIAZZALE CESARE BATTISTI 1 PARMA PR",
+        "amount": -100,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "22/02/2024",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "29/02/2024",
+        "description": "Cedole o Dividendi",
+        "amount": 116.26,
+        "sign_source": "column_position",
+        "movement_type": "Proventi"
+      },
+      {
+        "date": "29/02/2024",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI FEBBRAIO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "06/03/2024",
+        "description": "Bonifico a Vostro favore disposto da: MITT.: EC OPP OBB PLS DIC27IMI COD. DISP.: 0124030545521133 SECU BDP-IBS202402290063485 CED EC OPPORT OBBLIG PLUS 12/27 POS 0023161695 BENEF.: FRIGERI MARIA CRISTINA BIC. ORD.: SBOSITML",
+        "amount": 320.37,
+        "sign_source": "column_position",
+        "movement_type": "Bonifico"
+      },
+      {
+        "date": "06/03/2024",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU40 - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "06/03/2024",
+        "description": "Investimento in fondi comuni FONDO SOTTOSCRITTO - LU70 - DEPOSITO 19812/310001000811",
+        "amount": -500,
+        "sign_source": "column_position",
+        "movement_type": "Acquisto"
+      },
+      {
+        "date": "08/03/2024",
+        "description": "Pagamento Tramite POS ZARA 9107 STRADA CAVOUR, 16707/03 - 11:16 - Carta n.5167 XXXX XXXX XX05ABI: 01005 COD.3574495/002875",
+        "amount": -60.1,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "18/03/2024",
+        "description": "Prelievo sportello banca del gruppo CON CARTA N. 5167 XXXX XXXX XX05 EFFETTUATO IL 15/03/2024 ALLE ORE 17:12 PRESSO ABI 1025 - SPORTELLO 3696 IN PIAZZALE CESARE BATTISTI 1 PARMA PR",
+        "amount": -250,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "21/03/2024",
+        "description": "Pagamento POS EFFETTUATO IL 18/03/2024 ALLE ORE 11:57 MEDIANTE LA CARTA 5167 XXXX XXXX XX05 PRESSO HM IT0377 Parma",
+        "amount": -59.58,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "21/03/2024",
+        "description": "Premio polizza 10425/00000000000068144700 ADDEBITO PREMIO POLIZZA Abitazione & Famiglia",
+        "amount": -4.08,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "25/03/2024",
+        "description": "Prelievo sportello banca del gruppo CON CARTA N. 5167 XXXX XXXX XX05 EFFETTUATO IL 24/03/2024 ALLE ORE 11:03 PRESSO ABI 1025 - SPORTELLO 6454 IN PIAZZALE CESARE BATTISTI 1 PARMA PR",
+        "amount": -100,
+        "sign_source": "column_position",
+        "movement_type": "Altro"
+      },
+      {
+        "date": "31/03/2024",
+        "description": "Canone fisso mensile CANONE MENSILE MESE DI MARZO",
+        "amount": -6,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      },
+      {
+        "date": "31/03/2024",
+        "description": "Canone Carta di Debito MESE DI MARZO CARTA N. 5167XXXXXXXXXX05",
+        "amount": -1.5,
+        "sign_source": "column_position",
+        "movement_type": "Commissioni"
+      }
+    ],
+    "summary": {
+      "initial_balance": {
+        "value": 54131.91,
+        "source": "extracted"
+      },
+      "final_balance": {
+        "value": 50096.12,
+        "source": "extracted"
+      },
+      "total_movements_amount": {
+        "value": -4035.7899999999995,
+        "source": "calculated"
+      },
+      "total_commissions": {
+        "value": 65.2,
+        "source": "calculated"
+      },
+      "total_proventi": {
+        "value": 116.26,
+        "source": "calculated"
+      },
+      "math_verification": {
+        "expected_delta": -4035.79,
+        "actual_sum": -4035.79,
+        "matches": true
+      }
+    },
+    "finalPortfolio": [],
+    "dividends": []
+  }
+}

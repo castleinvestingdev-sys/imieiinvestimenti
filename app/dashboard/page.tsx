@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
 import styles from './Dashboard.module.css'
@@ -47,7 +47,10 @@ export default function DashboardPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [commissionsModalData, setCommissionsModalData] = useState<any>(null)
   const [editingTransactions, setEditingTransactions] = useState<any[]>([])
+  const [portfolioTab, setPortfolioTab] = useState<'initial' | 'final' | 'movements'>('final')
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const clienteFilter = searchParams.get('cliente')
   const supabase = createClient()
 
   // Multi-file upload state
@@ -127,7 +130,15 @@ export default function DashboardPage() {
       console.error('Error fetching analyses:', error)
       return
     }
-    setAnalyses(data || [])
+
+    // Filter by holder if clienteFilter is set
+    let filteredData = data || []
+    if (clienteFilter) {
+      filteredData = filteredData.filter(a =>
+        (a.costs_breakdown?.holder || 'Cliente Sconosciuto') === clienteFilter
+      )
+    }
+    setAnalyses(filteredData)
 
     const { data: trashedData } = await supabase
       .from('analyses')
@@ -136,8 +147,15 @@ export default function DashboardPage() {
       .not('deleted_at', 'is', null)
       .order('deleted_at', { ascending: false })
 
-    setTrashedAnalyses(trashedData || [])
-  }, [supabase])
+    // Also filter trashed data by holder
+    let filteredTrashed = trashedData || []
+    if (clienteFilter) {
+      filteredTrashed = filteredTrashed.filter(a =>
+        (a.costs_breakdown?.holder || 'Cliente Sconosciuto') === clienteFilter
+      )
+    }
+    setTrashedAnalyses(filteredTrashed)
+  }, [supabase, clienteFilter])
 
   // Show custom confirmation modal
   const showConfirmModal = (title: string, message: string): Promise<boolean> => {
@@ -1023,9 +1041,12 @@ export default function DashboardPage() {
     if (val === 'da calcolare') {
       return <span className={styles.calcValue}>da calcolare</span>
     }
-    const displayVal = isCurrency && typeof val === 'number'
-      ? `€${val.toLocaleString('it-IT')} `
-      : val;
+    let displayVal = val;
+    if (typeof val === 'number') {
+      displayVal = isCurrency
+        ? `€${val.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : val.toLocaleString('it-IT');
+    }
     return <span className={styles.foundValue}>{displayVal}</span>
   }
 
@@ -1047,12 +1068,22 @@ export default function DashboardPage() {
       )}
       <div className={styles.heroBackground} />
 
-      <header className={styles.dashHero}>
+      {/* Client Header when viewing a specific client */}
+      {clienteFilter && (
+        <div className={styles.clientHeader}>
+          <Link href="/consulente" className={styles.backToConsulente}>
+            ← Torna ai Clienti
+          </Link>
+          <h2 className={styles.clientName}>Cliente: {clienteFilter}</h2>
+        </div>
+      )}
+
+      <header className={`${styles.dashHero} ${clienteFilter ? styles.withClientHeader : ''}`}>
         <div className={styles.dashHeroInner}>
           <div className={styles.dashWelcome}>
-            <h1>I Tuoi Investimenti Semplificati</h1>
+            <h1>{clienteFilter ? `Portafoglio di ${clienteFilter}` : 'I Tuoi Investimenti Semplificati'}</h1>
             <p>
-              Carica i PDF &quot;Estratto Conto&quot; per analizzare il tuo portafoglio.
+              Carica i PDF &quot;Estratto Conto&quot; originali per analizzare il tuo portafoglio.
               Se non li trovi, cercali nell&apos;<a href="#">Homebanking</a> nella sezione documenti.
             </p>
           </div>
@@ -1213,7 +1244,7 @@ export default function DashboardPage() {
       <section className={styles.mainContent}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
-            {showTrash ? `Cestino(${trashedAnalyses.length})` : `I tuoi Conti(${bankGroups.length}) e Estratti Conto(${analyses.length})`}
+            {showTrash ? `Cestino (${trashedAnalyses.length})` : `I tuoi Conti (${bankGroups.length}) e Estratti Conto (${analyses.length})`}
           </h2>
           <button
             onClick={() => setShowTrash(!showTrash)}
@@ -1402,8 +1433,12 @@ export default function DashboardPage() {
 
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
-                                            <span className={styles.valueLabelSmall}>Rendimento</span>
-                                            <div className={styles.valueDataLarge}>{slot.file!.forensic_summary?.performance_pct || 'N/D'}</div>
+                                            <span className={styles.valueLabelSmall}>{slot.file!.account_type === 'DOSSIER' ? 'Portafoglio' : 'Rendimento'}</span>
+                                            <div className={styles.valueDataLarge}>
+                                              {slot.file!.account_type === 'DOSSIER'
+                                                ? `€${(slot.file!.portfolio_value || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                : (slot.file!.forensic_summary?.performance_pct || 'N/D')}
+                                            </div>
                                             <div className={styles.tileActions}>
                                               <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
                                               <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
@@ -1503,7 +1538,7 @@ export default function DashboardPage() {
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Saldo</span>
-                                            <div className={styles.valueDataLarge}>€{(slot.file!.portfolio_value || 0).toLocaleString('it-IT')}</div>
+                                            <div className={styles.valueDataLarge}>€{(slot.file!.portfolio_value || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                                             <div className={styles.tileActions}>
                                               <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
                                               <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
@@ -1718,39 +1753,401 @@ export default function DashboardPage() {
 
               <div className={styles.infoGrid}>
                 <div className={styles.infoItem}><strong>Banca</strong> {renderVal(inspectorData.bank_name)}</div>
-                <div className={styles.infoItem}><strong>Account</strong> {renderVal(inspectorData.benchmark_comparison)}</div>
-                <div className={styles.infoItem}><strong>IBAN</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
+                <div className={styles.infoItem}><strong>Intestatari</strong> {renderVal(inspectorData.costs_breakdown?.holder)}</div>
+                {inspectorData.account_type === 'DOSSIER' ? (
+                  <>
+                    <div className={styles.infoItem}><strong>Numero Dossier Titoli</strong> {renderVal(inspectorData.benchmark_comparison)}</div>
+                    <div className={styles.infoItem}><strong>Conto Corrente Regolatore</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className={styles.infoItem}><strong>Account</strong> {renderVal(inspectorData.benchmark_comparison)}</div>
+                    <div className={styles.infoItem}><strong>IBAN</strong> {renderVal(inspectorData.costs_breakdown?.settlementAccount)}</div>
+                  </>
+                )}
               </div>
 
               {inspectorData.account_type === 'DOSSIER' && (
-                <div className={styles.inspectorSection}>
-                  <h4>Portafoglio Finale</h4>
-                  <table className={styles.inspectorTable}>
-                    <thead><tr><th>ISIN</th><th>Ticker</th><th>Quantità</th><th>Valore</th></tr></thead>
-                    <tbody>
-                      {inspectorData.holdings?.map((h: any, i: number) => (
-                        <tr key={i}>
-                          <td>{renderVal(h.isin)}</td>
-                          <td>{renderVal(h.ticker)}</td>
-                          <td>{renderVal(h.quantity)}</td>
-                          <td>{renderVal(h.marketValue, true)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className={styles.infoGrid} style={{ marginTop: '1rem' }}>
+                  <div className={styles.infoItem}>
+                    <strong>Valuta del Portafoglio</strong>
+                    {renderVal(inspectorData.costs_breakdown?.portfolio_currency || 'EUR')}
+                  </div>
+                  {(() => {
+                    const calculatedTotal = inspectorData.holdings?.reduce((acc: number, h: any) => acc + (h.marketValue || 0), 0) || 0
+                    const extractedTotal = inspectorData.costs_breakdown?.portfolio_total_extracted || 0
+                    const isMatch = extractedTotal > 0 && Math.abs(calculatedTotal - extractedTotal) < 1
+                    return (
+                      <div className={styles.infoItem}>
+                        <strong>Valore Portafoglio</strong>
+                        {renderVal(calculatedTotal, true)}
+                        {extractedTotal > 0 && (
+                          <span style={{ marginLeft: '8px' }}>
+                            {isMatch ? (
+                              <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€`} style={{ color: '#22c55e', fontWeight: 'bold' }}>✅</span>
+                            ) : (
+                              <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€ - Differenza: ${Math.abs(calculatedTotal - extractedTotal).toFixed(2)}€`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 
+              {inspectorData.account_type === 'DOSSIER' && inspectorData.costs_breakdown?.securityMovements && (
+                <>
+                  {(() => {
+                    const movements = inspectorData.costs_breakdown.securityMovements || [];
+                    const totalMovements = movements.length;
+                    const buyMovements = movements.filter((m: any) => m.operationType === 'Acquisto').length;
+                    const sellMovements = movements.filter((m: any) => m.operationType === 'Vendita').length;
+
+                    // Calculate amounts using netAmount (actual value from PDF)
+                    const buyGross = movements
+                      .filter((m: any) => m.operationType === 'Acquisto')
+                      .reduce((acc: number, m: any) => acc + Math.abs(m.netAmount || 0), 0);
+                    const sellGross = movements
+                      .filter((m: any) => m.operationType === 'Vendita')
+                      .reduce((acc: number, m: any) => acc + Math.abs(m.netAmount || 0), 0);
+                    // Net total: sells (+) minus buys (-)
+                    const totalNet = sellGross - buyGross;
+
+                    return (
+                      <>
+                        {/* Row 1: Counts */}
+                        <div className={styles.infoGrid} style={{ marginTop: '1rem' }}>
+                          <div className={styles.infoItem}>
+                            <strong>Movimenti Titoli</strong>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>{totalMovements}</span>
+                          </div>
+                          <div className={styles.infoItem}>
+                            <strong>Acquisti</strong>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>{buyMovements}</span>
+                          </div>
+                          <div className={styles.infoItem}>
+                            <strong>Vendite</strong>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>{sellMovements}</span>
+                          </div>
+                        </div>
+                        {/* Row 2: Amounts */}
+                        <div className={styles.infoGrid} style={{ marginTop: '0.75rem' }}>
+                          <div className={styles.infoItem}>
+                            <strong>Totale Movimenti</strong>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: totalNet >= 0 ? '#22c55e' : '#ef4444' }}>{totalNet >= 0 ? '+' : '-'}€{Math.abs(totalNet).toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className={styles.infoItem}>
+                            <strong>Investimenti</strong>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#ef4444' }}>-€{buyGross.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className={styles.infoItem}>
+                            <strong>Disinvestimenti</strong>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#22c55e' }}>+€{sellGross.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+
+              {/* Tabbed Portfolio Section for DOSSIER */}
+              {inspectorData.account_type === 'DOSSIER' && (
+                <div className={styles.inspectorSection}>
+                  {/* Tab Navigation */}
+                  {(() => {
+                    // Calculate initial portfolio count
+                    const movements = inspectorData.costs_breakdown?.securityMovements || [];
+                    const finalHoldings = inspectorData.holdings || [];
+                    const movementDeltas: Record<string, { buys: number; sells: number }> = {};
+                    movements.forEach((m: any) => {
+                      const isin = m.isin || 'UNKNOWN';
+                      if (!movementDeltas[isin]) movementDeltas[isin] = { buys: 0, sells: 0 };
+                      if (m.operationType === 'Acquisto') movementDeltas[isin].buys += m.quantity || 0;
+                      else if (m.operationType === 'Vendita') movementDeltas[isin].sells += m.quantity || 0;
+                    });
+                    let initialCount = 0;
+                    const processedIsins = new Set<string>();
+                    finalHoldings.forEach((h: any) => {
+                      const isin = h.isin || 'UNKNOWN';
+                      processedIsins.add(isin);
+                      const delta = movementDeltas[isin] || { buys: 0, sells: 0 };
+                      const initialQty = (h.quantity || 0) - delta.buys + delta.sells;
+                      if (initialQty !== 0) initialCount++;
+                    });
+                    Object.entries(movementDeltas).forEach(([isin, delta]) => {
+                      if (!processedIsins.has(isin) && isin !== 'UNKNOWN') {
+                        const initialQty = 0 - delta.buys + delta.sells;
+                        if (initialQty !== 0) initialCount++;
+                      }
+                    });
+
+                    return (
+                  <div style={{ display: 'flex', gap: '0', marginBottom: '1rem', borderBottom: '2px solid #e2e8f0' }}>
+                    <button
+                      onClick={() => setPortfolioTab('initial')}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        border: 'none',
+                        background: portfolioTab === 'initial' ? '#fff' : 'transparent',
+                        borderBottom: portfolioTab === 'initial' ? '2px solid #10b981' : '2px solid transparent',
+                        marginBottom: '-2px',
+                        cursor: 'pointer',
+                        fontWeight: portfolioTab === 'initial' ? '600' : '400',
+                        color: portfolioTab === 'initial' ? '#10b981' : '#64748b',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      Portafoglio Iniziale
+                      <span style={{
+                        marginLeft: '8px',
+                        fontSize: '0.75rem',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        background: '#10b981',
+                        color: '#fff'
+                      }}>{initialCount}</span>
+                    </button>
+                    <button
+                      onClick={() => setPortfolioTab('movements')}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        border: 'none',
+                        background: portfolioTab === 'movements' ? '#fff' : 'transparent',
+                        borderBottom: portfolioTab === 'movements' ? '2px solid #10b981' : '2px solid transparent',
+                        marginBottom: '-2px',
+                        cursor: 'pointer',
+                        fontWeight: portfolioTab === 'movements' ? '600' : '400',
+                        color: portfolioTab === 'movements' ? '#10b981' : '#64748b',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      Movimenti Titoli
+                      <span style={{
+                        marginLeft: '8px',
+                        fontSize: '0.75rem',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        background: '#10b981',
+                        color: '#fff'
+                      }}>{inspectorData.costs_breakdown?.securityMovements?.length || 0}</span>
+                    </button>
+                    <button
+                      onClick={() => setPortfolioTab('final')}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        border: 'none',
+                        background: portfolioTab === 'final' ? '#fff' : 'transparent',
+                        borderBottom: portfolioTab === 'final' ? '2px solid #10b981' : '2px solid transparent',
+                        marginBottom: '-2px',
+                        cursor: 'pointer',
+                        fontWeight: portfolioTab === 'final' ? '600' : '400',
+                        color: portfolioTab === 'final' ? '#10b981' : '#64748b',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      Portafoglio Finale
+                      <span style={{
+                        marginLeft: '8px',
+                        fontSize: '0.75rem',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        background: '#10b981',
+                        color: '#fff'
+                      }}>{finalHoldings.length}</span>
+                    </button>
+                  </div>
+                    );
+                  })()}
+
+                  {/* Tab Content: Portafoglio Iniziale */}
+                  {portfolioTab === 'initial' && (() => {
+                    const movements = inspectorData.costs_breakdown?.securityMovements || [];
+                    const finalHoldings = inspectorData.holdings || [];
+                    const missingVal = <span style={{ color: '#ef4444', fontWeight: 'bold' }}>?</span>;
+
+                    // Calculate movement deltas per ISIN
+                    const movementDeltas: Record<string, { buys: number; sells: number; name: string; currency: string }> = {};
+                    movements.forEach((m: any) => {
+                      const isin = m.isin || 'UNKNOWN';
+                      if (!movementDeltas[isin]) {
+                        movementDeltas[isin] = { buys: 0, sells: 0, name: m.name || '', currency: m.currency || 'EUR' };
+                      }
+                      if (m.operationType === 'Acquisto') {
+                        movementDeltas[isin].buys += m.quantity || 0;
+                      } else if (m.operationType === 'Vendita') {
+                        movementDeltas[isin].sells += m.quantity || 0;
+                      }
+                    });
+
+                    // Build initial portfolio from final + reverse movements
+                    const initialPortfolio: any[] = [];
+                    const processedIsins = new Set<string>();
+
+                    // Start with final holdings
+                    finalHoldings.forEach((h: any) => {
+                      const isin = h.isin || 'UNKNOWN';
+                      processedIsins.add(isin);
+                      const delta = movementDeltas[isin] || { buys: 0, sells: 0 };
+                      // Initial = Final - Buys + Sells
+                      const initialQty = (h.quantity || 0) - delta.buys + delta.sells;
+                      if (initialQty !== 0) {
+                        initialPortfolio.push({
+                          isin: h.isin,
+                          name: h.name,
+                          currency: h.currency,
+                          initialQty: initialQty
+                        });
+                      }
+                    });
+
+                    // Add ISINs that were only in movements (completely sold)
+                    Object.entries(movementDeltas).forEach(([isin, delta]) => {
+                      if (!processedIsins.has(isin) && isin !== 'UNKNOWN') {
+                        const initialQty = 0 - delta.buys + delta.sells;
+                        if (initialQty !== 0) {
+                          initialPortfolio.push({
+                            isin,
+                            name: delta.name,
+                            currency: delta.currency,
+                            initialQty
+                          });
+                        }
+                      }
+                    });
+
+                    if (initialPortfolio.length === 0) {
+                      return (
+                        <p style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '40px' }}>
+                          Portafoglio iniziale vuoto
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <table className={styles.inspectorTable}>
+                        <thead><tr><th>ISIN</th><th>Nome</th><th>Divisa</th><th>Cambio</th><th>Quantità</th><th>Prezzo</th><th>Valore €</th></tr></thead>
+                        <tbody>
+                          {initialPortfolio.map((h: any, i: number) => (
+                            <tr key={i}>
+                              <td>{h.isin || ''}</td>
+                              <td>{h.name || ''}</td>
+                              <td>{h.currency || ''}</td>
+                              <td>{missingVal}</td>
+                              <td>{h.initialQty.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
+                              <td>{missingVal}</td>
+                              <td>{missingVal}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
+
+                  {/* Tab Content: Portafoglio Finale */}
+                  {portfolioTab === 'final' && (
+                    <table className={styles.inspectorTable}>
+                      <thead><tr><th>ISIN</th><th>Nome</th><th>Divisa</th><th>Cambio</th><th>Quantità</th><th>Prezzo</th><th>Valore €</th></tr></thead>
+                      <tbody>
+                        {inspectorData.holdings?.map((h: any, i: number) => (
+                          <tr key={i}>
+                            <td>{h.isin || ''}</td>
+                            <td>{h.name || ''}</td>
+                            <td>{h.currency || 'EUR'}</td>
+                            <td>{h.exchangeRate && h.exchangeRate !== 1 ? h.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''}</td>
+                            <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 }) : ''}</td>
+                            <td>{h.price && h.price !== 0 ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : ''}</td>
+                            <td>{h.marketValue && h.marketValue !== 0 ? `€${h.marketValue.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {/* Tab Content: Movimenti Titoli */}
+                  {portfolioTab === 'movements' && (
+                    inspectorData.costs_breakdown?.securityMovements && inspectorData.costs_breakdown.securityMovements.length > 0 ? (
+                      <table className={styles.inspectorTable}>
+                        <thead>
+                          <tr>
+                            <th>Data</th>
+                            <th>ISIN</th>
+                            <th>Nome Titolo</th>
+                            <th>Tipo</th>
+                            <th>Quantità</th>
+                            <th>Prezzo</th>
+                            <th>Cambio</th>
+                            <th>Divisa</th>
+                            <th>Spese/Imposte</th>
+                            <th>Importo Netto</th>
+                            <th>Importo Lordo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...inspectorData.costs_breakdown.securityMovements]
+                            .sort((a: any, b: any) => {
+                              const parseDate = (d: string) => {
+                                if (!d) return new Date(0);
+                                const [day, month, year] = d.split('/').map(Number);
+                                return new Date(year, month - 1, day);
+                              };
+                              return parseDate(a.date).getTime() - parseDate(b.date).getTime();
+                            })
+                            .map((m: any, i: number) => {
+                              const missingVal = <span style={{ color: '#ef4444', fontWeight: 'bold' }}>?</span>;
+                              const isVendita = m.operationType === 'Vendita';
+                              return (
+                                <tr key={i}>
+                                  <td>{m.date || missingVal}</td>
+                                  <td>{m.isin || missingVal}</td>
+                                  <td>{m.name || missingVal}</td>
+                                  <td>
+                                    <span className={m.operationType === 'Acquisto' ? styles.typeAcquisto : styles.typeVendita}>
+                                      {m.operationType || missingVal}
+                                    </span>
+                                  </td>
+                                  <td style={{ color: isVendita ? '#ef4444' : '#22c55e' }}>
+                                    {typeof m.quantity === 'number' && m.quantity !== 0
+                                      ? `${isVendita ? '-' : '+'}${m.quantity.toLocaleString('it-IT')}`
+                                      : missingVal}
+                                  </td>
+                                  <td>{typeof m.price === 'number' && m.price !== 0 ? m.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : missingVal}</td>
+                                  <td>{m.exchangeRate && m.exchangeRate !== 1 ? m.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''}</td>
+                                  <td>{m.currency || 'EUR'}</td>
+                                  <td style={{ color: '#ef4444' }}>{(() => {
+                                      const totalCosts = (m.fees || 0) + (m.taxes || 0);
+                                      return totalCosts !== 0 ? `-${totalCosts.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : missingVal;
+                                    })()}</td>
+                                  <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{typeof m.netAmount === 'number' && m.netAmount !== 0 ? `${isVendita ? '+' : '-'}€${Math.abs(m.netAmount).toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : missingVal}</td>
+                                  <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{(() => {
+                                      const grossAmount = ((m.quantity || 0) * (m.price || 0)) / (m.exchangeRate || 1);
+                                      return grossAmount !== 0 ? `${isVendita ? '+' : '-'}€${grossAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : missingVal;
+                                    })()}</td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '40px' }}>
+                        Non ci sono movimenti in questo periodo
+                      </p>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* Movimenti del Periodo - Solo per LIQUIDITY */}
+              {inspectorData.account_type === 'LIQUIDITY' && (
               <div className={styles.inspectorSection}>
                 <h4>
                   Movimenti del Periodo
-                  {inspectorData.account_type === 'LIQUIDITY' && (
-                    <span className={`${styles.statusBadge} ${styles.statusExtracted}`} style={{ verticalAlign: 'middle', marginLeft: '12px' }}>
-                      Estratto
-                    </span>
-                  )}
+                  <span className={`${styles.statusBadge} ${styles.statusExtracted}`} style={{ verticalAlign: 'middle', marginLeft: '12px' }}>
+                    Estratto
+                  </span>
                 </h4>
-                {inspectorData.account_type === 'LIQUIDITY' ? (
+                {inspectorData.account_type === 'LIQUIDITY' && (
                   <table className={styles.inspectorTable}>
                     <thead>
                       <tr>
@@ -1806,29 +2203,10 @@ export default function DashboardPage() {
                       })}
                     </tbody>
                   </table>
-                ) : (
-                  <table className={styles.inspectorTable}>
-                    <thead><tr><th>Data</th><th>Tipo</th><th>ISIN</th><th>Quantità</th><th>Valore</th></tr></thead>
-                    <tbody>
-                      {inspectorData.transactions?.map((t: any, i: number) => (
-                        <tr key={i}>
-                          <td>{renderVal(t.date)}</td>
-                          <td>{renderVal(t.type)}</td>
-                          <td>{renderVal(t.isin)}</td>
-                          <td>{renderVal(t.quantity)}</td>
-                          <td>{renderVal(t.exchangeValue, true)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 )}
               </div>
+              )}
 
-              <div className={styles.inspectorActions}>
-                <button className={styles.saveBtn} onClick={handleSaveInspector} disabled={isSaving}>
-                  {isSaving ? 'Salvataggio...' : 'Salva Modifiche'}
-                </button>
-              </div>
             </div>
           </div>
         </div>

@@ -420,17 +420,88 @@ Prima di restituire il JSON:
 - NON fermarti prima di aver estratto TUTTI i movimenti. Anche se ci sono 50+ movimenti, estraili TUTTI.
 - "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Bonifico", NON "Vendita".
 
+### FASE 8: ESTRAZIONE PORTAFOGLIO TITOLI (SOLO PER type="DOSSIER")
+Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio:
+
+**8.1 CONTROVALORE TOTALE**
+Cerca nel PDF il valore "CONTROVALORE TOTALE APPARENTE" o "CONTROVALORE TOTALE" o simile.
+Esempio: "CONTROVALORE TOTALE APPARENTE AL 31/03/2019 Euro 527.413,10"
+Estrai:
+- Il valore numerico → summary.portfolio_total_extracted (es. 527413.10)
+- La valuta → summary.portfolio_currency (es. "EUR" se dice "Euro", "USD" se dice "Dollar", ecc.)
+
+**8.2 SINGOLI TITOLI**
+Per OGNI titolo nella sezione "CONSISTENZA" (AZIONI, OBBLIGAZIONI, FONDI, SICAV, ETF):
+- **isin**: Codice ISIN del titolo (es. "FR0010245514", "IT0001047437")
+- **name**: Nome/Descrizione del titolo ESATTAMENTE come appare nel PDF (es. "LYXOR JAPAN (TOPIX)D", "EURIZON BREVE TERM $", "CARMIGNAC PATRIMOINE")
+- **currency**: Divisa/Valuta (es. "EUR", "USD") - dalla colonna "Divisa"
+- **exchangeRate**: Tasso di cambio (es. 1.1235) - dalla colonna "Cambio". Se vuoto o EUR, usa 1
+- **quantity**: Quantità/Consistenza (numero di quote/azioni)
+- **price**: Quotazione/Prezzo unitario - dalla colonna "Quotazione"
+- **marketValue**: Controvalore in Euro - dalla colonna "Controvalore Euro"
+
+IMPORTANTE:
+- Estrai il nome del titolo dalla colonna "Descrizione" del PDF
+- Il nome può essere abbreviato nel PDF (es. "ANIMA FONDO TRADING" o "LYXOR COMMOD. THOM.R")
+- NON inventare nomi - usa ESATTAMENTE quello che appare nel PDF
+- Per titoli in default (es. "Titolo in default"), metti marketValue = 0
+- I titoli in default NON contribuiscono al controvalore totale
+- Se la quotazione non è disponibile ("Non dispon."), metti price = 0
+
+### FASE 9: ESTRAZIONE MOVIMENTI TITOLI (SOLO PER type="DOSSIER")
+Se il documento è un DOSSIER TITOLI, estrai TUTTI i movimenti di acquisto/vendita titoli.
+
+**9.1 IDENTIFICAZIONE OPERAZIONI**
+Le banche usano terminologie diverse per indicare acquisti e vendite:
+
+**ACQUISTO (Carico titoli)** - Keywords:
+- "ACQUISTO", "ACQ.", "ACQ", "CARICO", "CARICO TITOLI"
+- "SOTTOSCRIZIONE", "SOTTOSC.", "SOTTOSCR."
+- "VERSAMENTO QUOTE", "CONFERIMENTO"
+- "PAC" (Piano Accumulo Capitale)
+- "NOTA INF. ACQ.", "SWITCH IN"
+- "INVESTIMENTO", "INV."
+
+**VENDITA (Scarico titoli)** - Keywords:
+- "VENDITA", "VEND.", "SCARICO", "SCARICO TITOLI"
+- "RISCATTO", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE"
+- "RIMBORSO", "RIMB.", "LIQUIDAZIONE", "LIQUIDAZ."
+- "DISINVESTIMENTO", "DISINV."
+- "NOTA INF. VEND.", "SWITCH OUT"
+- "PRELIEVO QUOTE"
+
+**9.2 STRUTTURA MOVIMENTI**
+Per OGNI movimento titoli estrai:
+- **isin**: Codice ISIN del titolo (se presente)
+- **date**: Data operazione (formato "DD/MM/YYYY")
+- **name**: Nome/Descrizione del titolo
+- **operationType**: "Acquisto" o "Vendita" (normalizza sempre a questi due valori)
+- **quantity**: Quantità/Numero quote (positivo)
+- **price**: Prezzo/Quotazione unitario
+- **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
+- **currency**: Valuta/Divisa (EUR, USD, etc.)
+- **fees**: Spese/Commissioni dell'operazione
+- **taxes**: Imposte, bolli, ritenute
+- **netAmount**: Importo netto totale dell'operazione
+
+**9.3 NOTE IMPORTANTI**
+- La sezione movimenti può essere chiamata: "MOVIMENTI", "OPERAZIONI", "LISTA OPERAZIONI", "DETTAGLIO MOVIMENTI"
+- Alcune banche mostrano solo il totale, altre mostrano il dettaglio per ogni titolo
+- Se non ci sono movimenti nel periodo, lascia l'array vuoto
+- Il netAmount per acquisti è l'importo pagato (positivo), per vendite è l'importo ricevuto (positivo)
+- fees e taxes potrebbero essere inclusi nel netAmount o mostrati separatamente
+
 ### STRUTTURA JSON RICHIESTA:
 {
   "type": "DOSSIER" | "LIQUIDITY",
   "layout_detected": "two_columns_dare_avere" | "single_column_with_sign" | "single_column_no_sign" | "other",
   "info": {
     "bankName": "Nome Banca",
-    "accountNumber": "Numero Conto",
+    "accountNumber": "Numero Conto o Dossier Titoli (es. 445/0000004742990)",
     "period_start": "YYYY-MM-DD",
     "period_end": "YYYY-MM-DD",
     "holder": "Intestatario",
-    "settlementAccount": "IBAN"
+    "settlementAccount": "Per DOSSIER: cerca 'Conto di Regolamento', 'Conto Regolamento', 'Conto di appoggio', 'Conto corrente tecnico', 'Cash account', 'C/C Regolamento', 'Conto Corrente', 'N. Conto Corrente', 'C/EURO' (es. C/EURO 00445/00035652638). Per LIQUIDITY: IBAN"
   },
   "scalar_data": {
     "numeri_creditori": 0,
@@ -461,9 +532,36 @@ Prima di restituire il JSON:
     "total_movements_amount": { "value": 0, "source": "calculated" },
     "total_commissions": { "value": 0, "source": "calculated" },
     "total_proventi": { "value": 0, "source": "calculated" },
-    "math_verification": { "expected_delta": 0, "actual_sum": 0, "matches": true }
+    "math_verification": { "expected_delta": 0, "actual_sum": 0, "matches": true },
+    "portfolio_total_extracted": 0,
+    "portfolio_currency": "EUR"
   },
-  "finalPortfolio": [],
+  "finalPortfolio": [
+    {
+      "isin": "CODICE_ISIN",
+      "name": "Nome del titolo dal PDF",
+      "currency": "EUR",
+      "exchangeRate": 1,
+      "quantity": 0,
+      "price": 0,
+      "marketValue": 0
+    }
+  ],
+  "securityMovements": [
+    {
+      "isin": "CODICE_ISIN",
+      "date": "DD/MM/YYYY",
+      "name": "Nome del titolo",
+      "operationType": "Acquisto" | "Vendita",
+      "quantity": 0,
+      "price": 0,
+      "exchangeRate": 1,
+      "currency": "EUR",
+      "fees": 0,
+      "taxes": 0,
+      "netAmount": 0
+    }
+  ],
   "dividends": []
 }
 
@@ -723,6 +821,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             costs_breakdown: {
                 ...(parsed.summary || {}),
                 scalar_data: parsed.scalar_data || {},
+                securityMovements: parsed.securityMovements || [],
                 // Map scalar_data fields to dashboard-expected keys
                 securities_purchase_count: parsed.scalar_data?.acquisto_titoli_count || 0,
                 securities_sale_count: parsed.scalar_data?.vendita_titoli_count || 0,
@@ -731,6 +830,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 securities_sale_amount: parsed.scalar_data?.vendita_titoli_amount || 0,
                 securities_net_amount: (parsed.scalar_data?.acquisto_titoli_amount || 0) + (parsed.scalar_data?.vendita_titoli_amount || 0),
                 settlementAccount: parsed.info?.settlementAccount || null,
+                holder: parsed.info?.holder || null,
                 original_ai_data: { ...(parsed.summary || {}) } // Backup for restore
             },
             benchmark_comparison: parsed.info?.accountNumber || 'N/D',

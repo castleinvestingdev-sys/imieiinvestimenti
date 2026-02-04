@@ -74,7 +74,7 @@ export default function Header() {
     { href: '/reati', label: 'Attenzione ai rebates' },
   ]
 
-  const isFullscreenPage = pathname === '/login' || pathname === '/register'
+  const isFullscreenPage = pathname === '/login' || pathname === '/register' || pathname === '/consulente' || pathname?.startsWith('/dashboard')
 
   if (isFullscreenPage) return null
 
@@ -145,7 +145,7 @@ export default function Header() {
 
                 {user ? (
                   <>
-                    <Link href="/dashboard" style={{
+                    <Link href="/consulente" style={{
                       background: 'linear-gradient(135deg, #00C853 0%, #009624 100%)',
                       color: '#fff',
                       padding: '0 24px',
@@ -392,7 +392,7 @@ export default function Header() {
               <hr style={{ border: 'none', borderTop: '1px solid #f1f5f9', margin: '8px 0' }} />
               {user ? (
                 <Link
-                  href="/dashboard"
+                  href="/consulente"
                   onClick={() => setMobileMenuOpen(false)}
                   style={{
                     padding: '14px',
