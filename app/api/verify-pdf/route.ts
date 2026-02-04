@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import https from 'https'
 
-// Allow up to 10 minutes for Gemini PDF processing (some complex PDFs need more time)
-export const maxDuration = 600
+// Allow up to 5 minutes for Gemini PDF processing (Vercel Hobby plan limit: 300s)
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
     const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
