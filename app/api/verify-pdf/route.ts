@@ -882,15 +882,35 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
 
         const calculatedTotal = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
 
-        // Post-process: riclassifica bonifici erroneamente classificati come Commissioni -> Altro
-        // Riclassifica anche vecchie categorie "Spesa" e "Bonifico" -> categoria appropriata
+        // Post-process: riclassifica movimenti erroneamente classificati
         movements.forEach((m: any) => {
+            const desc = m.description?.toLowerCase() || ''
+
             // Bonifici erroneamente classificati come Commissioni -> Altro
             if (m.movement_type === 'Commissioni' &&
-                m.description?.toLowerCase().includes('bonifico') &&
-                m.description?.toLowerCase().includes('disposto')) {
+                desc.includes('bonifico') &&
+                desc.includes('disposto')) {
                 m.movement_type = 'Altro'
             }
+
+            // PENSIONE INPS, STIPENDIO, ecc. NON sono commissioni -> Altro
+            if (m.movement_type === 'Commissioni' && (
+                desc.includes('pensione') ||
+                desc.includes('inps') ||
+                desc.includes('stipendio') ||
+                desc.includes('emolument') ||
+                desc.includes('retribuzione') ||
+                desc.includes('affitto') ||
+                desc.includes('canone locazione') ||
+                desc.includes('premio polizza') ||
+                desc.includes('assicurazione') ||
+                desc.includes('bolletta') ||
+                desc.includes('utenz') ||
+                desc.includes('prelievo')
+            )) {
+                m.movement_type = 'Altro'
+            }
+
             // Vecchia categoria "Bonifico" -> Altro
             if (m.movement_type === 'Bonifico') {
                 m.movement_type = 'Altro'

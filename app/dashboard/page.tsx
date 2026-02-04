@@ -15,6 +15,7 @@ interface Analysis {
   period_start: string
   period_end: string
   portfolio_value: number
+  initial_value?: number
   year?: number
   quarter?: string
   dossierNumber?: string
@@ -26,6 +27,8 @@ interface Analysis {
   forensic_summary?: {
     performance_pct?: string
   }
+  // Validation flags
+  coherenceWarning?: string
 }
 
 type AccountGroup = { identifier: string; analyses: Analysis[] };
@@ -146,6 +149,144 @@ function DashboardContent() {
         (a.costs_breakdown?.holder || 'Cliente Sconosciuto') === clienteFilter
       )
     }
+
+    // Infer missing period_start from previous documents or period_end
+    const inferPeriodStart = (analyses: Analysis[]): Analysis[] => {
+      // Group by account (bank + identifier)
+      const byAccount = new Map<string, Analysis[]>()
+      analyses.forEach(a => {
+        const key = `${a.bank_name}|${a.benchmark_comparison || ''}|${a.account_type}`
+        const list = byAccount.get(key) || []
+        list.push(a)
+        byAccount.set(key, list)
+      })
+
+      // Process each account group
+      byAccount.forEach((accountAnalyses) => {
+        // Sort by period_end ascending
+        accountAnalyses.sort((a, b) =>
+          new Date(a.period_end).getTime() - new Date(b.period_end).getTime()
+        )
+
+        // Infer period_start for each document
+        for (let i = 0; i < accountAnalyses.length; i++) {
+          const current = accountAnalyses[i]
+          if (!current.period_start && current.period_end) {
+            // Try to use previous document's period_end
+            if (i > 0 && accountAnalyses[i - 1].period_end) {
+              current.period_start = accountAnalyses[i - 1].period_end
+            } else {
+              // Infer from period_end - assume it's the last day of previous period
+              const endDate = new Date(current.period_end)
+              const endDay = endDate.getDate()
+              const endMonth = endDate.getMonth()
+              const endYear = endDate.getFullYear()
+
+              // If end is near end of month, assume monthly/quarterly period
+              if (endDay >= 28) {
+                // Get last day of previous month
+                const startDate = new Date(endYear, endMonth, 0) // Last day of previous month
+                current.period_start = startDate.toISOString().split('T')[0]
+              }
+            }
+          }
+        }
+      })
+
+      return analyses
+    }
+
+    filteredData = inferPeriodStart(filteredData)
+
+    // Validate coherence between consecutive EC (portfolio quantities)
+    const validateCoherence = (analyses: Analysis[]): Analysis[] => {
+      // Group by account (bank + identifier + type)
+      const byAccount = new Map<string, Analysis[]>()
+      analyses.forEach(a => {
+        const key = `${a.bank_name}|${a.benchmark_comparison || ''}|${a.account_type}`
+        const list = byAccount.get(key) || []
+        list.push(a)
+        byAccount.set(key, list)
+      })
+
+      // Validate each account group
+      byAccount.forEach((accountAnalyses) => {
+        // Sort by period_end ascending
+        accountAnalyses.sort((a, b) =>
+          new Date(a.period_end).getTime() - new Date(b.period_end).getTime()
+        )
+
+        // For each pair of consecutive documents
+        for (let i = 1; i < accountAnalyses.length; i++) {
+          const prev = accountAnalyses[i - 1]
+          const curr = accountAnalyses[i]
+
+          // Only validate DOSSIER accounts with holdings
+          if (prev.account_type !== 'DOSSIER' || !prev.holdings?.length) continue
+
+          // Build expected initial holdings from prev.holdings + curr movements
+          const prevHoldings = new Map<string, { isin: string; name: string; quantity: number }>()
+          prev.holdings?.forEach((h: any) => {
+            if (h.isin) {
+              prevHoldings.set(h.isin, {
+                isin: h.isin,
+                name: h.name || h.isin,
+                quantity: h.quantity || 0
+              })
+            }
+          })
+
+          // Apply security movements from current period
+          const securityMovements = curr.costs_breakdown?.securityMovements || []
+          securityMovements.forEach((m: any) => {
+            if (!m.isin) return
+            const existing = prevHoldings.get(m.isin) || { isin: m.isin, name: m.name || m.isin, quantity: 0 }
+            if (m.operationType === 'Acquisto') {
+              existing.quantity += (m.quantity || 0)
+            } else if (m.operationType === 'Vendita') {
+              existing.quantity -= (m.quantity || 0)
+            }
+            prevHoldings.set(m.isin, existing)
+          })
+
+          // Compare with current final holdings
+          const warnings: string[] = []
+          const currHoldings = new Map<string, number>()
+          curr.holdings?.forEach((h: any) => {
+            if (h.isin) currHoldings.set(h.isin, h.quantity || 0)
+          })
+
+          // Check for discrepancies
+          prevHoldings.forEach((expected, isin) => {
+            const actualQty = currHoldings.get(isin)
+            if (expected.quantity > 0 && actualQty === undefined) {
+              warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)} quote, assente nel periodo corrente`)
+            } else if (actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.001) {
+              warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)}, trovato ${actualQty.toFixed(4)}`)
+            }
+          })
+
+          // Check for new holdings without matching purchase
+          currHoldings.forEach((qty, isin) => {
+            if (!prevHoldings.has(isin) && qty > 0) {
+              const holding = curr.holdings?.find((h: any) => h.isin === isin)
+              const hasPurchase = securityMovements.some((m: any) => m.isin === isin && m.operationType === 'Acquisto')
+              if (!hasPurchase) {
+                warnings.push(`${holding?.name || isin}: nuovo titolo senza acquisto registrato`)
+              }
+            }
+          })
+
+          if (warnings.length > 0) {
+            curr.coherenceWarning = `⚠️ Incongruenze con periodo precedente:\n${warnings.join('\n')}`
+          }
+        }
+      })
+
+      return analyses
+    }
+
+    filteredData = validateCoherence(filteredData)
     setAnalyses(filteredData)
 
     const { data: trashedData } = await supabase
@@ -298,10 +439,45 @@ function DashboardContent() {
     await fetchAnalyses(user.id)
   }
 
+  // Funzione per riclassificare movimenti errati (per dati già nel database)
+  const reclassifyMovements = (transactions: any[]) => {
+    return transactions.map(t => {
+      const desc = t.description?.toLowerCase() || ''
+      let newType = t.movement_type
+
+      // Vecchia categoria "Bonifico" -> Altro
+      if (newType === 'Bonifico') newType = 'Altro'
+      // Vecchia categoria "Spesa" -> Commissioni
+      if (newType === 'Spesa') newType = 'Commissioni'
+
+      // PENSIONE INPS, STIPENDIO, ecc. NON sono commissioni -> Altro
+      if (newType === 'Commissioni' && (
+        desc.includes('pensione') ||
+        desc.includes('inps') ||
+        desc.includes('stipendio') ||
+        desc.includes('emolument') ||
+        desc.includes('retribuzione') ||
+        desc.includes('affitto') ||
+        desc.includes('canone locazione') ||
+        desc.includes('premio polizza') ||
+        desc.includes('assicurazione') ||
+        desc.includes('bolletta') ||
+        desc.includes('utenz') ||
+        desc.includes('prelievo') ||
+        (desc.includes('bonifico') && desc.includes('disposto'))
+      )) {
+        newType = 'Altro'
+      }
+
+      return { ...t, movement_type: newType }
+    })
+  }
+
   useEffect(() => {
     if (inspectorData) {
       setEditingValues(JSON.parse(JSON.stringify(inspectorData.costs_breakdown || {})))
-      setEditingTransactions(JSON.parse(JSON.stringify(inspectorData.transactions || [])))
+      const transactions = JSON.parse(JSON.stringify(inspectorData.transactions || []))
+      setEditingTransactions(reclassifyMovements(transactions))
     } else {
       setEditingValues(null)
       setEditingTransactions([])
@@ -991,21 +1167,38 @@ function DashboardContent() {
       if (freq === 'quarterly') {
         // Find which quarter this month belongs to
         const quarter = Math.floor(m / 3) + 1; // 1-4
+        const quarterStartMonth = (quarter - 1) * 3; // 0, 3, 6, 9
         const quarterEndMonth = quarter * 3 - 1; // 2, 5, 8, 11 (0-indexed)
 
-        // Find document for this quarter
-        const file = accountAnalyses.find(a => {
-          if (!a.period_end) return false;
-          const d = new Date(a.period_end);
-          const docMonth = d.getMonth();
-          const docYear = d.getFullYear();
-          return docYear === year && docMonth >= (quarter - 1) * 3 && docMonth <= quarterEndMonth;
-        });
+        // Check if ANY month in this quarter is 'monthly' - if so, render entire quarter as monthly
+        const hasMonthlyInQuarter = freqMap.slice(quarterStartMonth, quarterEndMonth + 1).includes('monthly');
 
-        slots.push({ type: 'quarterly', month: quarterEndMonth, quarter, file });
+        if (hasMonthlyInQuarter) {
+          // Process this quarter month by month
+          while (m <= quarterEndMonth) {
+            const file = accountAnalyses.find(a => {
+              if (!a.period_end) return false;
+              const d = new Date(a.period_end);
+              return d.getFullYear() === year && d.getMonth() === m;
+            });
+            slots.push({ type: 'monthly', month: m, file });
+            m++;
+          }
+        } else {
+          // All months in quarter are quarterly - create single quarterly slot
+          const file = accountAnalyses.find(a => {
+            if (!a.period_end) return false;
+            const d = new Date(a.period_end);
+            const docMonth = d.getMonth();
+            const docYear = d.getFullYear();
+            return docYear === year && docMonth >= quarterStartMonth && docMonth <= quarterEndMonth;
+          });
 
-        // Skip to next quarter
-        m = quarterEndMonth + 1;
+          slots.push({ type: 'quarterly', month: quarterEndMonth, quarter, file });
+
+          // Skip to next quarter
+          m = quarterEndMonth + 1;
+        }
       } else {
         // Monthly slot
         const file = accountAnalyses.find(a => {
@@ -1049,14 +1242,17 @@ function DashboardContent() {
   const getSlotDates = (year: number, slotIndex: number, frequency: 'monthly' | 'quarterly') => {
     const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
     if (frequency === 'monthly') {
-      const startDate = new Date(year, slotIndex - 1, 1);
-      const endDate = new Date(year, slotIndex, 0);
-      return { start: fmt(startDate), end: fmt(endDate), label: startDate.toLocaleString('it-IT', { month: 'short' }).toUpperCase() };
+      // Start: last day of previous month, End: last day of current month
+      const startDate = new Date(year, slotIndex - 1, 0); // Last day of previous month
+      const endDate = new Date(year, slotIndex, 0);       // Last day of current month
+      const labelDate = new Date(year, slotIndex - 1, 1); // For getting month name
+      return { start: fmt(startDate), end: fmt(endDate), label: labelDate.toLocaleString('it-IT', { month: 'short' }).toUpperCase() };
     } else {
-      const endMonth = slotIndex * 3;
-      const startMonth = endMonth - 2;
-      const startDate = new Date(year, startMonth - 1, 1);
-      const endDate = new Date(year, endMonth, 0);
+      // Quarterly: Start from last day of previous quarter
+      const endMonth = slotIndex * 3;       // e.g., Q4 = month 12
+      const startMonth = endMonth - 2;      // e.g., Q4 starts month 10
+      const startDate = new Date(year, startMonth - 1, 0); // Last day before quarter starts (e.g., Sep 30 for Q4)
+      const endDate = new Date(year, endMonth, 0);         // Last day of quarter (e.g., Dec 31 for Q4)
       return { start: fmt(startDate), end: fmt(endDate), label: `Q${slotIndex}` };
     }
   }
@@ -1429,6 +1625,9 @@ function DashboardContent() {
                                     const isPresent = !!slot.file;
                                     const isMonthly = slot.type === 'monthly';
 
+                                    // Find previous slot with a file to get period_end as start date
+                                    const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file);
+
                                     // Get display label and dates
                                     let displayLabel: string;
                                     let dates: { start: string; end: string };
@@ -1442,6 +1641,13 @@ function DashboardContent() {
                                       dates = getSlotDates(year, slot.quarter!, 'quarterly');
                                     }
 
+                                    // Calculate start date: use previous document's period_end if available
+                                    const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
+                                      ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                      : (isPresent && slot.file!.period_start
+                                        ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                        : dates.start);
+
                                     return (
                                       <div key={idx}
                                         className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
@@ -1453,7 +1659,7 @@ function DashboardContent() {
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
                                           {isPresent ? (
                                             <>
-                                              {new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
+                                              {startDateDisplay}<br />
                                               <span className={styles.arrowIconSmall}>↓</span>
                                               {new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                             </>
@@ -1473,6 +1679,14 @@ function DashboardContent() {
                                                 : (slot.file!.forensic_summary?.performance_pct || 'N/D')}
                                             </div>
                                             <div className={styles.tileActions}>
+                                              {slot.file!.coherenceWarning && (
+                                                <button
+                                                  className={styles.tileWarningBtn}
+                                                  onClick={(e) => { e.stopPropagation(); alert(slot.file!.coherenceWarning); }}
+                                                  title="Incongruenza con periodo precedente"
+                                                  style={{ background: 'rgba(251,191,36,0.15)', color: '#f59e0b', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
+                                                >⚠️</button>
+                                              )}
                                               <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
                                               <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
                                             </div>
@@ -1534,6 +1748,9 @@ function DashboardContent() {
                                     const isPresent = !!slot.file;
                                     const isMonthly = slot.type === 'monthly';
 
+                                    // Find previous slot with a file to get period_end as start date
+                                    const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file);
+
                                     // Get display label and dates
                                     let displayLabel: string;
                                     let dates: { start: string; end: string };
@@ -1547,6 +1764,13 @@ function DashboardContent() {
                                       dates = getSlotDates(year, slot.quarter!, 'quarterly');
                                     }
 
+                                    // Calculate start date: use previous document's period_end if available
+                                    const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
+                                      ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                      : (isPresent && slot.file!.period_start
+                                        ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                        : dates.start);
+
                                     return (
                                       <div key={idx}
                                         className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
@@ -1558,7 +1782,7 @@ function DashboardContent() {
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
                                           {isPresent ? (
                                             <>
-                                              {new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br />
+                                              {startDateDisplay}<br />
                                               <span className={styles.arrowIconSmall}>↓</span>
                                               {new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                             </>
@@ -1687,9 +1911,9 @@ function DashboardContent() {
                         val = scalarData[scalarKey]
                         displaySource = 'extracted'
                       } else if (item.key === 'total_commissions') {
-                        // Calculate from actual movements classified as "Commissioni"
-                        const txs = inspectorData.transactions || [];
-                        const commissioniSum = Math.abs(txs
+                        // Calculate from RECLASSIFIED movements (editingTransactions)
+                        // This includes bolli and imposte that are now under "Commissioni"
+                        const commissioniSum = Math.abs(editingTransactions
                           .filter((m: any) => m.movement_type === 'Commissioni')
                           .reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
                         val = commissioniSum;
@@ -1727,8 +1951,8 @@ function DashboardContent() {
                             ...(isCommissionsField ? { cursor: 'pointer' } : {})
                           }}
                           onClick={isCommissionsField ? () => {
-                            // Open commissions detail modal
-                            const transactions = inspectorData.transactions || []
+                            // Open commissions detail modal - use RECLASSIFIED transactions
+                            const transactions = editingTransactions
                             const periodEndStr = inspectorData.period_end || ''
                             const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
                             const periodMonthStr = periodEndStr.match(/[-/](\d{2})[-/]/)?.[1] || periodEndStr.split(/[-/]/)[1] || ''
@@ -1817,7 +2041,9 @@ function DashboardContent() {
                   {(() => {
                     const calculatedTotal = inspectorData.holdings?.reduce((acc: number, h: any) => acc + (h.marketValue || 0), 0) || 0
                     const extractedTotal = inspectorData.costs_breakdown?.portfolio_total_extracted || 0
-                    const isMatch = extractedTotal > 0 && Math.abs(calculatedTotal - extractedTotal) < 1
+                    const diff = Math.abs(calculatedTotal - extractedTotal)
+                    // Confronto esatto (tolleranza solo per errori floating point: 1 centesimo)
+                    const isMatch = extractedTotal > 0 && diff < 0.01
                     return (
                       <div className={styles.infoItem}>
                         <strong>Valore Portafoglio</strong>
@@ -1825,9 +2051,9 @@ function DashboardContent() {
                         {extractedTotal > 0 && (
                           <span style={{ marginLeft: '8px' }}>
                             {isMatch ? (
-                              <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€`} style={{ color: '#22c55e', fontWeight: 'bold' }}>✅</span>
+                              <span title={`Estratto: €${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`} style={{ color: '#22c55e', fontWeight: 'bold' }}>✅</span>
                             ) : (
-                              <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€ - Differenza: ${Math.abs(calculatedTotal - extractedTotal).toLocaleString('it-IT', { minimumFractionDigits: 2 })}€`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
+                              <span title={`Estratto: €${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })} - Differenza: €${diff.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
                             )}
                           </span>
                         )}
@@ -2098,8 +2324,8 @@ function DashboardContent() {
                             <td>{h.currency || 'EUR'}</td>
                             <td>{(h.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                             <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 }) : ''}</td>
-                            <td>{h.price && h.price !== 0 ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : ''}</td>
-                            <td>{h.marketValue && h.marketValue !== 0 ? `€${h.marketValue.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : ''}</td>
+                            <td>{h.price && h.price !== 0 ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'}</td>
+                            <td>€{(h.marketValue || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2231,10 +2457,7 @@ function DashboardContent() {
                                 className={`${styles.typeBadge} ${typeClass}`}
                                 style={{
                                   border: 'none',
-                                  background: 'transparent',
-                                  cursor: 'pointer',
-                                  fontWeight: '500',
-                                  padding: '4px 8px'
+                                  cursor: 'pointer'
                                 }}
                               >
                                 {movementTypes.map(type => (
