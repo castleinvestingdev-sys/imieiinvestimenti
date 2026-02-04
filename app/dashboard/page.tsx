@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -37,6 +37,14 @@ type BankGroup = {
 }
 
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className={styles.loadingContainer}><div className={styles.spinner}></div><p>Caricamento...</p></div>}>
+      <DashboardContent />
+    </Suspense>
+  )
+}
+
+function DashboardContent() {
   const [user, setUser] = useState<User | null>(null)
   const [analyses, setAnalyses] = useState<Analysis[]>([])
   const [trashedAnalyses, setTrashedAnalyses] = useState<Analysis[]>([])
