@@ -804,6 +804,28 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         // Salvataggio su Supabase
         logProgress('SALVATAGGIO DATABASE', 'Inserimento dati in Supabase')
 
+        // Normalize holdings - ensure exchangeRate defaults to 1
+        const normalizedHoldings = (parsed.finalPortfolio || []).map((h: any) => ({
+            ...h,
+            exchangeRate: h.exchangeRate && h.exchangeRate !== 0 ? h.exchangeRate : 1,
+            currency: h.currency || 'EUR',
+            quantity: h.quantity || 0,
+            price: h.price || 0,
+            marketValue: h.marketValue || 0
+        }))
+
+        // Normalize security movements - ensure exchangeRate defaults to 1
+        const normalizedSecurityMovements = (parsed.securityMovements || []).map((m: any) => ({
+            ...m,
+            exchangeRate: m.exchangeRate && m.exchangeRate !== 0 ? m.exchangeRate : 1,
+            currency: m.currency || 'EUR',
+            quantity: m.quantity || 0,
+            price: m.price || 0,
+            netAmount: m.netAmount || 0,
+            fees: m.fees || 0,
+            taxes: m.taxes || 0
+        }))
+
         const analysisData = {
             document_id: crypto.randomUUID(),
             user_id: userId || null,
@@ -812,16 +834,16 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             period_end: parseDate(parsed.info?.period_end),
             account_type: parsed.type,
             portfolio_value: isDossier
-                ? (parsed.finalPortfolio?.reduce((acc: number, item: any) => acc + (item.marketValue || 0), 0) || 0)
+                ? (normalizedHoldings.reduce((acc: number, item: any) => acc + (item.marketValue || 0), 0) || 0)
                 : (typeof parsed.summary?.final_balance === 'object' ? parsed.summary.final_balance.value : (parsed.summary?.final_balance || 0)),
             initial_value: 0,
-            holdings: parsed.finalPortfolio || [],
+            holdings: normalizedHoldings,
             transactions: parsed.movements || [],
             dividends: parsed.dividends || [],
             costs_breakdown: {
                 ...(parsed.summary || {}),
                 scalar_data: parsed.scalar_data || {},
-                securityMovements: parsed.securityMovements || [],
+                securityMovements: normalizedSecurityMovements,
                 // Map scalar_data fields to dashboard-expected keys
                 securities_purchase_count: parsed.scalar_data?.acquisto_titoli_count || 0,
                 securities_sale_count: parsed.scalar_data?.vendita_titoli_count || 0,
