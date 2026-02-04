@@ -669,7 +669,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         })
 
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
-        // Dal 2023+: il totale commissioni dell'Excel include anche "Imposta di bollo E/C e Rendiconto"
+        // + tutti i bolli bancari (E/C e Prodotti Finanziari) che sono classificati come "Spesa"
         const periodEndStr = parsed.info?.period_end || ''
         const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
 
@@ -691,22 +691,16 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             .filter((m: any) => m.movement_type === 'Commissioni')
             .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
 
-        // Dal 2023+: aggiungi bollo E/C (che è classificato come "Spesa" ma l'Excel lo include nelle commissioni)
-        // ECCEZIONE: Q1 (marzo) dal 2024+ NON include bollo E/C
+        // Aggiungi TUTTI i bolli bancari alle commissioni (sia E/C che Prodotti Finanziari)
+        // I bolli sono classificati come "Spesa" da Gemini ma vanno inclusi nel totale commissioni
         const periodMonthStr = periodEndStr.match(/[-/](\d{2})[-/]/)?.[1] || periodEndStr.split(/[-/]/)[1] || ''
         const periodMonth = parseInt(periodMonthStr) || 0
-        const isQ1 = periodMonth === 3
-        if (periodYear >= 2023 && !(periodYear >= 2024 && isQ1)) {
-            const bolloEC = Math.abs(movements
-                .filter((m: any) => m.movement_type === 'Spesa' && (
-                    m.description?.toLowerCase().includes('bollo') && (
-                        m.description?.toLowerCase().includes('e/c') ||
-                        m.description?.toLowerCase().includes('rendiconto')
-                    )
-                ))
-                .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
-            calculatedCommissions += bolloEC
-        }
+        const allBolli = Math.abs(movements
+            .filter((m: any) => m.movement_type === 'Spesa' &&
+                m.description?.toLowerCase().includes('bollo')
+            )
+            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
+        calculatedCommissions += allBolli
 
         // Dal 2022+: aggiungi Tobin Tax (Imposta transazioni finanziarie) alle commissioni
         // L'Excel la include nel totale commissioni dal 2022 in poi

@@ -1042,6 +1042,11 @@ function DashboardContent() {
   }
 
 
+  // Helper function to format currency with Italian locale (dot for thousands, comma for decimals)
+  const formatCurrency = (val: number): string => {
+    return new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)
+  }
+
   const renderVal = (val: any, isCurrency = false) => {
     if (val === 'non trovato' || val === null || val === undefined) {
       return <span className={styles.missingValue}>non trovato</span>
@@ -1052,7 +1057,7 @@ function DashboardContent() {
     let displayVal = val;
     if (typeof val === 'number') {
       displayVal = isCurrency
-        ? `€${val.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        ? `€${formatCurrency(val)}`
         : val.toLocaleString('it-IT');
     }
     return <span className={styles.foundValue}>{displayVal}</span>
@@ -1444,7 +1449,7 @@ function DashboardContent() {
                                             <span className={styles.valueLabelSmall}>{slot.file!.account_type === 'DOSSIER' ? 'Portafoglio' : 'Rendimento'}</span>
                                             <div className={styles.valueDataLarge}>
                                               {slot.file!.account_type === 'DOSSIER'
-                                                ? `€${(slot.file!.portfolio_value || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                ? `€${formatCurrency(slot.file!.portfolio_value || 0)}`
                                                 : (slot.file!.forensic_summary?.performance_pct || 'N/D')}
                                             </div>
                                             <div className={styles.tileActions}>
@@ -1546,7 +1551,7 @@ function DashboardContent() {
                                         {isPresent ? (
                                           <div className={styles.valueContainer}>
                                             <span className={styles.valueLabelSmall}>Saldo</span>
-                                            <div className={styles.valueDataLarge}>€{(slot.file!.portfolio_value || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                            <div className={styles.valueDataLarge}>€{formatCurrency(slot.file!.portfolio_value || 0)}</div>
                                             <div className={styles.tileActions}>
                                               <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
                                               <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
@@ -2063,7 +2068,7 @@ function DashboardContent() {
                             <td>{h.isin || ''}</td>
                             <td>{h.name || ''}</td>
                             <td>{h.currency || 'EUR'}</td>
-                            <td>{h.exchangeRate && h.exchangeRate !== 1 ? h.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''}</td>
+                            <td>{(h.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                             <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 }) : ''}</td>
                             <td>{h.price && h.price !== 0 ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : ''}</td>
                             <td>{h.marketValue && h.marketValue !== 0 ? `€${h.marketValue.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : ''}</td>
@@ -2121,7 +2126,7 @@ function DashboardContent() {
                                       : missingVal}
                                   </td>
                                   <td>{typeof m.price === 'number' && m.price !== 0 ? m.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : missingVal}</td>
-                                  <td>{m.exchangeRate && m.exchangeRate !== 1 ? m.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''}</td>
+                                  <td>{(m.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                                   <td>{m.currency || 'EUR'}</td>
                                   <td style={{ color: '#ef4444' }}>{(() => {
                                       const totalCosts = (m.fees || 0) + (m.taxes || 0);
