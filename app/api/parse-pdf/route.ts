@@ -225,51 +225,58 @@ Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friulad
 
 **MAI ASSUMERE UN SEGNO DI DEFAULT** - Usa sempre una delle 4 priorità sopra.
 
-### FASE 3.5: CLASSIFICAZIONE movement_type (REGOLE DETTAGLIATE)
+### FASE 3.5: CLASSIFICAZIONE movement_type (SOLO 5 CATEGORIE)
 
-**"Commissioni"** - Spese bancarie e costi del conto:
-- Commissioni di gestione e amministrazione (tipicamente 45€/trimestre)
-- Spese rendiconto, spese E/C, spese emissione E/C (tipicamente 0.70€)
-- **Canone mensile / canone fisso mensile** (tipicamente 6€/mese) - CE NE SONO 3 PER TRIMESTRE (uno per mese!)
-- **Canone carta di debito** (tipicamente 1.50€/mese) - CE NE SONO 3 PER TRIMESTRE (uno per mese!)
-- **Invio rendicontazione/contabili titoli** (tipicamente 0.70€) - NON SALTARE, spesso su pagine successive
-- **Costo emissione comunicazione di legge** (tipicamente 0.42€) - NON SALTARE
+**ESISTONO SOLO 5 CATEGORIE - USA ESCLUSIVAMENTE QUESTE:**
+
+**"Commissioni"** - TUTTI i costi bancari e imposte:
+- Commissioni di gestione e amministrazione
+- Spese rendiconto, spese E/C, spese emissione E/C
+- Canone mensile / canone fisso mensile
+- Canone carta di debito
+- Invio rendicontazione/contabili titoli
+- Costo emissione comunicazione di legge
 - Commissioni prelievo Bancocard
-- **Commissioni bonifico** (es. "Comm.ne bonifico", "Commissione bonifico" - la COMMISSIONE, NON il bonifico stesso)
-- **Competenze Fruttifere / Competenze di chiusura** (→ "Commissioni" con importo POSITIVO)
-- Rimborso canone (positivo → "Commissioni", solo importi piccoli < 20€)
-- **Rimborso spese e commissioni** (positivo → "Commissioni", solo importi piccoli < 20€)
-- **Donazione su sportello automatico** (addebito ATM per donazione a enti benefici, tipicamente 2€) → "Commissioni"
-- **Storno id. op. / storno operazione** (storno di accredito precedente, importo NEGATIVO) → "Commissioni"
-**IMPORTANTE**: Movimenti piccoli (0.42€, 0.70€, 1.00€, 1.50€) sono CRITICI per il calcolo delle commissioni totali. NON saltarli MAI.
-**VERIFICA**: Per un trimestre, aspettati almeno 3 canoni mensili (6€x3) e possibilmente 3 canoni carta debito (1.50€x3). Se ne trovi meno di 3, cerca meglio nel PDF.
+- Commissioni bonifico (es. "Comm.ne bonifico")
+- Competenze Fruttifere / Competenze di chiusura (importo POSITIVO)
+- Rimborso canone/spese (solo importi piccoli < 20€)
+- Donazione su sportello automatico
+- Storno id. op. / storno operazione
+- **IMPOSTA DI BOLLO E/C e Rendiconto** → Commissioni
+- **IMPOSTA DI BOLLO su Prodotti Finanziari** → Commissioni
+- **Ritenuta fiscale** → Commissioni
+- **Imposta transazioni finanziarie (Tobin Tax)** → Commissioni
 
-**"Spesa"** - Tasse e imposte:
-- **Imposta di bollo E/C e Rendiconto** (tipicamente 8.50€) - ESTRAI SEMPRE, NON SALTARE
-- **Imposta di bollo su Prodotti Finanziari** - ESTRAI SEMPRE, NON SALTARE
-- Ritenuta fiscale
-- F24, imposte varie
-- Imposta sulle transazioni finanziarie (Tobin Tax)
+**"Acquisto"** - Investimenti in titoli:
+- Sottoscrizione fondi, PAC, acquisto titoli/ETF/obbligazioni
 
-**"Acquisto"** - Investimenti: sottoscrizione fondi, PAC, acquisto titoli/ETF
-**"Vendita"** - Disinvestimenti: riscatto fondi, vendita titoli
-**"Proventi"** - Cedole, dividendi
-**"Bonifico"** - Bonifici, stipendio, versamenti
-**"Altro"** - Tutto il resto:
-- **Premio polizza** / Premio assicurazione → "Altro"
-- Prelievo contante (se non ha commissione separata)
-- Rimborsi di importo elevato (> 20€, es. "Rimborso spese e commissioni su errata applicazione") → "Altro"
+**"Vendita"** - Disinvestimenti:
+- Riscatto fondi, vendita titoli, rimborso quote
 
-**ATTENZIONE**:
-- TUTTE le imposte di bollo (sia E/C che Prodotti Finanziari) → **Spesa**, NON Commissioni
-- Competenze Fruttifere/di chiusura → **Commissioni** (importo positivo, compensano le spese bancarie)
-- **Premio polizza** → **Altro**, MAI Commissioni
-- **Rimborsi > 20€** → **Altro** (sono rettifiche, non costi bancari regolari)
-- **"Bonifico da Voi disposto a favore di:"** = il TRASFERIMENTO → **Bonifico**, NON Commissioni
-- **"Bonifico a Vostro favore"** = accredito → **Bonifico**, NON Commissioni
-- **"Comm.ne bonifico"** / **"Commissioni bonifico"** = la COMMISSIONE sul bonifico → **Commissioni**
-- **"Donazione su sportello automatico"** = addebito sul conto → **Commissioni**
-- **"storno id. op."** / **"storno operazione"** = storno di un accredito → **Commissioni**
+**"Proventi"** - Rendite da investimenti:
+- Cedole, dividendi, proventi titoli
+
+**"Altro"** - TUTTO IL RESTO (categoria predefinita):
+- Bonifici in entrata/uscita
+- Pensione INPS, stipendio, emolumenti
+- Affitto, canone locazione
+- Premio polizza, assicurazione
+- Prelievo contante
+- Rimborsi > 20€
+- Pagamenti utenze, bollette, F24, MAV, RAV
+- Qualsiasi altro movimento non nelle categorie sopra
+
+**ATTENZIONE - NON SONO COMMISSIONI (usa "Altro"):**
+- Pensione INPS / Pensione / INPS
+- Stipendio / Emolumenti / Retribuzione
+- Affitto / Canone locazione
+- Premio polizza
+- Rimborsi > 20€
+- Bollette / Utenze / F24 / MAV / RAV
+- Prelievo contante / Prelievo ATM
+- Bonifici (sia in entrata che in uscita)
+
+**REGOLA D'ORO**: Le COMMISSIONI includono SOLO costi/spese bancarie E imposte/bolli. Tutto il resto va in "Altro"!
 
 ### FASE 4: ESTRAZIONE MOVIMENTI
 
@@ -418,7 +425,7 @@ Prima di restituire il JSON:
 - Se il PDF ha più pagine, DEVI leggere e estrarre i movimenti da TUTTE le pagine.
 - Conta il numero totale di righe nella tabella movimenti nel PDF. Il tuo JSON DEVE avere lo STESSO numero di elementi nell'array "movements".
 - NON fermarti prima di aver estratto TUTTI i movimenti. Anche se ci sono 50+ movimenti, estraili TUTTI.
-- "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Bonifico", NON "Vendita".
+- "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Altro", NON "Vendita".
 
 ### FASE 8: ESTRAZIONE PORTAFOGLIO TITOLI (SOLO PER type="DOSSIER")
 Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio:
@@ -523,7 +530,7 @@ Per OGNI movimento titoli estrai:
       "description": "Descrizione completa concatenata",
       "amount": 0,
       "sign_source": "column_position" | "explicit_sign" | "keyword" | "math_verification",
-      "movement_type": "Commissioni" | "Acquisto" | "Vendita" | "Proventi" | "Bonifico" | "Spesa" | "Altro"
+      "movement_type": "Commissioni" | "Acquisto" | "Vendita" | "Proventi" | "Altro"
     }
   ],
   "summary": {
@@ -658,24 +665,34 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         const movements = parsed.movements || []
         const calculatedTotal = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
 
-        // Post-process: riclassifica "Bonifico da Voi disposto" da Commissioni a Bonifico
-        // Il modello a volte classifica erroneamente i bonifici come commissioni
+        // Post-process: riclassifica bonifici erroneamente classificati come Commissioni -> Altro
+        // Riclassifica anche vecchie categorie "Spesa" e "Bonifico" -> categoria appropriata
         movements.forEach((m: any) => {
+            // Bonifici erroneamente classificati come Commissioni -> Altro
             if (m.movement_type === 'Commissioni' &&
                 m.description?.toLowerCase().includes('bonifico') &&
                 m.description?.toLowerCase().includes('disposto')) {
-                m.movement_type = 'Bonifico'
+                m.movement_type = 'Altro'
+            }
+            // Vecchia categoria "Bonifico" -> Altro
+            if (m.movement_type === 'Bonifico') {
+                m.movement_type = 'Altro'
+            }
+            // Vecchia categoria "Spesa" -> Commissioni (bolli e imposte ora vanno sotto Commissioni)
+            if (m.movement_type === 'Spesa') {
+                m.movement_type = 'Commissioni'
             }
         })
 
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
-        // + tutti i bolli bancari (E/C e Prodotti Finanziari) che sono classificati come "Spesa"
+        // Include già bolli, imposte, Tobin Tax (ora classificati direttamente come Commissioni)
         const periodEndStr = parsed.info?.period_end || ''
         const periodYear = periodEndStr ? parseInt(periodEndStr.split(/[-/]/).find((p: string) => p.length === 4) || '0') : 0
+        const periodMonthStr = periodEndStr.match(/[-/](\d{2})[-/]/)?.[1] || periodEndStr.split(/[-/]/)[1] || ''
+        const periodMonth = parseInt(periodMonthStr) || 0
 
         // Post-process: "Spese emis. E/C.-Rendiconto-Comunicazioni" con sotto-voce "comunicazioni"
         // Dal 2024+: l'Excel conta solo la parte E/C (0.70), non le comunicazioni.
-        // Pre-2024: l'Excel conta entrambe (estratto conto + comunicazioni = 1.40).
         if (periodYear >= 2024) {
             movements.forEach((m: any) => {
                 if (m.movement_type === 'Commissioni' &&
@@ -691,34 +708,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             .filter((m: any) => m.movement_type === 'Commissioni')
             .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
 
-        // Aggiungi TUTTI i bolli bancari alle commissioni (sia E/C che Prodotti Finanziari)
-        // I bolli sono classificati come "Spesa" da Gemini ma vanno inclusi nel totale commissioni
-        const periodMonthStr = periodEndStr.match(/[-/](\d{2})[-/]/)?.[1] || periodEndStr.split(/[-/]/)[1] || ''
-        const periodMonth = parseInt(periodMonthStr) || 0
-        const allBolli = Math.abs(movements
-            .filter((m: any) => m.movement_type === 'Spesa' &&
-                m.description?.toLowerCase().includes('bollo')
-            )
-            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
-        calculatedCommissions += allBolli
-
-        // Dal 2022+: aggiungi Tobin Tax (Imposta transazioni finanziarie) alle commissioni
-        // L'Excel la include nel totale commissioni dal 2022 in poi
-        if (periodYear >= 2022) {
-            const tobinTax = Math.abs(movements
-                .filter((m: any) => m.movement_type === 'Spesa' && (
-                    m.description?.toLowerCase().includes('transazioni finanziarie') ||
-                    m.description?.toLowerCase().includes('tobin')
-                ))
-                .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
-            calculatedCommissions += tobinTax
-        }
-
         // Dal 2017+ (escluso Q1/marzo): l'Excel usa il totale LORDO delle commissioni (non sottrae competenze)
-        // Quando Gemini classifica "Competenze Fruttifere/di chiusura" come Commissioni (positive),
-        // queste riducono abs(net sum). Aggiungiamo indietro per ottenere il lordo.
-        // Q1 (marzo): l'Excel usa la somma NETTA (competenze restano come offset)
-        // Pre-2017: l'Excel usa la somma netta (include competenze come offset)
         if (periodYear >= 2017 && periodMonth !== 3) {
             const competenzeAmount = movements
                 .filter((m: any) => m.movement_type === 'Commissioni' &&
@@ -872,6 +862,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             documentId: data.id,
             fileName: file.name,
             status: 'ready',
+            holder: parsed.info?.holder || null,
             // Dati per verifica (usati da batch_verify.js)
             data: {
                 movements: parsed.movements || [],

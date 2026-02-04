@@ -149,7 +149,7 @@ export default function RendimentiPage() {
                                             onClick={() => setSelectedSector(s.id)}
                                         >
                                             <span className="sector-name">{s.icon} {s.name}</span>
-                                            <span className="sector-value">+{getReturnVal(period, geo, s.id).toFixed(2)}%</span>
+                                            <span className="sector-value">+{getReturnVal(period, geo, s.id).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>
                                         </div>
                                     ))}
                                 </div>
@@ -163,7 +163,7 @@ export default function RendimentiPage() {
                                     <p>Visualizzazione della crescita percentuale cumulata</p>
                                 </div>
                                 <div className="chart-stat">
-                                    <div className="chart-stat-value">+{getReturnVal(period, geo, selectedSector).toFixed(2)}%</div>
+                                    <div className="chart-stat-value">+{getReturnVal(period, geo, selectedSector).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</div>
                                     <div className="chart-stat-label">Rendimento Totale</div>
                                 </div>
                             </div>

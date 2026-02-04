@@ -46,7 +46,7 @@ export default async function AnalysisPage({ params }: PageProps) {
                 <div className={styles.headerBg}></div>
                 <div className={styles.headerContent}>
                     <div className={styles.headerInfo}>
-                        <Link href="/dashboard" className={styles.backLinkHeader}>
+                        <Link href={`/dashboard?cliente=${encodeURIComponent(costs.holder || '')}`} className={styles.backLinkHeader}>
                             <div className={styles.backIcon}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -98,7 +98,7 @@ export default async function AnalysisPage({ params }: PageProps) {
                     <div className={styles.card}>
                         <h3 className={styles.kpiTitle}>Performance Netta</h3>
                         <div className={`${styles.kpiValue} ${analysis.net_return >= 0 ? styles.performancePositive : styles.performanceNegative}`}>
-                            {analysis.net_return ? `${analysis.net_return > 0 ? '+' : ''}${analysis.net_return.toFixed(2)}%` : '0.00%'}
+                            {analysis.net_return ? `${analysis.net_return > 0 ? '+' : ''}${analysis.net_return.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : '0,00%'}
                         </div>
                         <div className={styles.kpiFooter}>
                             vs Benchmark: <strong>-3.2% (Est.)</strong>
@@ -108,7 +108,7 @@ export default async function AnalysisPage({ params }: PageProps) {
                     <div className={styles.card}>
                         <h3 className={styles.kpiTitle}>Incidenza Costi (TER)</h3>
                         <div className={styles.kpiValue} style={{ color: '#f59e0b' }}>
-                            {costs.managementFees ? `${costs.managementFees.toFixed(2)}%` : '1.85%'}
+                            {costs.managementFees ? `${costs.managementFees.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : '1,85%'}
                         </div>
                         <div className={styles.costBarContainer}>
                             <div className={styles.costBarFill} style={{ width: '65%' }}></div>
@@ -176,7 +176,7 @@ export default async function AnalysisPage({ params }: PageProps) {
                                                     <td>
                                                         <div className={styles.weightContainer}>
                                                             <span className={styles.weightValue}>
-                                                                {analysis.portfolio_value ? ((holding.value || 0) / analysis.portfolio_value * 100).toFixed(1) : 0}%
+                                                                {analysis.portfolio_value ? ((holding.value || 0) / analysis.portfolio_value * 100).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : 0}%
                                                             </span>
                                                             <div className={styles.weightBar}>
                                                                 <div className={styles.weightFill} style={{ width: `${analysis.portfolio_value ? ((holding.value || 0) / analysis.portfolio_value * 100) : 0}%` }}></div>

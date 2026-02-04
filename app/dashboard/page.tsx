@@ -487,7 +487,19 @@ function DashboardContent() {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
           ))
-          await fetchAnalyses(user.id)
+
+          // If the uploaded document has a different holder, navigate to that holder's view
+          const uploadedHolder = result.holder
+          if (uploadedHolder && clienteFilter && uploadedHolder !== clienteFilter) {
+            // Navigate to the new holder's dashboard
+            router.push(`/dashboard?cliente=${encodeURIComponent(uploadedHolder)}`)
+          } else if (uploadedHolder && !clienteFilter) {
+            // No filter was set, navigate to the uploaded document's holder
+            router.push(`/dashboard?cliente=${encodeURIComponent(uploadedHolder)}`)
+          } else {
+            // Same holder or no holder info - just refresh
+            await fetchAnalyses(user.id)
+          }
 
           // Scroll to newly added document using the analysis ID from the response
           const newAnalysisId = result.analysisId
@@ -549,7 +561,15 @@ function DashboardContent() {
                 setUploadQueue(prev => prev.map(f =>
                   f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
                 ))
-                await fetchAnalyses(user.id)
+                // Navigate to holder's view if different
+                const retryHolder = retryResult.holder
+                if (retryHolder && clienteFilter && retryHolder !== clienteFilter) {
+                  router.push(`/dashboard?cliente=${encodeURIComponent(retryHolder)}`)
+                } else if (retryHolder && !clienteFilter) {
+                  router.push(`/dashboard?cliente=${encodeURIComponent(retryHolder)}`)
+                } else {
+                  await fetchAnalyses(user.id)
+                }
               } else {
                 setUploadQueue(prev => prev.map(f =>
                   f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
@@ -1666,6 +1686,14 @@ function DashboardContent() {
                         const scalarData = editingValues.scalar_data || {}
                         val = scalarData[scalarKey]
                         displaySource = 'extracted'
+                      } else if (item.key === 'total_commissions') {
+                        // Calculate from actual movements classified as "Commissioni"
+                        const txs = inspectorData.transactions || [];
+                        const commissioniSum = Math.abs(txs
+                          .filter((m: any) => m.movement_type === 'Commissioni')
+                          .reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
+                        val = commissioniSum;
+                        displaySource = 'calculated';
                       } else {
                         // Standard fields
                         const entry = editingValues[item.key]
@@ -1799,7 +1827,7 @@ function DashboardContent() {
                             {isMatch ? (
                               <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€`} style={{ color: '#22c55e', fontWeight: 'bold' }}>✅</span>
                             ) : (
-                              <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€ - Differenza: ${Math.abs(calculatedTotal - extractedTotal).toFixed(2)}€`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
+                              <span title={`Estratto: ${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}€ - Differenza: ${Math.abs(calculatedTotal - extractedTotal).toLocaleString('it-IT', { minimumFractionDigits: 2 })}€`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
                             )}
                           </span>
                         )}
@@ -2180,7 +2208,13 @@ function DashboardContent() {
                         const typeClass = styles[`type${t.movement_type || 'Altro'}`] || styles.typeAltro;
                         const amount = t.amount !== undefined ? t.amount : t.exchangeValue;
                         const amountClass = amount < 0 ? styles.amountNegative : (amount > 0 ? styles.amountPositive : '');
-                        const movementTypes = ['Commissioni', 'Spesa', 'Acquisto', 'Vendita', 'Proventi', 'Dividendo', 'Bonifico', 'Altro'];
+                        const movementTypes = [
+                          { value: 'Commissioni', label: 'Commissioni' },
+                          { value: 'Acquisto', label: 'Acquisto titoli' },
+                          { value: 'Vendita', label: 'Vendita titoli' },
+                          { value: 'Proventi', label: 'Proventi titoli' },
+                          { value: 'Altro', label: 'Altro' }
+                        ];
 
                         return (
                           <tr key={i}>
@@ -2204,7 +2238,7 @@ function DashboardContent() {
                                 }}
                               >
                                 {movementTypes.map(type => (
-                                  <option key={type} value={type}>{type}</option>
+                                  <option key={type.value} value={type.value}>{type.label}</option>
                                 ))}
                               </select>
                             </td>
