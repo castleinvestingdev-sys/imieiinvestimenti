@@ -565,26 +565,27 @@ function DashboardContent() {
     console.log('Files in queue:', fileQueueRef.current.length)
     setIsProcessing(true)
 
-    // We only reset index if the queue was totally empty for a while
-    // Otherwise we keep incrementing to provide a "session" feel
     if (!isProcessing && uploadQueue.length === 0) {
       currentFileIndexRef.current = 0
     }
+
+    let lastHolder: string | null = null
+    let successCount = 0
+    let lastAnalysisId: string | null = null
+    const totalFiles = fileQueueRef.current.length
+    const isBatch = totalFiles > 1
 
     while (fileQueueRef.current.length > 0) {
       console.log('Processing next file, remaining:', fileQueueRef.current.length)
       const { id: fileId, file } = fileQueueRef.current.shift()!
       currentFileIndexRef.current++
 
-      // Update status to uploading with index info
       setUploadQueue(prev => {
         const currentIndex = currentFileIndexRef.current
-
         return prev.map(f => {
           const isCurrent = f.id === fileId
           return {
             ...f,
-            // Status and progress only for the current processing file
             ...(isCurrent ? {
               status: f.status === 'done' ? f.status : 'uploading' as const,
               progress: f.status === 'done' ? 100 : Math.max(f.progress, 5),
@@ -594,49 +595,37 @@ function DashboardContent() {
         })
       })
 
-
       try {
-        // Track start time for detailed progress messages
         const uploadStartTime = Date.now()
-
-        // Progress animation with detailed stage updates
         let currentProgress = 5
         const progressInterval = setInterval(() => {
           setUploadQueue(prev => prev.map(f => {
             if (f.id === fileId && (f.status === 'uploading' || f.status === 'analyzing')) {
               const elapsed = Math.floor((Date.now() - uploadStartTime) / 1000)
-              let stage = 'Inizializzazione...'
+              const allStages = [
+                'Caricamento PDF', 'Conversione documento', 'Invio a Gemini AI',
+                'Analisi con AI in corso', 'Estrazione movimenti', 'Lettura portafoglio titoli',
+                'Validazione dati', 'Calcolo rendimenti', 'Completamento analisi',
+                'Classificazione titoli', 'Verifica portafoglio', 'Calcolo commissioni',
+                'Analisi movimenti', 'Normalizzazione dati', 'Controllo coerenza',
+                'Estrazione dividendi', 'Verifica saldi', 'Quasi fatto',
+                'Ultimi controlli', 'Finalizzazione'
+              ]
+              const dots = '.'.repeat((elapsed % 3) + 1)
+              const stageIdx = Math.min(Math.floor(elapsed / 3), allStages.length - 1)
+              const stage = allStages[stageIdx % allStages.length] + dots
 
-              // Detailed stage messages based on elapsed time
-              if (elapsed < 2) {
-                stage = 'Caricamento PDF...'
-              } else if (elapsed < 5) {
-                stage = 'Conversione documento...'
-              } else if (elapsed < 10) {
-                stage = 'Invio a Gemini AI...'
-              } else if (elapsed < 30) {
-                stage = 'Analisi con AI in corso...'
-              } else if (elapsed < 60) {
-                stage = 'Estrazione movimenti...'
-              } else if (elapsed < 90) {
-                stage = 'Validazione dati...'
-              } else if (elapsed < 120) {
-                stage = 'Completamento analisi...'
-              } else {
-                stage = `Analisi approfondita... (${elapsed}s)`
-              }
-
-              // Slow down as we approach 90%
-              const maxProgress = 90
-              const increment = Math.max(0.5, (maxProgress - currentProgress) / 20)
+              const maxProgress = 97
+              const increment = currentProgress < 90
+                ? Math.max(0.5, (90 - currentProgress) / 20)
+                : 0.15
               currentProgress = Math.min(maxProgress, currentProgress + increment)
               return { ...f, progress: Math.round(currentProgress), stage, startTime: uploadStartTime }
             }
             return f
           }))
-        }, 1000) // Update every second for time-based messages
+        }, 1000)
 
-        // Update to analyzing after 3 seconds
         setTimeout(() => {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'analyzing' as const, stage: 'Analisi AI avviata...' } : f
@@ -647,7 +636,6 @@ function DashboardContent() {
         formData.append('file', file)
         formData.append('userId', user.id)
 
-        // AbortController with 5-minute timeout for Gemini processing
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000)
 
@@ -667,116 +655,85 @@ function DashboardContent() {
         clearInterval(progressInterval)
         const result = await response.json()
 
+        // Helper: refresh data and scroll to the newly uploaded card in timeline
+        const onFileSuccess = async (analysisId?: string, holder?: string) => {
+          if (holder) lastHolder = holder
+          successCount++
+          await fetchAnalyses(user.id)
+          if (analysisId) {
+            // Wait for React re-render with new data
+            setTimeout(() => {
+              const card = document.querySelector(`[data-analysis-id="${analysisId}"]`)
+              if (card) {
+                // Scroll the page vertically to the card's bank group
+                const bankBlock = card.closest('[class*="bankGroupBlock"]')
+                if (bankBlock) {
+                  (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+                // Scroll the timeline scroller horizontally to the card
+                const scroller = card.closest('[class*="dualTimelineScroller"]')
+                if (scroller) {
+                  const scrollerRect = scroller.getBoundingClientRect()
+                  const cardRect = card.getBoundingClientRect()
+                  const scrollLeft = (scroller as HTMLElement).scrollLeft + cardRect.left - scrollerRect.left - scrollerRect.width / 2 + cardRect.width / 2
+                  scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' })
+                }
+              }
+            }, 600)
+          }
+        }
+
         if (result.success) {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
           ))
+          await onFileSuccess(result.analysisId, result.holder)
 
-          // If the uploaded document has a different holder, navigate to that holder's view
-          const uploadedHolder = result.holder
-          if (uploadedHolder && clienteFilter && uploadedHolder !== clienteFilter) {
-            // Navigate to the new holder's dashboard
-            router.push(`/dashboard?cliente=${encodeURIComponent(uploadedHolder)}`)
-          } else if (uploadedHolder && !clienteFilter) {
-            // No filter was set, navigate to the uploaded document's holder
-            router.push(`/dashboard?cliente=${encodeURIComponent(uploadedHolder)}`)
-          } else {
-            // Same holder or no holder info - just refresh
-            await fetchAnalyses(user.id)
-          }
+        } else if (result.isDuplicate && response.status === 409) {
+          clearInterval(progressInterval)
 
-          // Scroll to newly added document using the analysis ID from the response
-          const newAnalysisId = result.analysisId
-          setTimeout(() => {
-            // First scroll to main content
-            const mainContent = document.querySelector('[class*="mainContent"]')
-            mainContent?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
-            // Then find and scroll to the specific tile
-            setTimeout(() => {
-              const targetTile = newAnalysisId
-                ? document.querySelector(`[data-analysis-id="${newAnalysisId}"]`)
-                : document.querySelectorAll('[data-has-analysis="true"]')[0]
-
-              if (targetTile) {
-                (targetTile as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
-              }
-            }, 600)
-          }, 500)
-
-        } else {
-          // Check if it's a duplicate period - ask user to confirm
-          if (result.isDuplicate && response.status === 409) {
-            clearInterval(progressInterval)
-
-            // Show confirmation modal
-            const shouldProceed = await new Promise<boolean>((resolve) => {
-              setConfirmModal({
-                isOpen: true,
-                title: '⚠️ Periodo Già Caricato',
-                message: `${result.message}\n\nVuoi ricalcolare comunque questo periodo? I dati precedenti verranno sostituiti.`,
-                onConfirm: () => {
-                  setConfirmModal(null)
-                  resolve(true)
-                },
-                onCancel: () => {
-                  setConfirmModal(null)
-                  resolve(false)
-                }
-              })
+          // Always ask user for confirmation on duplicates
+          const shouldProceed = await new Promise<boolean>((resolve) => {
+            setConfirmModal({
+              isOpen: true,
+              title: '⚠️ Periodo Già Caricato',
+              message: `${result.message}\n\nVuoi ricalcolare comunque questo periodo? I dati precedenti verranno sostituiti.`,
+              onConfirm: () => { setConfirmModal(null); resolve(true) },
+              onCancel: () => { setConfirmModal(null); resolve(false) }
             })
-
-            if (shouldProceed) {
-              // User confirmed - re-upload with force flag
-              setUploadQueue(prev => prev.map(f =>
-                f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, stage: 'Ricalcolo forzato...' } : f
-              ))
-
-              formData.append('force', 'true') // Signal to API to skip duplicate check
-
-              const retryResponse = await fetch('/api/parse-pdf', {
-                method: 'POST',
-                body: formData,
-              })
-
-              const retryResult = await retryResponse.json()
-
-              if (retryResult.success) {
-                setUploadQueue(prev => prev.map(f =>
-                  f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
-                ))
-                // Navigate to holder's view if different
-                const retryHolder = retryResult.holder
-                if (retryHolder && clienteFilter && retryHolder !== clienteFilter) {
-                  router.push(`/dashboard?cliente=${encodeURIComponent(retryHolder)}`)
-                } else if (retryHolder && !clienteFilter) {
-                  router.push(`/dashboard?cliente=${encodeURIComponent(retryHolder)}`)
-                } else {
-                  await fetchAnalyses(user.id)
-                }
-              } else {
-                setUploadQueue(prev => prev.map(f =>
-                  f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
-                ))
-              }
-            } else {
-              // User cancelled - remove from queue
-              setUploadQueue(prev => prev.filter(f => f.id !== fileId))
-            }
-          }
-          // Check if it's a rate limit error - retry after delay
-          else if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
+          })
+          if (shouldProceed) {
             setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
+              f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, stage: 'Ricalcolo forzato...' } : f
             ))
-            // Re-add to queue and wait
-            fileQueueRef.current.unshift({ id: fileId, file })
-            await new Promise(resolve => setTimeout(resolve, 5000))
+            formData.append('force', 'true')
+            const retryResponse = await fetch('/api/parse-pdf', { method: 'POST', body: formData })
+            const retryResult = await retryResponse.json()
+            if (retryResult.success) {
+              setUploadQueue(prev => prev.map(f =>
+                f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
+              ))
+              await onFileSuccess(retryResult.analysisId, retryResult.holder)
+            } else {
+              setUploadQueue(prev => prev.map(f =>
+                f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
+              ))
+            }
           } else {
             setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
+              f.id === fileId ? { ...f, status: 'done' as const, progress: 100, stage: 'Saltato' } : f
             ))
           }
+        } else if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
+          setUploadQueue(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
+          ))
+          fileQueueRef.current.unshift({ id: fileId, file })
+          await new Promise(resolve => setTimeout(resolve, 5000))
+        } else {
+          setUploadQueue(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
+          ))
         }
       } catch (error: any) {
         const errorMsg = error.name === 'AbortError'
@@ -787,20 +744,25 @@ function DashboardContent() {
         ))
       }
 
-      // Wait 3 seconds between files to avoid Gemini rate limiting
+      // Wait between files to avoid Gemini rate limiting
       if (fileQueueRef.current.length > 0) {
         await new Promise(resolve => setTimeout(resolve, 3000))
       }
     }
 
-
     setIsProcessing(false)
-    // We DON'T reset currentFileIndexRef here, so the next batch continues the count
 
-    // Clear completed files after 3 seconds
+    // --- Batch complete: navigate to holder if different ---
+    if (successCount > 0 && lastHolder) {
+      if ((clienteFilter && lastHolder !== clienteFilter) || !clienteFilter) {
+        router.push(`/dashboard?cliente=${encodeURIComponent(lastHolder)}`)
+      }
+    }
+
+    // Clear completed files after 5 seconds
     setTimeout(() => {
       setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
-    }, 3000)
+    }, 5000)
   }, [user, fetchAnalyses])
 
   // EFFECT: Process queue when items are available and not already processing
@@ -1794,6 +1756,7 @@ function DashboardContent() {
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
                                 return (
                                   <div key={idx}
+                                    data-analysis-id={isPresent ? slot.file!.id : undefined}
                                     className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
                                     <span className={styles.dualCardType}>{displayLabel}</span>
@@ -1851,6 +1814,7 @@ function DashboardContent() {
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
                                 return (
                                   <div key={idx}
+                                    data-analysis-id={isPresent ? slot.file!.id : undefined}
                                     className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
                                     <span className={styles.dualCardType}>{displayLabel}</span>
@@ -2435,85 +2399,99 @@ function DashboardContent() {
 
                   {/* Tab Content: Portafoglio Iniziale */}
                   {portfolioTab === 'initial' && (() => {
+                    // Check if previous period exists for this account
+                    const currentAccNorm = inspectorData.account_type === 'DOSSIER' ? normalizeAcc(inspectorData.benchmark_comparison || '') : ''
+                    const prevDoc = currentAccNorm ? analyses
+                      .filter(a =>
+                        a.id !== inspectorData.id &&
+                        a.account_type === inspectorData.account_type &&
+                        normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
+                        a.period_end && inspectorData.period_start &&
+                        new Date(a.period_end) <= new Date(inspectorData.period_start))
+                      .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
+                      : null
+
+                    const isImported = !!prevDoc
                     const movements = inspectorData.costs_breakdown?.securityMovements || [];
                     const finalHoldings = inspectorData.holdings || [];
                     const missingVal = <span style={{ color: '#ef4444', fontWeight: 'bold' }}>?</span>;
 
-                    // Calculate movement deltas per ISIN
-                    const movementDeltas: Record<string, { buys: number; sells: number; name: string; currency: string }> = {};
-                    movements.forEach((m: any) => {
-                      const isin = m.isin || 'UNKNOWN';
-                      if (!movementDeltas[isin]) {
-                        movementDeltas[isin] = { buys: 0, sells: 0, name: m.name || '', currency: m.currency || 'EUR' };
-                      }
-                      if (m.operationType === 'Acquisto') {
-                        movementDeltas[isin].buys += m.quantity || 0;
-                      } else if (m.operationType === 'Vendita') {
-                        movementDeltas[isin].sells += m.quantity || 0;
-                      }
-                    });
+                    let initialPortfolio: any[] = [];
 
-                    // Build initial portfolio from final + reverse movements
-                    const initialPortfolio: any[] = [];
-                    const processedIsins = new Set<string>();
-
-                    // Start with final holdings
-                    finalHoldings.forEach((h: any) => {
-                      const isin = h.isin || 'UNKNOWN';
-                      processedIsins.add(isin);
-                      const delta = movementDeltas[isin] || { buys: 0, sells: 0 };
-                      // Initial = Final - Buys + Sells
-                      const initialQty = (h.quantity || 0) - delta.buys + delta.sells;
-                      if (initialQty !== 0) {
-                        initialPortfolio.push({
-                          isin: h.isin,
-                          name: h.name,
-                          currency: h.currency,
-                          initialQty: initialQty
-                        });
-                      }
-                    });
-
-                    // Add ISINs that were only in movements (completely sold)
-                    Object.entries(movementDeltas).forEach(([isin, delta]) => {
-                      if (!processedIsins.has(isin) && isin !== 'UNKNOWN') {
-                        const initialQty = 0 - delta.buys + delta.sells;
-                        if (initialQty !== 0) {
-                          initialPortfolio.push({
-                            isin,
-                            name: delta.name,
-                            currency: delta.currency,
-                            initialQty
-                          });
+                    if (isImported) {
+                      // Use previous period's final holdings
+                      initialPortfolio = (prevDoc.holdings || []).map((h: any) => ({
+                        isin: h.isin, name: h.name, currency: h.currency,
+                        initialQty: h.quantity || 0, price: h.price || 0,
+                        exchangeRate: h.exchangeRate || 1, marketValue: h.marketValue || 0
+                      }))
+                    } else {
+                      // Calculate from final + reverse movements
+                      const movementDeltas: Record<string, { buys: number; sells: number; name: string; currency: string }> = {};
+                      movements.forEach((m: any) => {
+                        const isin = m.isin || 'UNKNOWN';
+                        if (!movementDeltas[isin]) {
+                          movementDeltas[isin] = { buys: 0, sells: 0, name: m.name || '', currency: m.currency || 'EUR' };
                         }
-                      }
-                    });
-
-                    if (initialPortfolio.length === 0) {
-                      return (
-                        <p style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '40px' }}>
-                          Portafoglio iniziale vuoto
-                        </p>
-                      );
+                        if (m.operationType === 'Acquisto') movementDeltas[isin].buys += m.quantity || 0;
+                        else if (m.operationType === 'Vendita') movementDeltas[isin].sells += m.quantity || 0;
+                      });
+                      const processedIsins = new Set<string>();
+                      finalHoldings.forEach((h: any) => {
+                        const isin = h.isin || 'UNKNOWN';
+                        processedIsins.add(isin);
+                        const delta = movementDeltas[isin] || { buys: 0, sells: 0 };
+                        const initialQty = (h.quantity || 0) - delta.buys + delta.sells;
+                        if (initialQty !== 0) {
+                          initialPortfolio.push({ isin: h.isin, name: h.name, currency: h.currency, initialQty });
+                        }
+                      });
+                      Object.entries(movementDeltas).forEach(([isin, delta]) => {
+                        if (!processedIsins.has(isin) && isin !== 'UNKNOWN') {
+                          const initialQty = 0 - delta.buys + delta.sells;
+                          if (initialQty !== 0) {
+                            initialPortfolio.push({ isin, name: delta.name, currency: delta.currency, initialQty });
+                          }
+                        }
+                      });
                     }
 
                     return (
-                      <table className={styles.inspectorTable}>
-                        <thead><tr><th>ISIN</th><th>Nome</th><th>Divisa</th><th>Cambio</th><th>Quantità</th><th>Prezzo</th><th>Valore €</th></tr></thead>
-                        <tbody>
-                          {initialPortfolio.map((h: any, i: number) => (
-                            <tr key={i}>
+                      <>
+                        <div style={{
+                          padding: '0.5rem 0.75rem', marginBottom: '0.5rem', borderRadius: '8px',
+                          fontSize: '0.7rem', fontWeight: 600,
+                          background: isImported ? '#eff6ff' : '#fefce8',
+                          color: isImported ? '#1d4ed8' : '#a16207',
+                          border: `1px solid ${isImported ? '#bfdbfe' : '#fde68a'}`
+                        }}>
+                          {isImported
+                            ? `Importato dal portafoglio finale del ${new Date(prevDoc.period_start).toLocaleDateString('it-IT')} - ${new Date(prevDoc.period_end).toLocaleDateString('it-IT')}`
+                            : 'Calcolato dai movimenti del periodo (nessun periodo precedente)'}
+                        </div>
+                        {initialPortfolio.length === 0 ? (
+                          <p style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '40px' }}>
+                            Portafoglio iniziale vuoto
+                          </p>
+                        ) : (
+                          <table className={styles.inspectorTable}>
+                            <thead><tr><th>ISIN</th><th>Nome</th><th>Divisa</th><th>Cambio</th><th>Quantità</th><th>Prezzo</th><th>Valore €</th></tr></thead>
+                            <tbody>
+                              {initialPortfolio.map((h: any, i: number) => (
+                                <tr key={i}>
                               <td>{h.isin || ''}</td>
                               <td>{h.name || ''}</td>
                               <td>{h.currency || ''}</td>
-                              <td>{missingVal}</td>
+                              <td>{h.exchangeRate != null ? h.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : missingVal}</td>
                               <td>{h.initialQty.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
-                              <td>{missingVal}</td>
-                              <td>{missingVal}</td>
+                              <td>{h.price != null ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : missingVal}</td>
+                              <td>{h.marketValue != null ? `€${formatCurrency(h.marketValue)}` : missingVal}</td>
                             </tr>
                           ))}
-                        </tbody>
-                      </table>
+                            </tbody>
+                          </table>
+                        )}
+                      </>
                     );
                   })()}
 
