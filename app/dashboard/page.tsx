@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
 import styles from './Dashboard.module.css'
 
@@ -150,12 +149,21 @@ function DashboardContent() {
       )
     }
 
+    // Normalizza numeri conto per raggruppamento: gestisce prefissi filiale variabili
+    // es. "3100/1000811", "19812/3100/1000811", "19812/3100/01000811" → "31001000811"
+    const normalizeAccKey = (acc: string) => {
+      if (!acc) return 'ND';
+      const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
+      if (segments.length === 0) return 'ND';
+      return segments.slice(-2).join('').toUpperCase() || 'ND';
+    };
+
     // Infer missing period_start from previous documents or period_end
     const inferPeriodStart = (analyses: Analysis[]): Analysis[] => {
       // Group by account (bank + identifier)
       const byAccount = new Map<string, Analysis[]>()
       analyses.forEach(a => {
-        const key = `${a.bank_name}|${a.benchmark_comparison || ''}|${a.account_type}`
+        const key = `${a.bank_name}|${normalizeAccKey(a.benchmark_comparison || '')}|${a.account_type}`
         const list = byAccount.get(key) || []
         list.push(a)
         byAccount.set(key, list)
@@ -203,7 +211,7 @@ function DashboardContent() {
       // Group by account (bank + identifier + type)
       const byAccount = new Map<string, Analysis[]>()
       analyses.forEach(a => {
-        const key = `${a.bank_name}|${a.benchmark_comparison || ''}|${a.account_type}`
+        const key = `${a.bank_name}|${normalizeAccKey(a.benchmark_comparison || '')}|${a.account_type}`
         const list = byAccount.get(key) || []
         list.push(a)
         byAccount.set(key, list)
@@ -809,6 +817,31 @@ function DashboardContent() {
     }
   }, [isProcessing, processQueue, uploadQueue])
 
+  // Prevent navigation while uploads are in progress
+  const hasActiveUploads = uploadQueue.some(f => f.status === 'uploading' || f.status === 'analyzing' || f.status === 'queued') || isProcessing
+  useEffect(() => {
+    if (!hasActiveUploads) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasActiveUploads])
+
+  // Safe navigation: warns user if uploads are in progress before navigating away
+  const safeNavigate = (href: string) => {
+    if (hasActiveUploads) {
+      showConfirmModal(
+        'Upload in corso',
+        'Ci sono PDF in fase di caricamento. Se esci ora, il caricamento verrà annullato. Vuoi uscire comunque?'
+      ).then((confirmed) => {
+        if (confirmed) router.push(href)
+      })
+    } else {
+      router.push(href)
+    }
+  }
+
   // DEBUG EFFECT: Log uploadQueue status changes only (not progress updates)
   const prevStatusRef = useRef<string>('')
   useEffect(() => {
@@ -998,7 +1031,15 @@ function DashboardContent() {
   // --- 2. Identificazione Connessioni e Normalizzazione Account ---
   // Estrae solo cifre per confronti numerici
   const extractNumericCore = (acc: string) => acc?.replace(/\D/g, '') || '';
-  const normalizeAcc = (acc: string) => acc?.replace(/[^a-zA-Z0-9]/g, '').replace(/^0+/, '').toUpperCase() || 'ND';
+  // Normalizza numeri conto: split per "/" o "-", strip zeri iniziali per segmento,
+  // prendi gli ultimi 2 segmenti. Gestisce prefissi filiale (es. "19812/3100/1000811" → "31001000811")
+  const normalizeAcc = (acc: string) => {
+    if (!acc) return 'ND';
+    const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
+    if (segments.length === 0) return 'ND';
+    const core = segments.slice(-2);
+    return core.join('').toUpperCase() || 'ND';
+  };
 
   // Mappa ogni account al suo settlement e alla banca raw
   const accountMetaMap = analyses.reduce((acc, a) => {
@@ -1300,9 +1341,16 @@ function DashboardContent() {
       {/* Client Header when viewing a specific client */}
       {clienteFilter && (
         <div className={styles.clientHeader}>
-          <Link href="/consulente" className={styles.backToConsulente}>
+          <a
+            href="/consulente"
+            className={styles.backToConsulente}
+            onClick={(e) => {
+              e.preventDefault()
+              safeNavigate('/consulente')
+            }}
+          >
             ← Torna ai Clienti
-          </Link>
+          </a>
           <h2 className={styles.clientName}>Cliente: {clienteFilter}</h2>
         </div>
       )}
@@ -1576,9 +1624,16 @@ function DashboardContent() {
                       {group.dossiers.length} Dossier Titoli | {group.liquidityAccounts.length} Conti Correnti
                     </div>
                   </div>
-                  <Link href={`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`} className={styles.btnAnalysisPremium}>
+                  <a
+                    href={`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`}
+                    className={styles.btnAnalysisPremium}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      safeNavigate(`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`)
+                    }}
+                  >
                     VEDI ANALISI <span>→</span>
-                  </Link>
+                  </a>
                 </div>
 
                 <div className={styles.accountsContainer}>
@@ -1641,6 +1696,22 @@ function DashboardContent() {
                                       dates = getSlotDates(year, slot.quarter!, 'quarterly');
                                     }
 
+                                    // Override: se il documento reale ha durata diversa dallo slot, correggi la label
+                                    if (isPresent && slot.file!.period_start && slot.file!.period_end) {
+                                      const docStart = new Date(slot.file!.period_start);
+                                      const docEnd = new Date(slot.file!.period_end);
+                                      const docDays = (docEnd.getTime() - docStart.getTime()) / (1000 * 60 * 60 * 24);
+                                      const monthNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
+                                      if (docDays < 45 && !isMonthly) {
+                                        displayLabel = monthNames[docEnd.getMonth()];
+                                        dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly');
+                                      } else if (docDays >= 45 && isMonthly) {
+                                        const q = Math.ceil((docEnd.getMonth() + 1) / 3);
+                                        displayLabel = `Q${q}`;
+                                        dates = getSlotDates(year, q, 'quarterly');
+                                      }
+                                    }
+
                                     // Calculate start date: use previous document's period_end if available
                                     const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                       ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -1653,7 +1724,7 @@ function DashboardContent() {
                                         className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                        onClick={() => isPresent && router.push(`/analisi/${slot.file!.id}`)}>
+                                        onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
 
                                         <div className={styles.tileDates}>
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
@@ -1764,6 +1835,22 @@ function DashboardContent() {
                                       dates = getSlotDates(year, slot.quarter!, 'quarterly');
                                     }
 
+                                    // Override: se il documento reale ha durata diversa dallo slot, correggi la label
+                                    if (isPresent && slot.file!.period_start && slot.file!.period_end) {
+                                      const docStart = new Date(slot.file!.period_start);
+                                      const docEnd = new Date(slot.file!.period_end);
+                                      const docDays = (docEnd.getTime() - docStart.getTime()) / (1000 * 60 * 60 * 24);
+                                      const monthNames2 = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
+                                      if (docDays < 45 && !isMonthly) {
+                                        displayLabel = monthNames2[docEnd.getMonth()];
+                                        dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly');
+                                      } else if (docDays >= 45 && isMonthly) {
+                                        const q = Math.ceil((docEnd.getMonth() + 1) / 3);
+                                        displayLabel = `Q${q}`;
+                                        dates = getSlotDates(year, q, 'quarterly');
+                                      }
+                                    }
+
                                     // Calculate start date: use previous document's period_end if available
                                     const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                       ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -1776,7 +1863,7 @@ function DashboardContent() {
                                         className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
                                         data-has-analysis={isPresent ? 'true' : 'false'}
                                         data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                        onClick={() => isPresent && router.push(`/analisi/${slot.file!.id}`)}>
+                                        onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
 
                                         <div className={styles.tileDates}>
                                           <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
@@ -1916,7 +2003,7 @@ function DashboardContent() {
                         const commissioniSum = Math.abs(editingTransactions
                           .filter((m: any) => m.movement_type === 'Commissioni')
                           .reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
-                        val = commissioniSum;
+                        val = -commissioniSum; // Negativo: le commissioni sono costi
                         displaySource = 'calculated';
                       } else {
                         // Standard fields
@@ -1996,7 +2083,9 @@ function DashboardContent() {
                                   className={`${styles.summaryInput} ${(item as any).positiveColor && typeof val === 'number' && val > 0 ? styles.positiveValue : ''} ${(item as any).negativeColor && typeof val === 'number' && val < 0 ? styles.negativeValue : ''}`}
                                   value={
                                     item.type === 'text' ? (val || '') :
-                                    `${item.type === 'currency' && typeof val === 'number' && val > 0 ? '+' : ''}${typeof val === 'number' ? val.toLocaleString('it-IT', { minimumFractionDigits: item.type === 'currency' ? 2 : 0 }) : val}${item.type === 'currency' ? ' €' : ''}`
+                                    item.type === 'currency' && typeof val === 'number'
+                                      ? `${val > 0 ? '+' : ''}${formatCurrency(val)} €`
+                                      : typeof val === 'number' ? formatCurrency(val) : val
                                   }
                                 />
                                 {isVerification && (
@@ -2051,9 +2140,9 @@ function DashboardContent() {
                         {extractedTotal > 0 && (
                           <span style={{ marginLeft: '8px' }}>
                             {isMatch ? (
-                              <span title={`Estratto: €${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`} style={{ color: '#22c55e', fontWeight: 'bold' }}>✅</span>
+                              <span title={`Estratto: €${formatCurrency(extractedTotal)}`} style={{ color: '#22c55e', fontWeight: 'bold' }}>✅</span>
                             ) : (
-                              <span title={`Estratto: €${extractedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })} - Differenza: €${diff.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
+                              <span title={`Estratto: €${formatCurrency(extractedTotal)} - Differenza: €${formatCurrency(diff)}`} style={{ color: '#ef4444', fontWeight: 'bold' }}>❌</span>
                             )}
                           </span>
                         )}
@@ -2102,15 +2191,15 @@ function DashboardContent() {
                         <div className={styles.infoGrid} style={{ marginTop: '0.75rem' }}>
                           <div className={styles.infoItem}>
                             <strong>Totale Movimenti</strong>
-                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: totalNet >= 0 ? '#22c55e' : '#ef4444' }}>{totalNet >= 0 ? '+' : '-'}€{Math.abs(totalNet).toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: totalNet >= 0 ? '#22c55e' : '#ef4444' }}>{totalNet >= 0 ? '+' : '-'}€{formatCurrency(Math.abs(totalNet))}</span>
                           </div>
                           <div className={styles.infoItem}>
                             <strong>Investimenti</strong>
-                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#ef4444' }}>-€{buyGross.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#ef4444' }}>-€{formatCurrency(buyGross)}</span>
                           </div>
                           <div className={styles.infoItem}>
                             <strong>Disinvestimenti</strong>
-                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#22c55e' }}>+€{sellGross.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#22c55e' }}>+€{formatCurrency(sellGross)}</span>
                           </div>
                         </div>
                       </>
@@ -2324,8 +2413,8 @@ function DashboardContent() {
                             <td>{h.currency || 'EUR'}</td>
                             <td>{(h.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                             <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 }) : ''}</td>
-                            <td>{h.price && h.price !== 0 ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : '0,00'}</td>
-                            <td>€{(h.marketValue || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+                            <td>{h.price && h.price !== 0 ? formatCurrency(h.price) : '0,00'}</td>
+                            <td>€{formatCurrency(h.marketValue || 0)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2376,20 +2465,20 @@ function DashboardContent() {
                                   </td>
                                   <td style={{ color: isVendita ? '#ef4444' : '#22c55e' }}>
                                     {typeof m.quantity === 'number' && m.quantity !== 0
-                                      ? `${isVendita ? '-' : '+'}${m.quantity.toLocaleString('it-IT')}`
+                                      ? `${isVendita ? '-' : '+'}${formatCurrency(m.quantity)}`
                                       : missingVal}
                                   </td>
-                                  <td>{typeof m.price === 'number' && m.price !== 0 ? m.price.toLocaleString('it-IT', { minimumFractionDigits: 2 }) : missingVal}</td>
+                                  <td>{typeof m.price === 'number' && m.price !== 0 ? formatCurrency(m.price) : missingVal}</td>
                                   <td>{(m.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                                   <td>{m.currency || 'EUR'}</td>
                                   <td style={{ color: '#ef4444' }}>{(() => {
                                       const totalCosts = (m.fees || 0) + (m.taxes || 0);
-                                      return totalCosts !== 0 ? `-${totalCosts.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : missingVal;
+                                      return totalCosts !== 0 ? `-${formatCurrency(totalCosts)}` : missingVal;
                                     })()}</td>
-                                  <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{typeof m.netAmount === 'number' && m.netAmount !== 0 ? `${isVendita ? '+' : '-'}€${Math.abs(m.netAmount).toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : missingVal}</td>
+                                  <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{typeof m.netAmount === 'number' && m.netAmount !== 0 ? `${isVendita ? '+' : '-'}€${formatCurrency(Math.abs(m.netAmount))}` : missingVal}</td>
                                   <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{(() => {
                                       const grossAmount = ((m.quantity || 0) * (m.price || 0)) / (m.exchangeRate || 1);
-                                      return grossAmount !== 0 ? `${isVendita ? '+' : '-'}€${grossAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : missingVal;
+                                      return grossAmount !== 0 ? `${isVendita ? '+' : '-'}€${formatCurrency(grossAmount)}` : missingVal;
                                     })()}</td>
                                 </tr>
                               );
@@ -2466,7 +2555,7 @@ function DashboardContent() {
                               </select>
                             </td>
                             <td className={amountClass}>
-                              {amount !== undefined ? `€ ${amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}` : 'N/D'}
+                              {amount !== undefined ? `€ ${formatCurrency(amount)}` : 'N/D'}
                             </td>
                           </tr>
                         )
@@ -2497,52 +2586,15 @@ function DashboardContent() {
             </div>
             <div className={styles.modalBody}>
               {(() => {
-                const { transactions, periodYear, periodMonth, isQ1, totalCommissions } = commissionsModalData;
+                const { transactions } = commissionsModalData;
 
-                // 1. Movimenti classificati come "Commissioni"
+                // Movimenti classificati come "Commissioni"
                 const commissioniMovements = transactions.filter((m: any) => m.movement_type === 'Commissioni');
-                const commissioniSum = Math.abs(commissioniMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
-
-                // 2. Bollo E/C (dal 2023+, escluso Q1 dal 2024+)
-                const shouldIncludeBollo = periodYear >= 2023 && !(periodYear >= 2024 && isQ1);
-                const bolloMovements = shouldIncludeBollo ? transactions.filter((m: any) =>
-                  m.movement_type === 'Spesa' && (
-                    m.description?.toLowerCase().includes('bollo') && (
-                      m.description?.toLowerCase().includes('e/c') ||
-                      m.description?.toLowerCase().includes('rendiconto')
-                    )
-                  )
-                ) : [];
-                const bolloSum = Math.abs(bolloMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
-
-                // 3. Tobin Tax (dal 2022+)
-                const shouldIncludeTobin = periodYear >= 2022;
-                const tobinMovements = shouldIncludeTobin ? transactions.filter((m: any) =>
-                  m.movement_type === 'Spesa' && (
-                    m.description?.toLowerCase().includes('transazioni finanziarie') ||
-                    m.description?.toLowerCase().includes('tobin')
-                  )
-                ) : [];
-                const tobinSum = Math.abs(tobinMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0));
-
-                // 4. Competenze (dal 2017+, escluso Q1)
-                const shouldIncludeCompetenzeGross = periodYear >= 2017 && periodMonth !== 3;
-                const competenzeMovements = shouldIncludeCompetenzeGross ? commissioniMovements.filter((m: any) =>
-                  (m.amount || 0) > 0 && m.description?.toLowerCase().includes('competenz')
-                ) : [];
-                const competenzeSum = competenzeMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0);
-
-                // 5. Calcolo finale
-                let calculatedTotal = commissioniSum;
-                if (shouldIncludeBollo) calculatedTotal += bolloSum;
-                if (shouldIncludeTobin) calculatedTotal += tobinSum;
-                if (shouldIncludeCompetenzeGross) calculatedTotal += competenzeSum;
+                const commissioniSum = commissioniMovements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0);
 
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {/* Step 1: Commissioni Base */}
                     <div className={styles.inspectorSection}>
-                      <h4>1️⃣ Movimenti classificati come "Commissioni" ({commissioniMovements.length})</h4>
                       <table className={styles.inspectorTable}>
                         <thead>
                           <tr>
@@ -2557,179 +2609,16 @@ function DashboardContent() {
                               <td>{renderVal(m.date)}</td>
                               <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
                               <td className={m.amount < 0 ? styles.amountNegative : styles.amountPositive}>
-                                € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                                € {formatCurrency(m.amount || 0)}
                               </td>
                             </tr>
                           ))}
                           <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
                             <td colSpan={2}>Totale (valore assoluto)</td>
-                            <td>€ {commissioniSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
+                            <td>€ {formatCurrency(Math.abs(commissioniSum))}</td>
                           </tr>
                         </tbody>
                       </table>
-                    </div>
-
-                    {/* Step 2: Bollo E/C */}
-                    {shouldIncludeBollo && (
-                      <div className={styles.inspectorSection}>
-                        <h4>2️⃣ Imposta di Bollo E/C (dal 2023+{periodYear >= 2024 ? ', escluso Q1' : ''})</h4>
-                        {bolloMovements.length > 0 ? (
-                          <table className={styles.inspectorTable}>
-                            <thead>
-                              <tr>
-                                <th>Data</th>
-                                <th>Descrizione</th>
-                                <th>Importo</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {bolloMovements.map((m: any, i: number) => (
-                                <tr key={i}>
-                                  <td>{renderVal(m.date)}</td>
-                                  <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
-                                  <td className={styles.amountNegative}>
-                                    € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                              ))}
-                              <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
-                                <td colSpan={2}>Totale (valore assoluto)</td>
-                                <td>€ {bolloSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        ) : (
-                          <p style={{ color: '#64748b', fontStyle: 'italic' }}>Nessun movimento trovato</p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Step 3: Tobin Tax */}
-                    {shouldIncludeTobin && (
-                      <div className={styles.inspectorSection}>
-                        <h4>3️⃣ Tobin Tax (dal 2022+)</h4>
-                        {tobinMovements.length > 0 ? (
-                          <table className={styles.inspectorTable}>
-                            <thead>
-                              <tr>
-                                <th>Data</th>
-                                <th>Descrizione</th>
-                                <th>Importo</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {tobinMovements.map((m: any, i: number) => (
-                                <tr key={i}>
-                                  <td>{renderVal(m.date)}</td>
-                                  <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
-                                  <td className={styles.amountNegative}>
-                                    € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                              ))}
-                              <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
-                                <td colSpan={2}>Totale (valore assoluto)</td>
-                                <td>€ {tobinSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        ) : (
-                          <p style={{ color: '#64748b', fontStyle: 'italic' }}>Nessun movimento trovato</p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Step 4: Competenze */}
-                    {shouldIncludeCompetenzeGross && (
-                      <div className={styles.inspectorSection}>
-                        <h4>4️⃣ Competenze Fruttifere/Chiusura (dal 2017+, escluso Q1)</h4>
-                        <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '10px' }}>
-                          Le competenze positive compensano le commissioni nel calcolo netto. Per ottenere il totale LORDO,
-                          vengono aggiunte nuovamente al calcolo.
-                        </p>
-                        {competenzeMovements.length > 0 ? (
-                          <table className={styles.inspectorTable}>
-                            <thead>
-                              <tr>
-                                <th>Data</th>
-                                <th>Descrizione</th>
-                                <th>Importo</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {competenzeMovements.map((m: any, i: number) => (
-                                <tr key={i}>
-                                  <td>{renderVal(m.date)}</td>
-                                  <td style={{ fontSize: '0.75rem', maxWidth: '400px' }}>{renderVal(m.description)}</td>
-                                  <td className={styles.amountPositive}>
-                                    € {(m.amount || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                              ))}
-                              <tr style={{ fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }}>
-                                <td colSpan={2}>Totale</td>
-                                <td>€ {competenzeSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        ) : (
-                          <p style={{ color: '#64748b', fontStyle: 'italic' }}>Nessun movimento trovato</p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Calcolo Finale */}
-                    <div className={styles.inspectorSection} style={{ backgroundColor: '#f1f5f9', padding: '20px', borderRadius: '8px' }}>
-                      <h4>📊 Calcolo Finale</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.95rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Commissioni base:</span>
-                          <span>€ {commissioniSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        {shouldIncludeBollo && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span>+ Bollo E/C:</span>
-                            <span>€ {bolloSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
-                          </div>
-                        )}
-                        {shouldIncludeTobin && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span>+ Tobin Tax:</span>
-                            <span>€ {tobinSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
-                          </div>
-                        )}
-                        {shouldIncludeCompetenzeGross && competenzeSum > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span>+ Competenze (lordo):</span>
-                            <span>€ {competenzeSum.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
-                          </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1.1rem', borderTop: '2px solid #94a3b8', paddingTop: '10px', marginTop: '10px' }}>
-                          <span>TOTALE COMMISSIONI:</span>
-                          <span style={{ color: '#ef4444' }}>€ {calculatedTotal.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#64748b', marginTop: '5px' }}>
-                          <span>Valore da costs_breakdown:</span>
-                          <span>€ {(totalCommissions || 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        {Math.abs(calculatedTotal - (totalCommissions || 0)) > 0.01 && (
-                          <div style={{ padding: '10px', backgroundColor: '#fef2f2', borderLeft: '4px solid #ef4444', marginTop: '10px' }}>
-                            <strong style={{ color: '#dc2626' }}>⚠️ Attenzione:</strong> Differenza di €{Math.abs(calculatedTotal - (totalCommissions || 0)).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Regole Applicate */}
-                    <div className={styles.inspectorSection}>
-                      <h4>📜 Regole Applicate</h4>
-                      <ul style={{ fontSize: '0.9rem', color: '#64748b', lineHeight: '1.6' }}>
-                        <li><strong>2024+:</strong> Normalizzazione spese E/C-Comunicazioni a €0.70 (solo E/C)</li>
-                        <li><strong>2023+:</strong> Inclusione Imposta di Bollo E/C{periodYear >= 2024 && ' (escluso Q1)'}</li>
-                        <li><strong>2022+:</strong> Inclusione Tobin Tax (Imposta transazioni finanziarie)</li>
-                        <li><strong>2017+:</strong> Calcolo LORDO con riaggiunta competenze positive (escluso Q1)</li>
-                        <li><strong>Pre-2017 o Q1:</strong> Calcolo NETTO (competenze come offset)</li>
-                      </ul>
                     </div>
                   </div>
                 );

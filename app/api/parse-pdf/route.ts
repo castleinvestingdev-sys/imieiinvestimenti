@@ -180,6 +180,19 @@ Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON
 - "ESTRATTO CONTO", "CONTO CORRENTE", "E/C" → type = "LIQUIDITY"
 - "DOSSIER TITOLI", "ESTRATTO CONTO TITOLI" → type = "DOSSIER"
 
+**RICONOSCIMENTO BANCA**: Normalizza il nome della banca al nome ufficiale. Banche supportate:
+Intesa Sanpaolo, UniCredit, Banco BPM, BPER Banca, Monte dei Paschi di Siena, Crédit Agricole Italia (anche Cariparma, Friuladria, CA), BNL (BNP Paribas), Credem, Banca Mediolanum, FinecoBank, Banca Generali, Azimut, CheBanca! (Mediobanca Premier), Banca Sella, Banca Popolare di Sondrio, Banco di Desio, Banca di Asti, Banca Passadore, Cassa di Risparmio di Bolzano, Volksbank Alto Adige, Banca del Piemonte, Banca Carige (BPER), Banca Ifis, Illimity Bank, Banca Progetto, Banca CF+, Banca Sistema, Banca Valsabbina, Cassa Centrale Banca, Raiffeisen, Cassa Rurale, BCC (Banca di Credito Cooperativo), Iccrea Banca, Deutsche Bank Italia, ING Italia, N26, Revolut, Widiba, Webank, Buddybank, BBVA Italia, Santander Consumer Bank, Banca Aletti, Banca Euromobiliare, Fideuram, Sanpaolo Invest, IW Bank.
+
+### FASE 1.5: DETERMINAZIONE DEL PERIODO (CRITICA)
+**Per LIQUIDITY**: Il periodo NON si deduce dall'intestazione ma dai MOVIMENTI.
+- **period_start**: La data della riga "SALDO INIZIALE" (o "SALDO AL", "SALDO CONTABILE INIZIALE") nella tabella movimenti. Questa è la data ESATTA di inizio periodo.
+- **period_end**: La data della riga "SALDO FINALE" (o "SALDO AL", "SALDO CONTABILE FINALE") nella tabella movimenti. Questa è la data ESATTA di fine periodo.
+- IMPORTANTE: Gli estratti conto possono essere trimestrali, bimestrali o mensili. NON assumere che siano sempre trimestrali. La data del saldo iniziale e finale ti dice esattamente il periodo.
+- Esempio: se il saldo iniziale ha data 31/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-31" e period_end = "2025-08-31" (è un estratto mensile).
+- Esempio: se il saldo iniziale ha data 01/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-01" e period_end = "2025-08-31" (è un estratto bimestrale).
+
+**Per DOSSIER**: Usa "PERIODO RENDICONTATO" o date dal frontespizio.
+
 ### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
 Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
 - Layout: DUE COLONNE SEPARATE per DARE e AVERE
@@ -446,6 +459,27 @@ Per OGNI titolo nella sezione "CONSISTENZA" (AZIONI, OBBLIGAZIONI, FONDI, SICAV,
 - **quantity**: Quantità/Consistenza (numero di quote/azioni)
 - **price**: Quotazione/Prezzo unitario - dalla colonna "Quotazione"
 - **marketValue**: Controvalore in Euro - dalla colonna "Controvalore Euro"
+- **assetType**: Classificazione del titolo. Deduci dal nome, dalla sezione del PDF o dall'ISIN:
+  - "Azione" → Titoli azionari individuali (es. "ENI SPA", "ENEL", "UNICREDIT")
+  - "Obbligazione" → BTP, BOT, CCT, obbligazioni corporate, titoli di stato (es. "BTP 01MG2023", "MEDIOBANCA 2025")
+  - "Fondo" → Fondi comuni di investimento, SICAV (es. "ANIMA FONDO TRADING", "EURIZON BREVE TERM", "CARMIGNAC PATRIMOINE", "PHARUS SICAV")
+  - "ETF" → Exchange Traded Fund (es. "LYXOR JAPAN (TOPIX)", "ISHARES CORE", "AMUNDI MSCI", "VANGUARD")
+  - "Altro" → Se non classificabile con certezza
+
+**ATTENZIONE CRITICA - FORMATO NUMERI ITALIANI NELLE QUANTITÀ:**
+I numeri nelle colonne "Consistenza" e "Quotazione" usano il formato italiano:
+- Il PUNTO "." è SEMPRE il separatore delle MIGLIAIA (NON il decimale!)
+- La VIRGOLA "," è SEMPRE il separatore DECIMALE
+- Esempi di conversione CORRETTA:
+  - "1.000,000" → quantity: 1000 (MILLE, non 1!)
+  - "5.000,000" → quantity: 5000 (CINQUEMILA, non 5!)
+  - "1.000" senza virgola → quantity: 1000 (MILLE, il punto è separatore migliaia!)
+  - "2556,138" → quantity: 2556.138
+  - "28,3550000" → price: 28.355
+  - "28.355,00" → marketValue: 28355
+- ERRORE COMUNE: leggere "1.000,000" come 1.0 o "5.000,000" come 5.0. Questo è SBAGLIATO!
+- VERIFICA: se quantity × price ≠ marketValue (con tolleranza), probabilmente hai sbagliato la quantità.
+  Esempio: se quantity=1, price=28.355 → 28.355 ≠ 28355 (marketValue) → ERRORE! Deve essere quantity=1000.
 
 IMPORTANTE:
 - Estrai il nome del titolo dalla colonna "Descrizione" del PDF
@@ -547,6 +581,7 @@ Per OGNI movimento titoli estrai:
     {
       "isin": "CODICE_ISIN",
       "name": "Nome del titolo dal PDF",
+      "assetType": "Fondo",
       "currency": "EUR",
       "exchangeRate": 1,
       "quantity": 0,
@@ -781,15 +816,19 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
         if (!forceRecalculate && userId && periodStart && periodEnd && accountNumber) {
             logProgress('CHECK DUPLICATI', 'Verifico periodo già caricato')
-            const { data: existingAnalysis } = await supabase
+            // Query per periodo senza filtro account esatto (il numero può variare tra PDF)
+            const { data: existingAnalyses } = await supabase
                 .from('analyses')
                 .select('id, period_start, period_end, benchmark_comparison')
                 .eq('user_id', userId)
                 .eq('period_start', periodStart)
                 .eq('period_end', periodEnd)
-                .eq('benchmark_comparison', accountNumber)
-                .limit(1)
-                .single()
+
+            // Match normalizzato: gestisce prefissi filiale variabili (es. "19812/3100/1000811" vs "3100/1000811")
+            const normalizedNew = normalizeAccountNumber(accountNumber)
+            const existingAnalysis = existingAnalyses?.find(a =>
+                normalizeAccountNumber(a.benchmark_comparison || '') === normalizedNew
+            )
 
             if (existingAnalysis) {
                 logProgress('⚠️ DUPLICATO RILEVATO', `Periodo ${periodStart} - ${periodEnd} già presente`)
@@ -900,6 +939,15 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         console.error('Stack:', error.stack)
         return NextResponse.json({ success: false, error: error.message || 'Errore interno del server' }, { status: 500 })
     }
+}
+
+// Normalizza numeri conto: gestisce prefissi filiale variabili
+// es. "3100/1000811", "19812/3100/1000811", "19812/3100/01000811" → "31001000811"
+function normalizeAccountNumber(acc: string): string {
+    if (!acc) return '';
+    const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
+    if (segments.length === 0) return '';
+    return segments.slice(-2).join('').toUpperCase();
 }
 
 function parseDate(dateStr: string | undefined): string | null {
