@@ -1,0 +1,2004 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - main [ref=e50]:
+      - generic [ref=e51]:
+        - link "← Torna ai Clienti" [ref=e52] [cursor=pointer]:
+          - /url: /consulente
+        - 'heading "Cliente: FRIGERI MARIA CRISTINA" [level=2] [ref=e53]'
+      - generic [ref=e55]:
+        - generic [ref=e56]:
+          - heading "Portafoglio di FRIGERI MARIA CRISTINA" [level=1] [ref=e57]
+          - paragraph [ref=e58]:
+            - text: Carica i PDF "Estratto Conto" originali per analizzare il tuo portafoglio. Se non li trovi, cercali nell'
+            - link "Homebanking" [ref=e59] [cursor=pointer]:
+              - /url: "#"
+            - text: nella sezione documenti.
+        - generic [ref=e60] [cursor=pointer]:
+          - generic [ref=e61]: ↑
+          - generic [ref=e62]: TRASCINA I DOCUMENTI QUI
+          - generic [ref=e63]: oppure
+          - button "SFOGLIA I FILE" [ref=e64]
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - heading "I tuoi Conti (2) e Estratti Conto (30)" [level=2] [ref=e67]
+          - button "🗑️ Cestino (7)" [ref=e68] [cursor=pointer]
+        - generic [ref=e69]:
+          - generic [ref=e70]:
+            - generic [ref=e71]: I
+            - generic [ref=e72]:
+              - heading "Intesa Sanpaolo" [level=3] [ref=e73]
+              - generic [ref=e74]: 1 Dossier Titoli | 1 Conti Correnti
+            - generic [ref=e75]:
+              - button "🗑️" [ref=e76] [cursor=pointer]
+              - link "VEDI ANALISI →" [ref=e77] [cursor=pointer]:
+                - /url: /analisi/4d1d7a23-10bc-43c0-ad78-53f311c1e7a8
+                - text: VEDI ANALISI
+                - generic [ref=e78]: →
+          - generic [ref=e79]:
+            - generic [ref=e80]:
+              - generic [ref=e82]:
+                - generic [ref=e84]: Dossier Titoli
+                - button "🗑️" [ref=e85] [cursor=pointer]
+              - generic [ref=e86]:
+                - generic [ref=e88]: Liquidità
+                - button "🗑️" [ref=e89] [cursor=pointer]
+            - generic [ref=e90]:
+              - generic [ref=e91]:
+                - generic [ref=e92]: "2016"
+                - generic [ref=e93]:
+                  - generic [ref=e94] [cursor=pointer]:
+                    - generic [ref=e96]: Q1
+                    - generic [ref=e97]:
+                      - text: 31/12/2015
+                      - generic [ref=e98]: ↓
+                      - text: 31/03/2016
+                    - generic [ref=e99]: +
+                  - generic [ref=e100] [cursor=pointer]:
+                    - generic [ref=e101]:
+                      - generic [ref=e102]: Q2
+                      - generic "Portafoglio iniziale assente" [ref=e103]: ⚠️
+                    - generic [ref=e104]:
+                      - text: 01/01/2016
+                      - generic [ref=e105]: ↓
+                      - text: 30/06/2016
+                    - generic [ref=e106]:
+                      - generic [ref=e107]: €265.751,79
+                      - generic [ref=e108]:
+                        - button "🔍" [ref=e109]
+                        - button "🗑️" [ref=e110]
+                  - generic [ref=e111] [cursor=pointer]:
+                    - generic [ref=e113]: Q3
+                    - generic [ref=e114]:
+                      - text: 30/06/2016
+                      - generic [ref=e115]: ↓
+                      - text: 30/09/2016
+                    - generic [ref=e116]: +
+                  - generic [ref=e117] [cursor=pointer]:
+                    - generic [ref=e118]:
+                      - generic [ref=e119]: Q4
+                      - generic "Portafoglio iniziale assente" [ref=e120]: ⚠️
+                    - generic [ref=e121]:
+                      - text: 30/06/2016
+                      - generic [ref=e122]: ↓
+                      - text: 31/12/2016
+                    - generic [ref=e123]:
+                      - generic [ref=e124]: €357.275,74
+                      - generic [ref=e125]:
+                        - button "🔍" [ref=e126]
+                        - button "🗑️" [ref=e127]
+                - generic [ref=e128]:
+                  - generic [ref=e129] [cursor=pointer]:
+                    - generic [ref=e130]: Q1
+                    - generic [ref=e131]:
+                      - text: 31/12/2015
+                      - generic [ref=e132]: ↓
+                      - text: 31/03/2016
+                    - generic [ref=e133]: +
+                  - generic [ref=e134] [cursor=pointer]:
+                    - generic [ref=e135]: Q2
+                    - generic [ref=e136]:
+                      - text: 31/03/2016
+                      - generic [ref=e137]: ↓
+                      - text: 30/06/2016
+                    - generic [ref=e138]: +
+                  - generic [ref=e139] [cursor=pointer]:
+                    - generic [ref=e140]: Q3
+                    - generic [ref=e141]:
+                      - text: 30/06/2016
+                      - generic [ref=e142]: ↓
+                      - text: 30/09/2016
+                    - generic [ref=e143]: +
+                  - generic [ref=e144] [cursor=pointer]:
+                    - generic [ref=e145]: Q4
+                    - generic [ref=e146]:
+                      - text: 30/09/2016
+                      - generic [ref=e147]: ↓
+                      - text: 31/12/2016
+                    - generic [ref=e148]: +
+              - generic [ref=e149]:
+                - generic [ref=e150]: "2017"
+                - generic [ref=e151]:
+                  - generic [ref=e152] [cursor=pointer]:
+                    - generic [ref=e154]: Q1
+                    - generic [ref=e155]:
+                      - text: 31/12/2016
+                      - generic [ref=e156]: ↓
+                      - text: 31/03/2017
+                    - generic [ref=e157]: +
+                  - generic [ref=e158] [cursor=pointer]:
+                    - generic [ref=e159]:
+                      - generic [ref=e160]: Q2
+                      - generic "Portafoglio iniziale assente" [ref=e161]: ⚠️
+                    - generic [ref=e162]:
+                      - text: 01/01/2017
+                      - generic [ref=e163]: ↓
+                      - text: 30/06/2017
+                    - generic [ref=e164]:
+                      - generic [ref=e165]: €366.487,37
+                      - generic [ref=e166]:
+                        - button "🔍" [ref=e167]
+                        - button "🗑️" [ref=e168]
+                  - generic [ref=e169] [cursor=pointer]:
+                    - generic [ref=e171]: Q3
+                    - generic [ref=e172]:
+                      - text: 30/06/2017
+                      - generic [ref=e173]: ↓
+                      - text: 30/09/2017
+                    - generic [ref=e174]: +
+                  - generic [ref=e175] [cursor=pointer]:
+                    - generic [ref=e176]:
+                      - generic [ref=e177]: Q4
+                      - generic "Portafoglio iniziale assente" [ref=e178]: ⚠️
+                    - generic [ref=e179]:
+                      - text: 30/06/2017
+                      - generic [ref=e180]: ↓
+                      - text: 31/12/2017
+                    - generic [ref=e181]:
+                      - generic [ref=e182]: €348.675,75
+                      - generic [ref=e183]:
+                        - button "🔍" [ref=e184]
+                        - button "🗑️" [ref=e185]
+                - generic [ref=e186]:
+                  - generic [ref=e187] [cursor=pointer]:
+                    - generic [ref=e188]: Q1
+                    - generic [ref=e189]:
+                      - text: 31/12/2016
+                      - generic [ref=e190]: ↓
+                      - text: 31/03/2017
+                    - generic [ref=e191]: +
+                  - generic [ref=e192] [cursor=pointer]:
+                    - generic [ref=e193]: Q2
+                    - generic [ref=e194]:
+                      - text: 31/03/2017
+                      - generic [ref=e195]: ↓
+                      - text: 30/06/2017
+                    - generic [ref=e196]: +
+                  - generic [ref=e197] [cursor=pointer]:
+                    - generic [ref=e198]: Q3
+                    - generic [ref=e199]:
+                      - text: 30/06/2017
+                      - generic [ref=e200]: ↓
+                      - text: 30/09/2017
+                    - generic [ref=e201]:
+                      - generic [ref=e202]: €41.655,50
+                      - generic [ref=e203]:
+                        - button "🔍" [ref=e204]
+                        - button "🗑️" [ref=e205]
+                  - generic [ref=e206] [cursor=pointer]:
+                    - generic [ref=e207]: Q4
+                    - generic [ref=e208]:
+                      - text: 30/09/2017
+                      - generic [ref=e209]: ↓
+                      - text: 31/12/2017
+                    - generic [ref=e210]: +
+              - generic [ref=e211]:
+                - generic [ref=e212]: "2018"
+                - generic [ref=e213]:
+                  - generic [ref=e214] [cursor=pointer]:
+                    - generic [ref=e215]:
+                      - generic [ref=e216]: Q1
+                      - generic "Portafoglio iniziale non quadra" [ref=e217]: ❌
+                    - generic [ref=e218]:
+                      - text: 01/01/2018
+                      - generic [ref=e219]: ↓
+                      - text: 31/03/2018
+                    - generic [ref=e220]:
+                      - generic [ref=e221]: €371.286,85
+                      - generic [ref=e222]:
+                        - button "🔍" [ref=e223]
+                        - button "🗑️" [ref=e224]
+                  - generic [ref=e225] [cursor=pointer]:
+                    - generic [ref=e226]:
+                      - generic [ref=e227]: Q2
+                      - generic "Portafoglio iniziale verificato" [ref=e228]: ✅
+                    - generic [ref=e229]:
+                      - text: 31/03/2018
+                      - generic [ref=e230]: ↓
+                      - text: 30/06/2018
+                    - generic [ref=e231]:
+                      - generic [ref=e232]: €377.079,09
+                      - generic [ref=e233]:
+                        - button "🔍" [ref=e234]
+                        - button "🗑️" [ref=e235]
+                  - generic [ref=e236] [cursor=pointer]:
+                    - generic [ref=e237]:
+                      - generic [ref=e238]: Q3
+                      - generic "Portafoglio iniziale non quadra" [ref=e239]: ❌
+                    - generic [ref=e240]:
+                      - text: 30/06/2018
+                      - generic [ref=e241]: ↓
+                      - text: 30/09/2018
+                    - generic [ref=e242]:
+                      - generic [ref=e243]: €355.451,10
+                      - generic [ref=e244]:
+                        - button "🔍" [ref=e245]
+                        - button "🗑️" [ref=e246]
+                  - generic [ref=e247] [cursor=pointer]:
+                    - generic [ref=e249]: Q4
+                    - generic [ref=e250]:
+                      - text: 30/09/2018
+                      - generic [ref=e251]: ↓
+                      - text: 31/12/2018
+                    - generic [ref=e252]: +
+                - generic [ref=e253]:
+                  - generic [ref=e254] [cursor=pointer]:
+                    - generic [ref=e255]: Q1
+                    - generic [ref=e256]:
+                      - text: 31/12/2017
+                      - generic [ref=e257]: ↓
+                      - text: 31/03/2018
+                    - generic [ref=e258]:
+                      - generic [ref=e259]: €42.024,60
+                      - generic [ref=e260]:
+                        - button "🔍" [ref=e261]
+                        - button "🗑️" [ref=e262]
+                  - generic [ref=e263] [cursor=pointer]:
+                    - generic [ref=e264]: Q2
+                    - generic [ref=e265]:
+                      - text: 31/03/2018
+                      - generic [ref=e266]: ↓
+                      - text: 30/06/2018
+                    - generic [ref=e267]:
+                      - generic [ref=e268]: €38.762,76
+                      - generic [ref=e269]:
+                        - button "🔍" [ref=e270]
+                        - button "🗑️" [ref=e271]
+                  - generic [ref=e272] [cursor=pointer]:
+                    - generic [ref=e273]: Q3
+                    - generic [ref=e274]:
+                      - text: 30/06/2018
+                      - generic [ref=e275]: ↓
+                      - text: 30/09/2018
+                    - generic [ref=e276]:
+                      - generic [ref=e277]: €34.009,23
+                      - generic [ref=e278]:
+                        - button "🔍" [ref=e279]
+                        - button "🗑️" [ref=e280]
+                  - generic [ref=e281] [cursor=pointer]:
+                    - generic [ref=e282]: Q4
+                    - generic [ref=e283]:
+                      - text: 30/09/2018
+                      - generic [ref=e284]: ↓
+                      - text: 31/12/2018
+                    - generic [ref=e285]:
+                      - generic [ref=e286]: €30.346,51
+                      - generic [ref=e287]:
+                        - button "🔍" [ref=e288]
+                        - button "🗑️" [ref=e289]
+              - generic [ref=e290]:
+                - generic [ref=e291]: "2019"
+                - generic [ref=e292]:
+                  - generic [ref=e293] [cursor=pointer]:
+                    - generic [ref=e295]: Q1
+                    - generic [ref=e296]:
+                      - text: 31/12/2018
+                      - generic [ref=e297]: ↓
+                      - text: 31/03/2019
+                    - generic [ref=e298]: +
+                  - generic [ref=e299] [cursor=pointer]:
+                    - generic [ref=e301]: Q2
+                    - generic [ref=e302]:
+                      - text: 31/03/2019
+                      - generic [ref=e303]: ↓
+                      - text: 30/06/2019
+                    - generic [ref=e304]: +
+                  - generic [ref=e305] [cursor=pointer]:
+                    - generic [ref=e307]: Q3
+                    - generic [ref=e308]:
+                      - text: 30/06/2019
+                      - generic [ref=e309]: ↓
+                      - text: 30/09/2019
+                    - generic [ref=e310]: +
+                  - generic [ref=e311] [cursor=pointer]:
+                    - generic [ref=e313]: Q4
+                    - generic [ref=e314]:
+                      - text: 30/09/2019
+                      - generic [ref=e315]: ↓
+                      - text: 31/12/2019
+                    - generic [ref=e316]: +
+                - generic [ref=e317]:
+                  - generic [ref=e318] [cursor=pointer]:
+                    - generic [ref=e319]: Q1
+                    - generic [ref=e320]:
+                      - text: 31/12/2018
+                      - generic [ref=e321]: ↓
+                      - text: 31/03/2019
+                    - generic [ref=e322]: +
+                  - generic [ref=e323] [cursor=pointer]:
+                    - generic [ref=e324]: Q2
+                    - generic [ref=e325]:
+                      - text: 31/03/2019
+                      - generic [ref=e326]: ↓
+                      - text: 30/06/2019
+                    - generic [ref=e327]: +
+                  - generic [ref=e328] [cursor=pointer]:
+                    - generic [ref=e329]: Q3
+                    - generic [ref=e330]:
+                      - text: 30/06/2019
+                      - generic [ref=e331]: ↓
+                      - text: 30/09/2019
+                    - generic [ref=e332]: +
+                  - generic [ref=e333] [cursor=pointer]:
+                    - generic [ref=e334]: Q4
+                    - generic [ref=e335]:
+                      - text: 30/09/2019
+                      - generic [ref=e336]: ↓
+                      - text: 31/12/2019
+                    - generic [ref=e337]: +
+              - generic [ref=e338]:
+                - generic [ref=e339]: "2020"
+                - generic [ref=e340]:
+                  - generic [ref=e341] [cursor=pointer]:
+                    - generic [ref=e343]: Q1
+                    - generic [ref=e344]:
+                      - text: 31/12/2019
+                      - generic [ref=e345]: ↓
+                      - text: 31/03/2020
+                    - generic [ref=e346]: +
+                  - generic [ref=e347] [cursor=pointer]:
+                    - generic [ref=e349]: Q2
+                    - generic [ref=e350]:
+                      - text: 31/03/2020
+                      - generic [ref=e351]: ↓
+                      - text: 30/06/2020
+                    - generic [ref=e352]: +
+                  - generic [ref=e353] [cursor=pointer]:
+                    - generic [ref=e355]: Q3
+                    - generic [ref=e356]:
+                      - text: 30/06/2020
+                      - generic [ref=e357]: ↓
+                      - text: 30/09/2020
+                    - generic [ref=e358]: +
+                  - generic [ref=e359] [cursor=pointer]:
+                    - generic [ref=e361]: Q4
+                    - generic [ref=e362]:
+                      - text: 30/09/2020
+                      - generic [ref=e363]: ↓
+                      - text: 31/12/2020
+                    - generic [ref=e364]: +
+                - generic [ref=e365]:
+                  - generic [ref=e366] [cursor=pointer]:
+                    - generic [ref=e367]: Q1
+                    - generic [ref=e368]:
+                      - text: 31/12/2019
+                      - generic [ref=e369]: ↓
+                      - text: 31/03/2020
+                    - generic [ref=e370]: +
+                  - generic [ref=e371] [cursor=pointer]:
+                    - generic [ref=e372]: Q2
+                    - generic [ref=e373]:
+                      - text: 31/03/2020
+                      - generic [ref=e374]: ↓
+                      - text: 30/06/2020
+                    - generic [ref=e375]: +
+                  - generic [ref=e376] [cursor=pointer]:
+                    - generic [ref=e377]: Q3
+                    - generic [ref=e378]:
+                      - text: 30/06/2020
+                      - generic [ref=e379]: ↓
+                      - text: 30/09/2020
+                    - generic [ref=e380]: +
+                  - generic [ref=e381] [cursor=pointer]:
+                    - generic [ref=e382]: Q4
+                    - generic [ref=e383]:
+                      - text: 30/09/2020
+                      - generic [ref=e384]: ↓
+                      - text: 31/12/2020
+                    - generic [ref=e385]: +
+              - generic [ref=e386]:
+                - generic [ref=e387]: "2021"
+                - generic [ref=e388]:
+                  - generic [ref=e389] [cursor=pointer]:
+                    - generic [ref=e391]: Q1
+                    - generic [ref=e392]:
+                      - text: 31/12/2020
+                      - generic [ref=e393]: ↓
+                      - text: 31/03/2021
+                    - generic [ref=e394]: +
+                  - generic [ref=e395] [cursor=pointer]:
+                    - generic [ref=e397]: Q2
+                    - generic [ref=e398]:
+                      - text: 31/03/2021
+                      - generic [ref=e399]: ↓
+                      - text: 30/06/2021
+                    - generic [ref=e400]: +
+                  - generic [ref=e401] [cursor=pointer]:
+                    - generic [ref=e403]: Q3
+                    - generic [ref=e404]:
+                      - text: 30/06/2021
+                      - generic [ref=e405]: ↓
+                      - text: 30/09/2021
+                    - generic [ref=e406]: +
+                  - generic [ref=e407] [cursor=pointer]:
+                    - generic [ref=e409]: Q4
+                    - generic [ref=e410]:
+                      - text: 30/09/2021
+                      - generic [ref=e411]: ↓
+                      - text: 31/12/2021
+                    - generic [ref=e412]: +
+                - generic [ref=e413]:
+                  - generic [ref=e414] [cursor=pointer]:
+                    - generic [ref=e415]: Q1
+                    - generic [ref=e416]:
+                      - text: 31/12/2020
+                      - generic [ref=e417]: ↓
+                      - text: 31/03/2021
+                    - generic [ref=e418]: +
+                  - generic [ref=e419] [cursor=pointer]:
+                    - generic [ref=e420]: Q2
+                    - generic [ref=e421]:
+                      - text: 31/03/2021
+                      - generic [ref=e422]: ↓
+                      - text: 30/06/2021
+                    - generic [ref=e423]: +
+                  - generic [ref=e424] [cursor=pointer]:
+                    - generic [ref=e425]: Q3
+                    - generic [ref=e426]:
+                      - text: 30/06/2021
+                      - generic [ref=e427]: ↓
+                      - text: 30/09/2021
+                    - generic [ref=e428]: +
+                  - generic [ref=e429] [cursor=pointer]:
+                    - generic [ref=e430]: Q4
+                    - generic [ref=e431]:
+                      - text: 30/09/2021
+                      - generic [ref=e432]: ↓
+                      - text: 31/12/2021
+                    - generic [ref=e433]: +
+              - generic [ref=e434]:
+                - generic [ref=e435]: "2022"
+                - generic [ref=e436]:
+                  - generic [ref=e437] [cursor=pointer]:
+                    - generic [ref=e439]: Q1
+                    - generic [ref=e440]:
+                      - text: 31/12/2021
+                      - generic [ref=e441]: ↓
+                      - text: 31/03/2022
+                    - generic [ref=e442]: +
+                  - generic [ref=e443] [cursor=pointer]:
+                    - generic [ref=e445]: Q2
+                    - generic [ref=e446]:
+                      - text: 31/03/2022
+                      - generic [ref=e447]: ↓
+                      - text: 30/06/2022
+                    - generic [ref=e448]: +
+                  - generic [ref=e449] [cursor=pointer]:
+                    - generic [ref=e451]: Q3
+                    - generic [ref=e452]:
+                      - text: 30/06/2022
+                      - generic [ref=e453]: ↓
+                      - text: 30/09/2022
+                    - generic [ref=e454]: +
+                  - generic [ref=e455] [cursor=pointer]:
+                    - generic [ref=e457]: Q4
+                    - generic [ref=e458]:
+                      - text: 30/09/2022
+                      - generic [ref=e459]: ↓
+                      - text: 31/12/2022
+                    - generic [ref=e460]: +
+                - generic [ref=e461]:
+                  - generic [ref=e462] [cursor=pointer]:
+                    - generic [ref=e463]: Q1
+                    - generic [ref=e464]:
+                      - text: 31/12/2021
+                      - generic [ref=e465]: ↓
+                      - text: 31/03/2022
+                    - generic [ref=e466]: +
+                  - generic [ref=e467] [cursor=pointer]:
+                    - generic [ref=e468]: Q2
+                    - generic [ref=e469]:
+                      - text: 31/03/2022
+                      - generic [ref=e470]: ↓
+                      - text: 30/06/2022
+                    - generic [ref=e471]: +
+                  - generic [ref=e472] [cursor=pointer]:
+                    - generic [ref=e473]: Q3
+                    - generic [ref=e474]:
+                      - text: 30/06/2022
+                      - generic [ref=e475]: ↓
+                      - text: 30/09/2022
+                    - generic [ref=e476]: +
+                  - generic [ref=e477] [cursor=pointer]:
+                    - generic [ref=e478]: Q4
+                    - generic [ref=e479]:
+                      - text: 30/09/2022
+                      - generic [ref=e480]: ↓
+                      - text: 31/12/2022
+                    - generic [ref=e481]: +
+              - generic [ref=e482]:
+                - generic [ref=e483]: "2023"
+                - generic [ref=e484]:
+                  - generic [ref=e485] [cursor=pointer]:
+                    - generic [ref=e487]: Q1
+                    - generic [ref=e488]:
+                      - text: 31/12/2022
+                      - generic [ref=e489]: ↓
+                      - text: 31/03/2023
+                    - generic [ref=e490]: +
+                  - generic [ref=e491] [cursor=pointer]:
+                    - generic [ref=e493]: Q2
+                    - generic [ref=e494]:
+                      - text: 31/03/2023
+                      - generic [ref=e495]: ↓
+                      - text: 30/06/2023
+                    - generic [ref=e496]: +
+                  - generic [ref=e497] [cursor=pointer]:
+                    - generic [ref=e499]: Q3
+                    - generic [ref=e500]:
+                      - text: 30/06/2023
+                      - generic [ref=e501]: ↓
+                      - text: 30/09/2023
+                    - generic [ref=e502]: +
+                  - generic [ref=e503] [cursor=pointer]:
+                    - generic [ref=e505]: Q4
+                    - generic [ref=e506]:
+                      - text: 30/09/2023
+                      - generic [ref=e507]: ↓
+                      - text: 31/12/2023
+                    - generic [ref=e508]: +
+                - generic [ref=e509]:
+                  - generic [ref=e510] [cursor=pointer]:
+                    - generic [ref=e511]: Q1
+                    - generic [ref=e512]:
+                      - text: 31/12/2022
+                      - generic [ref=e513]: ↓
+                      - text: 31/03/2023
+                    - generic [ref=e514]: +
+                  - generic [ref=e515] [cursor=pointer]:
+                    - generic [ref=e516]: Q2
+                    - generic [ref=e517]:
+                      - text: 31/03/2023
+                      - generic [ref=e518]: ↓
+                      - text: 30/06/2023
+                    - generic [ref=e519]: +
+                  - generic [ref=e520] [cursor=pointer]:
+                    - generic [ref=e521]: Q3
+                    - generic [ref=e522]:
+                      - text: 30/06/2023
+                      - generic [ref=e523]: ↓
+                      - text: 30/09/2023
+                    - generic [ref=e524]: +
+                  - generic [ref=e525] [cursor=pointer]:
+                    - generic [ref=e526]: Q4
+                    - generic [ref=e527]:
+                      - text: 30/09/2023
+                      - generic [ref=e528]: ↓
+                      - text: 31/12/2023
+                    - generic [ref=e529]: +
+              - generic [ref=e530]:
+                - generic [ref=e531]: "2024"
+                - generic [ref=e532]:
+                  - generic [ref=e533] [cursor=pointer]:
+                    - generic [ref=e535]: Q1
+                    - generic [ref=e536]:
+                      - text: 31/12/2023
+                      - generic [ref=e537]: ↓
+                      - text: 31/03/2024
+                    - generic [ref=e538]: +
+                  - generic [ref=e539] [cursor=pointer]:
+                    - generic [ref=e541]: Q2
+                    - generic [ref=e542]:
+                      - text: 31/03/2024
+                      - generic [ref=e543]: ↓
+                      - text: 30/06/2024
+                    - generic [ref=e544]: +
+                  - generic [ref=e545] [cursor=pointer]:
+                    - generic [ref=e547]: Q3
+                    - generic [ref=e548]:
+                      - text: 30/06/2024
+                      - generic [ref=e549]: ↓
+                      - text: 30/09/2024
+                    - generic [ref=e550]: +
+                  - generic [ref=e551] [cursor=pointer]:
+                    - generic [ref=e553]: Q4
+                    - generic [ref=e554]:
+                      - text: 30/09/2024
+                      - generic [ref=e555]: ↓
+                      - text: 31/12/2024
+                    - generic [ref=e556]: +
+                - generic [ref=e557]:
+                  - generic [ref=e558] [cursor=pointer]:
+                    - generic [ref=e559]: Q1
+                    - generic [ref=e560]:
+                      - text: 31/12/2023
+                      - generic [ref=e561]: ↓
+                      - text: 31/03/2024
+                    - generic [ref=e562]: +
+                  - generic [ref=e563] [cursor=pointer]:
+                    - generic [ref=e564]: Q2
+                    - generic [ref=e565]:
+                      - text: 31/03/2024
+                      - generic [ref=e566]: ↓
+                      - text: 30/06/2024
+                    - generic [ref=e567]: +
+                  - generic [ref=e568] [cursor=pointer]:
+                    - generic [ref=e569]: Q3
+                    - generic [ref=e570]:
+                      - text: 30/06/2024
+                      - generic [ref=e571]: ↓
+                      - text: 30/09/2024
+                    - generic [ref=e572]: +
+                  - generic [ref=e573] [cursor=pointer]:
+                    - generic [ref=e574]: Q4
+                    - generic [ref=e575]:
+                      - text: 30/09/2024
+                      - generic [ref=e576]: ↓
+                      - text: 31/12/2024
+                    - generic [ref=e577]: +
+              - generic [ref=e578]:
+                - generic [ref=e579]: "2025"
+                - generic [ref=e580]:
+                  - generic [ref=e581] [cursor=pointer]:
+                    - generic [ref=e583]: Q1
+                    - generic [ref=e584]:
+                      - text: 31/12/2024
+                      - generic [ref=e585]: ↓
+                      - text: 31/03/2025
+                    - generic [ref=e586]: +
+                  - generic [ref=e587] [cursor=pointer]:
+                    - generic [ref=e589]: Q2
+                    - generic [ref=e590]:
+                      - text: 31/03/2025
+                      - generic [ref=e591]: ↓
+                      - text: 30/06/2025
+                    - generic [ref=e592]: +
+                  - generic [ref=e593] [cursor=pointer]:
+                    - generic [ref=e595]: Q3
+                    - generic [ref=e596]:
+                      - text: 30/06/2025
+                      - generic [ref=e597]: ↓
+                      - text: 30/09/2025
+                    - generic [ref=e598]: +
+                  - generic [ref=e599] [cursor=pointer]:
+                    - generic [ref=e601]: Q4
+                    - generic [ref=e602]:
+                      - text: 30/09/2025
+                      - generic [ref=e603]: ↓
+                      - text: 31/12/2025
+                    - generic [ref=e604]: +
+                - generic [ref=e605]:
+                  - generic [ref=e606] [cursor=pointer]:
+                    - generic [ref=e607]: Q1
+                    - generic [ref=e608]:
+                      - text: 31/12/2024
+                      - generic [ref=e609]: ↓
+                      - text: 31/03/2025
+                    - generic [ref=e610]: +
+                  - generic [ref=e611] [cursor=pointer]:
+                    - generic [ref=e612]: Q2
+                    - generic [ref=e613]:
+                      - text: 31/03/2025
+                      - generic [ref=e614]: ↓
+                      - text: 30/06/2025
+                    - generic [ref=e615]: +
+                  - generic [ref=e616] [cursor=pointer]:
+                    - generic [ref=e617]: Q3
+                    - generic [ref=e618]:
+                      - text: 30/06/2025
+                      - generic [ref=e619]: ↓
+                      - text: 30/09/2025
+                    - generic [ref=e620]: +
+                  - generic [ref=e621] [cursor=pointer]:
+                    - generic [ref=e622]: Q4
+                    - generic [ref=e623]:
+                      - text: 30/09/2025
+                      - generic [ref=e624]: ↓
+                      - text: 31/12/2025
+                    - generic [ref=e625]: +
+              - generic [ref=e626]:
+                - generic [ref=e627]: "2026"
+                - generic [ref=e628]:
+                  - generic [ref=e629] [cursor=pointer]:
+                    - generic [ref=e631]: Q1
+                    - generic [ref=e632]:
+                      - text: 31/12/2025
+                      - generic [ref=e633]: ↓
+                      - text: 31/03/2026
+                    - generic [ref=e634]: +
+                  - generic [ref=e635] [cursor=pointer]:
+                    - generic [ref=e637]: Q2
+                    - generic [ref=e638]:
+                      - text: 31/03/2026
+                      - generic [ref=e639]: ↓
+                      - text: 30/06/2026
+                    - generic [ref=e640]: +
+                  - generic [ref=e641] [cursor=pointer]:
+                    - generic [ref=e643]: Q3
+                    - generic [ref=e644]:
+                      - text: 30/06/2026
+                      - generic [ref=e645]: ↓
+                      - text: 30/09/2026
+                    - generic [ref=e646]: +
+                  - generic [ref=e647] [cursor=pointer]:
+                    - generic [ref=e649]: Q4
+                    - generic [ref=e650]:
+                      - text: 30/09/2026
+                      - generic [ref=e651]: ↓
+                      - text: 31/12/2026
+                    - generic [ref=e652]: +
+                - generic [ref=e653]:
+                  - generic [ref=e654] [cursor=pointer]:
+                    - generic [ref=e655]: Q1
+                    - generic [ref=e656]:
+                      - text: 31/12/2025
+                      - generic [ref=e657]: ↓
+                      - text: 31/03/2026
+                    - generic [ref=e658]: +
+                  - generic [ref=e659] [cursor=pointer]:
+                    - generic [ref=e660]: Q2
+                    - generic [ref=e661]:
+                      - text: 31/03/2026
+                      - generic [ref=e662]: ↓
+                      - text: 30/06/2026
+                    - generic [ref=e663]: +
+                  - generic [ref=e664] [cursor=pointer]:
+                    - generic [ref=e665]: Q3
+                    - generic [ref=e666]:
+                      - text: 30/06/2026
+                      - generic [ref=e667]: ↓
+                      - text: 30/09/2026
+                    - generic [ref=e668]: +
+                  - generic [ref=e669] [cursor=pointer]:
+                    - generic [ref=e670]: Q4
+                    - generic [ref=e671]:
+                      - text: 30/09/2026
+                      - generic [ref=e672]: ↓
+                      - text: 31/12/2026
+                    - generic [ref=e673]: +
+        - generic [ref=e674]:
+          - generic [ref=e675]:
+            - generic [ref=e676]: C
+            - generic [ref=e677]:
+              - heading "CRÉDIT AGRICOLE" [level=3] [ref=e678]
+              - generic [ref=e679]: 2 Dossier Titoli | 1 Conti Correnti
+            - generic [ref=e680]:
+              - button "🗑️" [ref=e681] [cursor=pointer]
+              - link "VEDI ANALISI →" [ref=e682] [cursor=pointer]:
+                - /url: /analisi/3e3037a2-d3b1-4fb6-94c1-25219e4c9cd5
+                - text: VEDI ANALISI
+                - generic [ref=e683]: →
+          - generic [ref=e684]:
+            - generic [ref=e685]:
+              - generic [ref=e687]:
+                - generic [ref=e688]:
+                  - generic [ref=e689]: Dossier Titoli
+                  - generic [ref=e690]: 00445/0000004742990
+                - button "🗑️" [ref=e691] [cursor=pointer]
+              - generic [ref=e692]:
+                - generic [ref=e693]:
+                  - generic [ref=e694]: Dossier Titoli
+                  - generic [ref=e695]: 00445/0000009206591
+                - button "🗑️" [ref=e696] [cursor=pointer]
+              - generic [ref=e697]:
+                - generic [ref=e699]: Liquidità
+                - button "🗑️" [ref=e700] [cursor=pointer]
+            - generic [ref=e701]:
+              - generic [ref=e702]:
+                - generic [ref=e703]: "2016"
+                - generic [ref=e704]:
+                  - generic [ref=e705] [cursor=pointer]:
+                    - generic [ref=e707]: Q1
+                    - generic [ref=e708]:
+                      - text: 31/12/2015
+                      - generic [ref=e709]: ↓
+                      - text: 31/03/2016
+                    - generic [ref=e710]: +
+                  - generic [ref=e711] [cursor=pointer]:
+                    - generic [ref=e713]: Q2
+                    - generic [ref=e714]:
+                      - text: 31/03/2016
+                      - generic [ref=e715]: ↓
+                      - text: 30/06/2016
+                    - generic [ref=e716]: +
+                  - generic [ref=e717] [cursor=pointer]:
+                    - generic [ref=e719]: Q3
+                    - generic [ref=e720]:
+                      - text: 30/06/2016
+                      - generic [ref=e721]: ↓
+                      - text: 30/09/2016
+                    - generic [ref=e722]: +
+                  - generic [ref=e723] [cursor=pointer]:
+                    - generic [ref=e725]: Q4
+                    - generic [ref=e726]:
+                      - text: 30/09/2016
+                      - generic [ref=e727]: ↓
+                      - text: 31/12/2016
+                    - generic [ref=e728]: +
+                - generic [ref=e729]:
+                  - generic [ref=e730] [cursor=pointer]:
+                    - generic [ref=e732]: Q1
+                    - generic [ref=e733]:
+                      - text: 31/12/2015
+                      - generic [ref=e734]: ↓
+                      - text: 31/03/2016
+                    - generic [ref=e735]: +
+                  - generic [ref=e736] [cursor=pointer]:
+                    - generic [ref=e738]: Q2
+                    - generic [ref=e739]:
+                      - text: 31/03/2016
+                      - generic [ref=e740]: ↓
+                      - text: 30/06/2016
+                    - generic [ref=e741]: +
+                  - generic [ref=e742] [cursor=pointer]:
+                    - generic [ref=e744]: Q3
+                    - generic [ref=e745]:
+                      - text: 30/06/2016
+                      - generic [ref=e746]: ↓
+                      - text: 30/09/2016
+                    - generic [ref=e747]: +
+                  - generic [ref=e748] [cursor=pointer]:
+                    - generic [ref=e750]: Q4
+                    - generic [ref=e751]:
+                      - text: 30/09/2016
+                      - generic [ref=e752]: ↓
+                      - text: 31/12/2016
+                    - generic [ref=e753]: +
+                - generic [ref=e754]:
+                  - generic [ref=e755] [cursor=pointer]:
+                    - generic [ref=e756]: Q1
+                    - generic [ref=e757]:
+                      - text: 31/12/2015
+                      - generic [ref=e758]: ↓
+                      - text: 31/03/2016
+                    - generic [ref=e759]: +
+                  - generic [ref=e760] [cursor=pointer]:
+                    - generic [ref=e761]: Q2
+                    - generic [ref=e762]:
+                      - text: 01/04/2016
+                      - generic [ref=e763]: ↓
+                      - text: 30/06/2016
+                    - generic [ref=e764]:
+                      - generic [ref=e765]: €27.173,53
+                      - generic [ref=e766]:
+                        - button "🔍" [ref=e767]
+                        - button "🗑️" [ref=e768]
+                  - generic [ref=e769] [cursor=pointer]:
+                    - generic [ref=e770]: Q3
+                    - generic [ref=e771]:
+                      - text: 30/06/2016
+                      - generic [ref=e772]: ↓
+                      - text: 30/09/2016
+                    - generic [ref=e773]: +
+                  - generic [ref=e774] [cursor=pointer]:
+                    - generic [ref=e775]: Q4
+                    - generic [ref=e776]:
+                      - text: 30/09/2016
+                      - generic [ref=e777]: ↓
+                      - text: 31/12/2016
+                    - generic [ref=e778]: +
+              - generic [ref=e779]:
+                - generic [ref=e780]: "2017"
+                - generic [ref=e781]:
+                  - generic [ref=e782] [cursor=pointer]:
+                    - generic [ref=e784]: Q1
+                    - generic [ref=e785]:
+                      - text: 31/12/2016
+                      - generic [ref=e786]: ↓
+                      - text: 31/03/2017
+                    - generic [ref=e787]: +
+                  - generic [ref=e788] [cursor=pointer]:
+                    - generic [ref=e790]: Q2
+                    - generic [ref=e791]:
+                      - text: 31/03/2017
+                      - generic [ref=e792]: ↓
+                      - text: 30/06/2017
+                    - generic [ref=e793]: +
+                  - generic [ref=e794] [cursor=pointer]:
+                    - generic [ref=e796]: Q3
+                    - generic [ref=e797]:
+                      - text: 30/06/2017
+                      - generic [ref=e798]: ↓
+                      - text: 30/09/2017
+                    - generic [ref=e799]: +
+                  - generic [ref=e800] [cursor=pointer]:
+                    - generic [ref=e802]: Q4
+                    - generic [ref=e803]:
+                      - text: 30/09/2017
+                      - generic [ref=e804]: ↓
+                      - text: 31/12/2017
+                    - generic [ref=e805]: +
+                - generic [ref=e806]:
+                  - generic [ref=e807] [cursor=pointer]:
+                    - generic [ref=e809]: Q1
+                    - generic [ref=e810]:
+                      - text: 31/12/2016
+                      - generic [ref=e811]: ↓
+                      - text: 31/03/2017
+                    - generic [ref=e812]: +
+                  - generic [ref=e813] [cursor=pointer]:
+                    - generic [ref=e815]: Q2
+                    - generic [ref=e816]:
+                      - text: 31/03/2017
+                      - generic [ref=e817]: ↓
+                      - text: 30/06/2017
+                    - generic [ref=e818]: +
+                  - generic [ref=e819] [cursor=pointer]:
+                    - generic [ref=e821]: Q3
+                    - generic [ref=e822]:
+                      - text: 30/06/2017
+                      - generic [ref=e823]: ↓
+                      - text: 30/09/2017
+                    - generic [ref=e824]: +
+                  - generic [ref=e825] [cursor=pointer]:
+                    - generic [ref=e827]: Q4
+                    - generic [ref=e828]:
+                      - text: 30/09/2017
+                      - generic [ref=e829]: ↓
+                      - text: 31/12/2017
+                    - generic [ref=e830]: +
+                - generic [ref=e831]:
+                  - generic [ref=e832] [cursor=pointer]:
+                    - generic [ref=e833]: Q1
+                    - generic [ref=e834]:
+                      - text: 31/12/2016
+                      - generic [ref=e835]: ↓
+                      - text: 31/03/2017
+                    - generic [ref=e836]: +
+                  - generic [ref=e837] [cursor=pointer]:
+                    - generic [ref=e838]: Q2
+                    - generic [ref=e839]:
+                      - text: 31/03/2017
+                      - generic [ref=e840]: ↓
+                      - text: 30/06/2017
+                    - generic [ref=e841]: +
+                  - generic [ref=e842] [cursor=pointer]:
+                    - generic [ref=e843]: Q3
+                    - generic [ref=e844]:
+                      - text: 30/06/2017
+                      - generic [ref=e845]: ↓
+                      - text: 30/09/2017
+                    - generic [ref=e846]: +
+                  - generic [ref=e847] [cursor=pointer]:
+                    - generic [ref=e848]: Q4
+                    - generic [ref=e849]:
+                      - text: 30/09/2017
+                      - generic [ref=e850]: ↓
+                      - text: 31/12/2017
+                    - generic [ref=e851]: +
+              - generic [ref=e852]:
+                - generic [ref=e853]: "2018"
+                - generic [ref=e854]:
+                  - generic [ref=e855] [cursor=pointer]:
+                    - generic [ref=e857]: Q1
+                    - generic [ref=e858]:
+                      - text: 31/12/2017
+                      - generic [ref=e859]: ↓
+                      - text: 31/03/2018
+                    - generic [ref=e860]: +
+                  - generic [ref=e861] [cursor=pointer]:
+                    - generic [ref=e863]: Q2
+                    - generic [ref=e864]:
+                      - text: 31/03/2018
+                      - generic [ref=e865]: ↓
+                      - text: 30/06/2018
+                    - generic [ref=e866]: +
+                  - generic [ref=e867] [cursor=pointer]:
+                    - generic [ref=e869]: Q3
+                    - generic [ref=e870]:
+                      - text: 30/06/2018
+                      - generic [ref=e871]: ↓
+                      - text: 30/09/2018
+                    - generic [ref=e872]: +
+                  - generic [ref=e873] [cursor=pointer]:
+                    - generic [ref=e875]: Q4
+                    - generic [ref=e876]:
+                      - text: 30/09/2018
+                      - generic [ref=e877]: ↓
+                      - text: 31/12/2018
+                    - generic [ref=e878]: +
+                - generic [ref=e879]:
+                  - generic [ref=e880] [cursor=pointer]:
+                    - generic [ref=e882]: Q1
+                    - generic [ref=e883]:
+                      - text: 31/12/2017
+                      - generic [ref=e884]: ↓
+                      - text: 31/03/2018
+                    - generic [ref=e885]: +
+                  - generic [ref=e886] [cursor=pointer]:
+                    - generic [ref=e888]: Q2
+                    - generic [ref=e889]:
+                      - text: 31/03/2018
+                      - generic [ref=e890]: ↓
+                      - text: 30/06/2018
+                    - generic [ref=e891]: +
+                  - generic [ref=e892] [cursor=pointer]:
+                    - generic [ref=e894]: Q3
+                    - generic [ref=e895]:
+                      - text: 30/06/2018
+                      - generic [ref=e896]: ↓
+                      - text: 30/09/2018
+                    - generic [ref=e897]: +
+                  - generic [ref=e898] [cursor=pointer]:
+                    - generic [ref=e900]: Q4
+                    - generic [ref=e901]:
+                      - text: 30/09/2018
+                      - generic [ref=e902]: ↓
+                      - text: 31/12/2018
+                    - generic [ref=e903]: +
+                - generic [ref=e904]:
+                  - generic [ref=e905] [cursor=pointer]:
+                    - generic [ref=e906]: Q1
+                    - generic [ref=e907]:
+                      - text: 31/12/2017
+                      - generic [ref=e908]: ↓
+                      - text: 31/03/2018
+                    - generic [ref=e909]: +
+                  - generic [ref=e910] [cursor=pointer]:
+                    - generic [ref=e911]: Q2
+                    - generic [ref=e912]:
+                      - text: 31/03/2018
+                      - generic [ref=e913]: ↓
+                      - text: 30/06/2018
+                    - generic [ref=e914]: +
+                  - generic [ref=e915] [cursor=pointer]:
+                    - generic [ref=e916]: Q3
+                    - generic [ref=e917]:
+                      - text: 30/06/2018
+                      - generic [ref=e918]: ↓
+                      - text: 30/09/2018
+                    - generic [ref=e919]: +
+                  - generic [ref=e920] [cursor=pointer]:
+                    - generic [ref=e921]: Q4
+                    - generic [ref=e922]:
+                      - text: 30/09/2018
+                      - generic [ref=e923]: ↓
+                      - text: 31/12/2018
+                    - generic [ref=e924]: +
+              - generic [ref=e925]:
+                - generic [ref=e926]: "2019"
+                - generic [ref=e927]:
+                  - generic [ref=e928] [cursor=pointer]:
+                    - generic [ref=e930]: Q1
+                    - generic [ref=e931]:
+                      - text: 31/12/2018
+                      - generic [ref=e932]: ↓
+                      - text: 31/03/2019
+                    - generic [ref=e933]: +
+                  - generic [ref=e934] [cursor=pointer]:
+                    - generic [ref=e936]: Q2
+                    - generic [ref=e937]:
+                      - text: 31/03/2019
+                      - generic [ref=e938]: ↓
+                      - text: 30/06/2019
+                    - generic [ref=e939]: +
+                  - generic [ref=e940] [cursor=pointer]:
+                    - generic [ref=e941]:
+                      - generic [ref=e942]: Q3
+                      - generic "Portafoglio iniziale assente" [ref=e943]: ⚠️
+                    - generic [ref=e944]:
+                      - text: 01/07/2019
+                      - generic [ref=e945]: ↓
+                      - text: 30/09/2019
+                    - generic [ref=e946]:
+                      - generic [ref=e947]: €537.455,30
+                      - generic [ref=e948]:
+                        - button "🔍" [ref=e949]
+                        - button "🗑️" [ref=e950]
+                  - generic [ref=e951] [cursor=pointer]:
+                    - generic [ref=e952]:
+                      - generic [ref=e953]: Q4
+                      - generic "Portafoglio iniziale verificato" [ref=e954]: ✅
+                    - generic [ref=e955]:
+                      - text: 30/09/2019
+                      - generic [ref=e956]: ↓
+                      - text: 31/12/2019
+                    - generic [ref=e957]:
+                      - generic [ref=e958]: €549.345,51
+                      - generic [ref=e959]:
+                        - button "🔍" [ref=e960]
+                        - button "🗑️" [ref=e961]
+                - generic [ref=e962]:
+                  - generic [ref=e963] [cursor=pointer]:
+                    - generic [ref=e965]: Q1
+                    - generic [ref=e966]:
+                      - text: 31/12/2018
+                      - generic [ref=e967]: ↓
+                      - text: 31/03/2019
+                    - generic [ref=e968]: +
+                  - generic [ref=e969] [cursor=pointer]:
+                    - generic [ref=e971]: Q2
+                    - generic [ref=e972]:
+                      - text: 31/03/2019
+                      - generic [ref=e973]: ↓
+                      - text: 30/06/2019
+                    - generic [ref=e974]: +
+                  - generic [ref=e975] [cursor=pointer]:
+                    - generic [ref=e977]: Q3
+                    - generic [ref=e978]:
+                      - text: 30/06/2019
+                      - generic [ref=e979]: ↓
+                      - text: 30/09/2019
+                    - generic [ref=e980]: +
+                  - generic [ref=e981] [cursor=pointer]:
+                    - generic [ref=e983]: Q4
+                    - generic [ref=e984]:
+                      - text: 30/09/2019
+                      - generic [ref=e985]: ↓
+                      - text: 31/12/2019
+                    - generic [ref=e986]: +
+                - generic [ref=e987]:
+                  - generic [ref=e988] [cursor=pointer]:
+                    - generic [ref=e989]: Q1
+                    - generic [ref=e990]:
+                      - text: 31/12/2018
+                      - generic [ref=e991]: ↓
+                      - text: 31/03/2019
+                    - generic [ref=e992]: +
+                  - generic [ref=e993] [cursor=pointer]:
+                    - generic [ref=e994]: Q2
+                    - generic [ref=e995]:
+                      - text: 31/03/2019
+                      - generic [ref=e996]: ↓
+                      - text: 30/06/2019
+                    - generic [ref=e997]: +
+                  - generic [ref=e998] [cursor=pointer]:
+                    - generic [ref=e999]: Q3
+                    - generic [ref=e1000]:
+                      - text: 30/06/2019
+                      - generic [ref=e1001]: ↓
+                      - text: 30/09/2019
+                    - generic [ref=e1002]: +
+                  - generic [ref=e1003] [cursor=pointer]:
+                    - generic [ref=e1004]: Q4
+                    - generic [ref=e1005]:
+                      - text: 30/09/2019
+                      - generic [ref=e1006]: ↓
+                      - text: 31/12/2019
+                    - generic [ref=e1007]: +
+              - generic [ref=e1008]:
+                - generic [ref=e1009]: "2020"
+                - generic [ref=e1010]:
+                  - generic [ref=e1011] [cursor=pointer]:
+                    - generic [ref=e1012]:
+                      - generic [ref=e1013]: Q1
+                      - generic "Portafoglio iniziale verificato" [ref=e1014]: ✅
+                    - generic [ref=e1015]:
+                      - text: 01/01/2020
+                      - generic [ref=e1016]: ↓
+                      - text: 31/03/2020
+                    - generic [ref=e1017]:
+                      - generic [ref=e1018]: €501.665,15
+                      - generic [ref=e1019]:
+                        - button "🔍" [ref=e1020]
+                        - button "🗑️" [ref=e1021]
+                  - generic [ref=e1022] [cursor=pointer]:
+                    - generic [ref=e1024]: Q2
+                    - generic [ref=e1025]:
+                      - text: 31/03/2020
+                      - generic [ref=e1026]: ↓
+                      - text: 30/06/2020
+                    - generic [ref=e1027]: +
+                  - generic [ref=e1028] [cursor=pointer]:
+                    - generic [ref=e1030]: Q3
+                    - generic [ref=e1031]:
+                      - text: 30/06/2020
+                      - generic [ref=e1032]: ↓
+                      - text: 30/09/2020
+                    - generic [ref=e1033]: +
+                  - generic [ref=e1034] [cursor=pointer]:
+                    - generic [ref=e1036]: Q4
+                    - generic [ref=e1037]:
+                      - text: 30/09/2020
+                      - generic [ref=e1038]: ↓
+                      - text: 31/12/2020
+                    - generic [ref=e1039]: +
+                - generic [ref=e1040]:
+                  - generic [ref=e1041] [cursor=pointer]:
+                    - generic [ref=e1043]: Q1
+                    - generic [ref=e1044]:
+                      - text: 31/12/2019
+                      - generic [ref=e1045]: ↓
+                      - text: 31/03/2020
+                    - generic [ref=e1046]: +
+                  - generic [ref=e1047] [cursor=pointer]:
+                    - generic [ref=e1049]: Q2
+                    - generic [ref=e1050]:
+                      - text: 31/03/2020
+                      - generic [ref=e1051]: ↓
+                      - text: 30/06/2020
+                    - generic [ref=e1052]: +
+                  - generic [ref=e1053] [cursor=pointer]:
+                    - generic [ref=e1055]: Q3
+                    - generic [ref=e1056]:
+                      - text: 30/06/2020
+                      - generic [ref=e1057]: ↓
+                      - text: 30/09/2020
+                    - generic [ref=e1058]: +
+                  - generic [ref=e1059] [cursor=pointer]:
+                    - generic [ref=e1061]: Q4
+                    - generic [ref=e1062]:
+                      - text: 30/09/2020
+                      - generic [ref=e1063]: ↓
+                      - text: 31/12/2020
+                    - generic [ref=e1064]: +
+                - generic [ref=e1065]:
+                  - generic [ref=e1066] [cursor=pointer]:
+                    - generic [ref=e1067]: Q1
+                    - generic [ref=e1068]:
+                      - text: 31/12/2019
+                      - generic [ref=e1069]: ↓
+                      - text: 31/03/2020
+                    - generic [ref=e1070]: +
+                  - generic [ref=e1071] [cursor=pointer]:
+                    - generic [ref=e1072]: Q2
+                    - generic [ref=e1073]:
+                      - text: 31/03/2020
+                      - generic [ref=e1074]: ↓
+                      - text: 30/06/2020
+                    - generic [ref=e1075]: +
+                  - generic [ref=e1076] [cursor=pointer]:
+                    - generic [ref=e1077]: Q3
+                    - generic [ref=e1078]:
+                      - text: 30/06/2020
+                      - generic [ref=e1079]: ↓
+                      - text: 30/09/2020
+                    - generic [ref=e1080]: +
+                  - generic [ref=e1081] [cursor=pointer]:
+                    - generic [ref=e1082]: Q4
+                    - generic [ref=e1083]:
+                      - text: 30/09/2020
+                      - generic [ref=e1084]: ↓
+                      - text: 31/12/2020
+                    - generic [ref=e1085]: +
+              - generic [ref=e1086]:
+                - generic [ref=e1087]: "2021"
+                - generic [ref=e1088]:
+                  - generic [ref=e1089] [cursor=pointer]:
+                    - generic [ref=e1091]: Q1
+                    - generic [ref=e1092]:
+                      - text: 31/12/2020
+                      - generic [ref=e1093]: ↓
+                      - text: 31/03/2021
+                    - generic [ref=e1094]: +
+                  - generic [ref=e1095] [cursor=pointer]:
+                    - generic [ref=e1096]:
+                      - generic [ref=e1097]: Q2
+                      - generic "Portafoglio iniziale assente" [ref=e1098]: ⚠️
+                    - generic [ref=e1099]:
+                      - text: 01/04/2021
+                      - generic [ref=e1100]: ↓
+                      - text: 30/06/2021
+                    - generic [ref=e1101]:
+                      - generic [ref=e1102]: €614.237,81
+                      - generic [ref=e1103]:
+                        - button "🔍" [ref=e1104]
+                        - button "🗑️" [ref=e1105]
+                  - generic [ref=e1106] [cursor=pointer]:
+                    - generic [ref=e1107]:
+                      - generic [ref=e1108]: Q3
+                      - generic "Portafoglio iniziale non quadra" [ref=e1109]: ❌
+                    - generic [ref=e1110]:
+                      - text: 30/06/2021
+                      - generic [ref=e1111]: ↓
+                      - text: 30/09/2021
+                    - generic [ref=e1112]:
+                      - generic [ref=e1113]: €727.689,15
+                      - generic [ref=e1114]:
+                        - button "🔍" [ref=e1115]
+                        - button "🗑️" [ref=e1116]
+                  - generic [ref=e1117] [cursor=pointer]:
+                    - generic [ref=e1118]:
+                      - generic [ref=e1119]: Q4
+                      - generic "Portafoglio iniziale verificato" [ref=e1120]: ✅
+                    - generic [ref=e1121]:
+                      - text: 30/09/2021
+                      - generic [ref=e1122]: ↓
+                      - text: 31/12/2021
+                    - generic [ref=e1123]:
+                      - generic [ref=e1124]: €739.152,11
+                      - generic [ref=e1125]:
+                        - button "🔍" [ref=e1126]
+                        - button "🗑️" [ref=e1127]
+                - generic [ref=e1128]:
+                  - generic [ref=e1129] [cursor=pointer]:
+                    - generic [ref=e1131]: Q1
+                    - generic [ref=e1132]:
+                      - text: 31/12/2020
+                      - generic [ref=e1133]: ↓
+                      - text: 31/03/2021
+                    - generic [ref=e1134]: +
+                  - generic [ref=e1135] [cursor=pointer]:
+                    - generic [ref=e1137]: Q2
+                    - generic [ref=e1138]:
+                      - text: 31/03/2021
+                      - generic [ref=e1139]: ↓
+                      - text: 30/06/2021
+                    - generic [ref=e1140]: +
+                  - generic [ref=e1141] [cursor=pointer]:
+                    - generic [ref=e1143]: Q3
+                    - generic [ref=e1144]:
+                      - text: 30/06/2021
+                      - generic [ref=e1145]: ↓
+                      - text: 30/09/2021
+                    - generic [ref=e1146]: +
+                  - generic [ref=e1147] [cursor=pointer]:
+                    - generic [ref=e1149]: Q4
+                    - generic [ref=e1150]:
+                      - text: 30/09/2021
+                      - generic [ref=e1151]: ↓
+                      - text: 31/12/2021
+                    - generic [ref=e1152]: +
+                - generic [ref=e1153]:
+                  - generic [ref=e1154] [cursor=pointer]:
+                    - generic [ref=e1155]: Q1
+                    - generic [ref=e1156]:
+                      - text: 31/12/2020
+                      - generic [ref=e1157]: ↓
+                      - text: 31/03/2021
+                    - generic [ref=e1158]: +
+                  - generic [ref=e1159] [cursor=pointer]:
+                    - generic [ref=e1160]: Q2
+                    - generic [ref=e1161]:
+                      - text: 31/03/2021
+                      - generic [ref=e1162]: ↓
+                      - text: 30/06/2021
+                    - generic [ref=e1163]: +
+                  - generic [ref=e1164] [cursor=pointer]:
+                    - generic [ref=e1165]: Q3
+                    - generic [ref=e1166]:
+                      - text: 30/06/2021
+                      - generic [ref=e1167]: ↓
+                      - text: 30/09/2021
+                    - generic [ref=e1168]: +
+                  - generic [ref=e1169] [cursor=pointer]:
+                    - generic [ref=e1170]: Q4
+                    - generic [ref=e1171]:
+                      - text: 30/09/2021
+                      - generic [ref=e1172]: ↓
+                      - text: 31/12/2021
+                    - generic [ref=e1173]: +
+              - generic [ref=e1174]:
+                - generic [ref=e1175]: "2022"
+                - generic [ref=e1176]:
+                  - generic [ref=e1177] [cursor=pointer]:
+                    - generic [ref=e1178]:
+                      - generic [ref=e1179]: Q1
+                      - generic "Portafoglio iniziale non quadra" [ref=e1180]: ❌
+                    - generic [ref=e1181]:
+                      - text: 01/01/2022
+                      - generic [ref=e1182]: ↓
+                      - text: 31/03/2022
+                    - generic [ref=e1183]:
+                      - generic [ref=e1184]: €607.626,21
+                      - generic [ref=e1185]:
+                        - button "🔍" [ref=e1186]
+                        - button "🗑️" [ref=e1187]
+                  - generic [ref=e1188] [cursor=pointer]:
+                    - generic [ref=e1189]:
+                      - generic [ref=e1190]: Q2
+                      - generic "Portafoglio iniziale non quadra" [ref=e1191]: ❌
+                    - generic [ref=e1192]:
+                      - text: 31/03/2022
+                      - generic [ref=e1193]: ↓
+                      - text: 30/06/2022
+                    - generic [ref=e1194]:
+                      - generic [ref=e1195]: €696.233,35
+                      - generic [ref=e1196]:
+                        - button "🔍" [ref=e1197]
+                        - button "🗑️" [ref=e1198]
+                  - generic [ref=e1199] [cursor=pointer]:
+                    - generic [ref=e1201]: Q3
+                    - generic [ref=e1202]:
+                      - text: 30/06/2022
+                      - generic [ref=e1203]: ↓
+                      - text: 30/09/2022
+                    - generic [ref=e1204]: +
+                  - generic [ref=e1205] [cursor=pointer]:
+                    - generic [ref=e1206]:
+                      - generic [ref=e1207]: Q4
+                      - generic "Portafoglio iniziale assente" [ref=e1208]: ⚠️
+                    - generic [ref=e1209]:
+                      - text: 30/06/2022
+                      - generic [ref=e1210]: ↓
+                      - text: 31/12/2022
+                    - generic [ref=e1211]:
+                      - generic [ref=e1212]: €661.498,38
+                      - generic [ref=e1213]:
+                        - button "🔍" [ref=e1214]
+                        - button "🗑️" [ref=e1215]
+                - generic [ref=e1216]:
+                  - generic [ref=e1217] [cursor=pointer]:
+                    - generic [ref=e1219]: Q1
+                    - generic [ref=e1220]:
+                      - text: 31/12/2021
+                      - generic [ref=e1221]: ↓
+                      - text: 31/03/2022
+                    - generic [ref=e1222]: +
+                  - generic [ref=e1223] [cursor=pointer]:
+                    - generic [ref=e1225]: Q2
+                    - generic [ref=e1226]:
+                      - text: 31/03/2022
+                      - generic [ref=e1227]: ↓
+                      - text: 30/06/2022
+                    - generic [ref=e1228]: +
+                  - generic [ref=e1229] [cursor=pointer]:
+                    - generic [ref=e1231]: Q3
+                    - generic [ref=e1232]:
+                      - text: 30/06/2022
+                      - generic [ref=e1233]: ↓
+                      - text: 30/09/2022
+                    - generic [ref=e1234]: +
+                  - generic [ref=e1235] [cursor=pointer]:
+                    - generic [ref=e1237]: Q4
+                    - generic [ref=e1238]:
+                      - text: 30/09/2022
+                      - generic [ref=e1239]: ↓
+                      - text: 31/12/2022
+                    - generic [ref=e1240]: +
+                - generic [ref=e1241]:
+                  - generic [ref=e1242] [cursor=pointer]:
+                    - generic [ref=e1243]: Q1
+                    - generic [ref=e1244]:
+                      - text: 31/12/2021
+                      - generic [ref=e1245]: ↓
+                      - text: 31/03/2022
+                    - generic [ref=e1246]: +
+                  - generic [ref=e1247] [cursor=pointer]:
+                    - generic [ref=e1248]: Q2
+                    - generic [ref=e1249]:
+                      - text: 31/03/2022
+                      - generic [ref=e1250]: ↓
+                      - text: 30/06/2022
+                    - generic [ref=e1251]: +
+                  - generic [ref=e1252] [cursor=pointer]:
+                    - generic [ref=e1253]: Q3
+                    - generic [ref=e1254]:
+                      - text: 30/06/2022
+                      - generic [ref=e1255]: ↓
+                      - text: 30/09/2022
+                    - generic [ref=e1256]: +
+                  - generic [ref=e1257] [cursor=pointer]:
+                    - generic [ref=e1258]: Q4
+                    - generic [ref=e1259]:
+                      - text: 30/09/2022
+                      - generic [ref=e1260]: ↓
+                      - text: 31/12/2022
+                    - generic [ref=e1261]: +
+              - generic [ref=e1262]:
+                - generic [ref=e1263]: "2023"
+                - generic [ref=e1264]:
+                  - generic [ref=e1265] [cursor=pointer]:
+                    - generic [ref=e1266]:
+                      - generic [ref=e1267]: Q1
+                      - generic "Portafoglio iniziale non quadra" [ref=e1268]: ❌
+                    - generic [ref=e1269]:
+                      - text: 01/01/2023
+                      - generic [ref=e1270]: ↓
+                      - text: 31/03/2023
+                    - generic [ref=e1271]:
+                      - generic [ref=e1272]: €716.840,89
+                      - generic [ref=e1273]:
+                        - button "🔍" [ref=e1274]
+                        - button "🗑️" [ref=e1275]
+                  - generic [ref=e1276] [cursor=pointer]:
+                    - generic [ref=e1277]:
+                      - generic [ref=e1278]: Q2
+                      - generic "Portafoglio iniziale verificato" [ref=e1279]: ✅
+                    - generic [ref=e1280]:
+                      - text: 31/03/2023
+                      - generic [ref=e1281]: ↓
+                      - text: 30/06/2023
+                    - generic [ref=e1282]:
+                      - generic [ref=e1283]: €756.003,37
+                      - generic [ref=e1284]:
+                        - button "🔍" [ref=e1285]
+                        - button "🗑️" [ref=e1286]
+                  - generic [ref=e1287] [cursor=pointer]:
+                    - generic [ref=e1288]:
+                      - generic [ref=e1289]: Q3
+                      - generic "Portafoglio iniziale verificato" [ref=e1290]: ✅
+                    - generic [ref=e1291]:
+                      - text: 30/06/2023
+                      - generic [ref=e1292]: ↓
+                      - text: 30/09/2023
+                    - generic [ref=e1293]:
+                      - generic [ref=e1294]: €744.973,51
+                      - generic [ref=e1295]:
+                        - button "🔍" [ref=e1296]
+                        - button "🗑️" [ref=e1297]
+                  - generic [ref=e1298] [cursor=pointer]:
+                    - generic [ref=e1300]: Q4
+                    - generic [ref=e1301]:
+                      - text: 30/09/2023
+                      - generic [ref=e1302]: ↓
+                      - text: 31/12/2023
+                    - generic [ref=e1303]: +
+                - generic [ref=e1304]:
+                  - generic [ref=e1305] [cursor=pointer]:
+                    - generic [ref=e1307]: Q1
+                    - generic [ref=e1308]:
+                      - text: 31/12/2022
+                      - generic [ref=e1309]: ↓
+                      - text: 31/03/2023
+                    - generic [ref=e1310]: +
+                  - generic [ref=e1311] [cursor=pointer]:
+                    - generic [ref=e1313]: Q2
+                    - generic [ref=e1314]:
+                      - text: 31/03/2023
+                      - generic [ref=e1315]: ↓
+                      - text: 30/06/2023
+                    - generic [ref=e1316]: +
+                  - generic [ref=e1317] [cursor=pointer]:
+                    - generic [ref=e1319]: Q3
+                    - generic [ref=e1320]:
+                      - text: 30/06/2023
+                      - generic [ref=e1321]: ↓
+                      - text: 30/09/2023
+                    - generic [ref=e1322]: +
+                  - generic [ref=e1323] [cursor=pointer]:
+                    - generic [ref=e1325]: Q4
+                    - generic [ref=e1326]:
+                      - text: 30/09/2023
+                      - generic [ref=e1327]: ↓
+                      - text: 31/12/2023
+                    - generic [ref=e1328]: +
+                - generic [ref=e1329]:
+                  - generic [ref=e1330] [cursor=pointer]:
+                    - generic [ref=e1331]: Q1
+                    - generic [ref=e1332]:
+                      - text: 31/12/2022
+                      - generic [ref=e1333]: ↓
+                      - text: 31/03/2023
+                    - generic [ref=e1334]: +
+                  - generic [ref=e1335] [cursor=pointer]:
+                    - generic [ref=e1336]: Q2
+                    - generic [ref=e1337]:
+                      - text: 31/03/2023
+                      - generic [ref=e1338]: ↓
+                      - text: 30/06/2023
+                    - generic [ref=e1339]: +
+                  - generic [ref=e1340] [cursor=pointer]:
+                    - generic [ref=e1341]: Q3
+                    - generic [ref=e1342]:
+                      - text: 30/06/2023
+                      - generic [ref=e1343]: ↓
+                      - text: 30/09/2023
+                    - generic [ref=e1344]: +
+                  - generic [ref=e1345] [cursor=pointer]:
+                    - generic [ref=e1346]: Q4
+                    - generic [ref=e1347]:
+                      - text: 30/09/2023
+                      - generic [ref=e1348]: ↓
+                      - text: 31/12/2023
+                    - generic [ref=e1349]: +
+              - generic [ref=e1350]:
+                - generic [ref=e1351]: "2024"
+                - generic [ref=e1352]:
+                  - generic [ref=e1353] [cursor=pointer]:
+                    - generic [ref=e1355]: Q1
+                    - generic [ref=e1356]:
+                      - text: 31/12/2023
+                      - generic [ref=e1357]: ↓
+                      - text: 31/03/2024
+                    - generic [ref=e1358]: +
+                  - generic [ref=e1359] [cursor=pointer]:
+                    - generic [ref=e1361]: Q2
+                    - generic [ref=e1362]:
+                      - text: 31/03/2024
+                      - generic [ref=e1363]: ↓
+                      - text: 30/06/2024
+                    - generic [ref=e1364]: +
+                  - generic [ref=e1365] [cursor=pointer]:
+                    - generic [ref=e1367]: Q3
+                    - generic [ref=e1368]:
+                      - text: 30/06/2024
+                      - generic [ref=e1369]: ↓
+                      - text: 30/09/2024
+                    - generic [ref=e1370]: +
+                  - generic [ref=e1371] [cursor=pointer]:
+                    - generic [ref=e1373]: Q4
+                    - generic [ref=e1374]:
+                      - text: 30/09/2024
+                      - generic [ref=e1375]: ↓
+                      - text: 31/12/2024
+                    - generic [ref=e1376]: +
+                - generic [ref=e1377]:
+                  - generic [ref=e1378] [cursor=pointer]:
+                    - generic [ref=e1380]: Q1
+                    - generic [ref=e1381]:
+                      - text: 31/12/2023
+                      - generic [ref=e1382]: ↓
+                      - text: 31/03/2024
+                    - generic [ref=e1383]: +
+                  - generic [ref=e1384] [cursor=pointer]:
+                    - generic [ref=e1386]: APR
+                    - generic [ref=e1387]:
+                      - text: 31/03/2024
+                      - generic [ref=e1388]: ↓
+                      - text: 30/04/2024
+                    - generic [ref=e1389]: +
+                  - generic [ref=e1390] [cursor=pointer]:
+                    - generic [ref=e1391]:
+                      - generic [ref=e1392]: MAG
+                      - generic "Portafoglio iniziale assente" [ref=e1393]: ⚠️
+                    - generic [ref=e1394]:
+                      - text: 01/05/2024
+                      - generic [ref=e1395]: ↓
+                      - text: 31/05/2024
+                    - generic [ref=e1396]:
+                      - generic [ref=e1397]: €629.172,94
+                      - generic [ref=e1398]:
+                        - button "🔍" [ref=e1399]
+                        - button "🗑️" [ref=e1400]
+                  - generic [ref=e1401] [cursor=pointer]:
+                    - generic [ref=e1403]: GIU
+                    - generic [ref=e1404]:
+                      - text: 31/05/2024
+                      - generic [ref=e1405]: ↓
+                      - text: 30/06/2024
+                    - generic [ref=e1406]: +
+                  - generic [ref=e1407] [cursor=pointer]:
+                    - generic [ref=e1409]: LUG
+                    - generic [ref=e1410]:
+                      - text: 30/06/2024
+                      - generic [ref=e1411]: ↓
+                      - text: 31/07/2024
+                    - generic [ref=e1412]: +
+                  - generic [ref=e1413] [cursor=pointer]:
+                    - generic [ref=e1415]: AGO
+                    - generic [ref=e1416]:
+                      - text: 31/07/2024
+                      - generic [ref=e1417]: ↓
+                      - text: 31/08/2024
+                    - generic [ref=e1418]: +
+                  - generic [ref=e1419] [cursor=pointer]:
+                    - generic [ref=e1421]: SET
+                    - generic [ref=e1422]:
+                      - text: 31/08/2024
+                      - generic [ref=e1423]: ↓
+                      - text: 30/09/2024
+                    - generic [ref=e1424]: +
+                  - generic [ref=e1425] [cursor=pointer]:
+                    - generic [ref=e1427]: OTT
+                    - generic [ref=e1428]:
+                      - text: 30/09/2024
+                      - generic [ref=e1429]: ↓
+                      - text: 31/10/2024
+                    - generic [ref=e1430]: +
+                  - generic [ref=e1431] [cursor=pointer]:
+                    - generic [ref=e1433]: NOV
+                    - generic [ref=e1434]:
+                      - text: 31/10/2024
+                      - generic [ref=e1435]: ↓
+                      - text: 30/11/2024
+                    - generic [ref=e1436]: +
+                  - generic [ref=e1437] [cursor=pointer]:
+                    - generic [ref=e1439]: DIC
+                    - generic [ref=e1440]:
+                      - text: 30/11/2024
+                      - generic [ref=e1441]: ↓
+                      - text: 31/12/2024
+                    - generic [ref=e1442]: +
+                - generic [ref=e1443]:
+                  - generic [ref=e1444] [cursor=pointer]:
+                    - generic [ref=e1445]: Q1
+                    - generic [ref=e1446]:
+                      - text: 31/12/2023
+                      - generic [ref=e1447]: ↓
+                      - text: 31/03/2024
+                    - generic [ref=e1448]: +
+                  - generic [ref=e1449] [cursor=pointer]:
+                    - generic [ref=e1450]: Q2
+                    - generic [ref=e1451]:
+                      - text: 31/03/2024
+                      - generic [ref=e1452]: ↓
+                      - text: 30/06/2024
+                    - generic [ref=e1453]: +
+                  - generic [ref=e1454] [cursor=pointer]:
+                    - generic [ref=e1455]: Q3
+                    - generic [ref=e1456]:
+                      - text: 30/06/2024
+                      - generic [ref=e1457]: ↓
+                      - text: 30/09/2024
+                    - generic [ref=e1458]: +
+                  - generic [ref=e1459] [cursor=pointer]:
+                    - generic [ref=e1460]: Q4
+                    - generic [ref=e1461]:
+                      - text: 30/09/2024
+                      - generic [ref=e1462]: ↓
+                      - text: 31/12/2024
+                    - generic [ref=e1463]: +
+              - generic [ref=e1464]:
+                - generic [ref=e1465]: "2025"
+                - generic [ref=e1466]:
+                  - generic [ref=e1467] [cursor=pointer]:
+                    - generic [ref=e1469]: Q1
+                    - generic [ref=e1470]:
+                      - text: 31/12/2024
+                      - generic [ref=e1471]: ↓
+                      - text: 31/03/2025
+                    - generic [ref=e1472]: +
+                  - generic [ref=e1473] [cursor=pointer]:
+                    - generic [ref=e1474]:
+                      - generic [ref=e1475]: APR
+                      - generic "Portafoglio iniziale assente" [ref=e1476]: ⚠️
+                    - generic [ref=e1477]:
+                      - text: 01/04/2025
+                      - generic [ref=e1478]: ↓
+                      - text: 30/04/2025
+                    - generic [ref=e1479]:
+                      - generic [ref=e1480]: €616.271,58
+                      - generic [ref=e1481]:
+                        - button "🔍" [ref=e1482]
+                        - button "🗑️" [ref=e1483]
+                  - generic [ref=e1484] [cursor=pointer]:
+                    - generic [ref=e1485]:
+                      - generic [ref=e1486]: MAG
+                      - generic "Portafoglio iniziale verificato" [ref=e1487]: ✅
+                    - generic [ref=e1488]:
+                      - text: 30/04/2025
+                      - generic [ref=e1489]: ↓
+                      - text: 31/05/2025
+                    - generic [ref=e1490]:
+                      - generic [ref=e1491]: €635.530,80
+                      - generic [ref=e1492]:
+                        - button "🔍" [ref=e1493]
+                        - button "🗑️" [ref=e1494]
+                  - generic [ref=e1495] [cursor=pointer]:
+                    - generic [ref=e1496]:
+                      - generic [ref=e1497]: GIU
+                      - generic "Portafoglio iniziale verificato" [ref=e1498]: ✅
+                    - generic [ref=e1499]:
+                      - text: 31/05/2025
+                      - generic [ref=e1500]: ↓
+                      - text: 30/06/2025
+                    - generic [ref=e1501]:
+                      - generic [ref=e1502]: €666.850,95
+                      - generic [ref=e1503]:
+                        - button "🔍" [ref=e1504]
+                        - button "🗑️" [ref=e1505]
+                  - generic [ref=e1506] [cursor=pointer]:
+                    - generic [ref=e1508]: LUG
+                    - generic [ref=e1509]:
+                      - text: 30/06/2025
+                      - generic [ref=e1510]: ↓
+                      - text: 31/07/2025
+                    - generic [ref=e1511]: +
+                  - generic [ref=e1512] [cursor=pointer]:
+                    - generic [ref=e1514]: AGO
+                    - generic [ref=e1515]:
+                      - text: 31/07/2025
+                      - generic [ref=e1516]: ↓
+                      - text: 31/08/2025
+                    - generic [ref=e1517]: +
+                  - generic [ref=e1518] [cursor=pointer]:
+                    - generic [ref=e1520]: SET
+                    - generic [ref=e1521]:
+                      - text: 31/08/2025
+                      - generic [ref=e1522]: ↓
+                      - text: 30/09/2025
+                    - generic [ref=e1523]: +
+                  - generic [ref=e1524] [cursor=pointer]:
+                    - generic [ref=e1526]: OTT
+                    - generic [ref=e1527]:
+                      - text: 30/09/2025
+                      - generic [ref=e1528]: ↓
+                      - text: 31/10/2025
+                    - generic [ref=e1529]: +
+                  - generic [ref=e1530] [cursor=pointer]:
+                    - generic [ref=e1532]: NOV
+                    - generic [ref=e1533]:
+                      - text: 31/10/2025
+                      - generic [ref=e1534]: ↓
+                      - text: 30/11/2025
+                    - generic [ref=e1535]: +
+                  - generic [ref=e1536] [cursor=pointer]:
+                    - generic [ref=e1538]: DIC
+                    - generic [ref=e1539]:
+                      - text: 30/11/2025
+                      - generic [ref=e1540]: ↓
+                      - text: 31/12/2025
+                    - generic [ref=e1541]: +
+                - generic [ref=e1542]:
+                  - generic [ref=e1543] [cursor=pointer]:
+                    - generic [ref=e1545]: Q1
+                    - generic [ref=e1546]:
+                      - text: 31/12/2024
+                      - generic [ref=e1547]: ↓
+                      - text: 31/03/2025
+                    - generic [ref=e1548]: +
+                  - generic [ref=e1549] [cursor=pointer]:
+                    - generic [ref=e1551]: Q2
+                    - generic [ref=e1552]:
+                      - text: 31/03/2025
+                      - generic [ref=e1553]: ↓
+                      - text: 30/06/2025
+                    - generic [ref=e1554]: +
+                  - generic [ref=e1555] [cursor=pointer]:
+                    - generic [ref=e1557]: Q3
+                    - generic [ref=e1558]:
+                      - text: 30/06/2025
+                      - generic [ref=e1559]: ↓
+                      - text: 30/09/2025
+                    - generic [ref=e1560]: +
+                  - generic [ref=e1561] [cursor=pointer]:
+                    - generic [ref=e1563]: Q4
+                    - generic [ref=e1564]:
+                      - text: 30/09/2025
+                      - generic [ref=e1565]: ↓
+                      - text: 31/12/2025
+                    - generic [ref=e1566]: +
+                - generic [ref=e1567]:
+                  - generic [ref=e1568] [cursor=pointer]:
+                    - generic [ref=e1569]: Q1
+                    - generic [ref=e1570]:
+                      - text: 31/12/2024
+                      - generic [ref=e1571]: ↓
+                      - text: 31/03/2025
+                    - generic [ref=e1572]: +
+                  - generic [ref=e1573] [cursor=pointer]:
+                    - generic [ref=e1574]: Q2
+                    - generic [ref=e1575]:
+                      - text: 31/03/2025
+                      - generic [ref=e1576]: ↓
+                      - text: 30/06/2025
+                    - generic [ref=e1577]: +
+                  - generic [ref=e1578] [cursor=pointer]:
+                    - generic [ref=e1579]: Q3
+                    - generic [ref=e1580]:
+                      - text: 30/06/2025
+                      - generic [ref=e1581]: ↓
+                      - text: 30/09/2025
+                    - generic [ref=e1582]: +
+                  - generic [ref=e1583] [cursor=pointer]:
+                    - generic [ref=e1584]: Q4
+                    - generic [ref=e1585]:
+                      - text: 30/09/2025
+                      - generic [ref=e1586]: ↓
+                      - text: 31/12/2025
+                    - generic [ref=e1587]: +
+              - generic [ref=e1588]:
+                - generic [ref=e1589]: "2026"
+                - generic [ref=e1590]:
+                  - generic [ref=e1591] [cursor=pointer]:
+                    - generic [ref=e1593]: Q1
+                    - generic [ref=e1594]:
+                      - text: 31/12/2025
+                      - generic [ref=e1595]: ↓
+                      - text: 31/03/2026
+                    - generic [ref=e1596]: +
+                  - generic [ref=e1597] [cursor=pointer]:
+                    - generic [ref=e1599]: Q2
+                    - generic [ref=e1600]:
+                      - text: 31/03/2026
+                      - generic [ref=e1601]: ↓
+                      - text: 30/06/2026
+                    - generic [ref=e1602]: +
+                  - generic [ref=e1603] [cursor=pointer]:
+                    - generic [ref=e1605]: Q3
+                    - generic [ref=e1606]:
+                      - text: 30/06/2026
+                      - generic [ref=e1607]: ↓
+                      - text: 30/09/2026
+                    - generic [ref=e1608]: +
+                  - generic [ref=e1609] [cursor=pointer]:
+                    - generic [ref=e1611]: Q4
+                    - generic [ref=e1612]:
+                      - text: 30/09/2026
+                      - generic [ref=e1613]: ↓
+                      - text: 31/12/2026
+                    - generic [ref=e1614]: +
+                - generic [ref=e1615]:
+                  - generic [ref=e1616] [cursor=pointer]:
+                    - generic [ref=e1618]: Q1
+                    - generic [ref=e1619]:
+                      - text: 31/12/2025
+                      - generic [ref=e1620]: ↓
+                      - text: 31/03/2026
+                    - generic [ref=e1621]: +
+                  - generic [ref=e1622] [cursor=pointer]:
+                    - generic [ref=e1624]: Q2
+                    - generic [ref=e1625]:
+                      - text: 31/03/2026
+                      - generic [ref=e1626]: ↓
+                      - text: 30/06/2026
+                    - generic [ref=e1627]: +
+                  - generic [ref=e1628] [cursor=pointer]:
+                    - generic [ref=e1630]: Q3
+                    - generic [ref=e1631]:
+                      - text: 30/06/2026
+                      - generic [ref=e1632]: ↓
+                      - text: 30/09/2026
+                    - generic [ref=e1633]: +
+                  - generic [ref=e1634] [cursor=pointer]:
+                    - generic [ref=e1636]: Q4
+                    - generic [ref=e1637]:
+                      - text: 30/09/2026
+                      - generic [ref=e1638]: ↓
+                      - text: 31/12/2026
+                    - generic [ref=e1639]: +
+                - generic [ref=e1640]:
+                  - generic [ref=e1641] [cursor=pointer]:
+                    - generic [ref=e1642]: Q1
+                    - generic [ref=e1643]:
+                      - text: 31/12/2025
+                      - generic [ref=e1644]: ↓
+                      - text: 31/03/2026
+                    - generic [ref=e1645]: +
+                  - generic [ref=e1646] [cursor=pointer]:
+                    - generic [ref=e1647]: Q2
+                    - generic [ref=e1648]:
+                      - text: 31/03/2026
+                      - generic [ref=e1649]: ↓
+                      - text: 30/06/2026
+                    - generic [ref=e1650]: +
+                  - generic [ref=e1651] [cursor=pointer]:
+                    - generic [ref=e1652]: Q3
+                    - generic [ref=e1653]:
+                      - text: 30/06/2026
+                      - generic [ref=e1654]: ↓
+                      - text: 30/09/2026
+                    - generic [ref=e1655]: +
+                  - generic [ref=e1656] [cursor=pointer]:
+                    - generic [ref=e1657]: Q4
+                    - generic [ref=e1658]:
+                      - text: 30/09/2026
+                      - generic [ref=e1659]: ↓
+                      - text: 31/12/2026
+                    - generic [ref=e1660]: +
+  - contentinfo [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - generic [ref=e9]:
+            - generic [ref=e11]: 📊
+            - generic [ref=e12]: iMieiInvestimenti.it
+          - paragraph [ref=e13]:
+            - text: Analisi indipendente dei tuoi investimenti.
+            - text: Trasparenza. Chiarezza. Controllo.
+        - generic [ref=e14]:
+          - heading "Informazioni" [level=4] [ref=e15]
+          - list [ref=e16]:
+            - listitem [ref=e17]:
+              - link "Come Funziona" [ref=e18] [cursor=pointer]:
+                - /url: /come-funziona
+            - listitem [ref=e19]:
+              - link "Commissioni di Sistema" [ref=e20] [cursor=pointer]:
+                - /url: /commissioni
+            - listitem [ref=e21]:
+              - link "Rendimenti di Mercato" [ref=e22] [cursor=pointer]:
+                - /url: /rendimenti
+            - listitem [ref=e23]:
+              - link "Attenzione ai Reati" [ref=e24] [cursor=pointer]:
+                - /url: /reati
+        - generic [ref=e25]:
+          - heading "Legale" [level=4] [ref=e26]
+          - list [ref=e27]:
+            - listitem [ref=e28]:
+              - link "Privacy Policy" [ref=e29] [cursor=pointer]:
+                - /url: /privacy
+            - listitem [ref=e30]:
+              - link "Termini e Condizioni" [ref=e31] [cursor=pointer]:
+                - /url: /termini
+            - listitem [ref=e32]:
+              - link "Cookie Policy" [ref=e33] [cursor=pointer]:
+                - /url: /cookie
+        - generic [ref=e34]:
+          - heading "Contatti" [level=4] [ref=e35]
+          - list [ref=e36]:
+            - listitem [ref=e37]: 📧 info@imieiinvestimenti.it
+            - listitem [ref=e38]: 📞 +39 02 1234 5678
+      - paragraph [ref=e40]: © 2026 iMieiInvestimenti.it - Tutti i diritti riservati
+  - button "Open Next.js Dev Tools" [ref=e46] [cursor=pointer]:
+    - img [ref=e47]
+  - alert [ref=e1661]

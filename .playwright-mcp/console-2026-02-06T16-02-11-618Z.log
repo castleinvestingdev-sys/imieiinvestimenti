@@ -1,0 +1,177 @@
+[  489026ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1933:1]
+ 1930 |                           )
+ 1931 |                         })}
+ 1932 |                       </div>
+ 1933 |                     ))}
+      :                      ^
+ 1934 |                   </div>
+ 1935 |                 </div>
+ 1935 |               </div>
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/dashboard/page.tsx @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/next-devtools/userspace/app/errors/intercept-console-error.js:51
+[  489374ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1933:1]
+ 1930 |                           )
+ 1931 |                         })}
+ 1932 |                       </div>
+ 1933 |                     ))}
+      :                      ^
+ 1934 |                   </div>
+ 1935 |                 </div>
+ 1935 |               </div>
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/dashboard/page.tsx @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/next-devtools/userspace/app/errors/intercept-console-error.js:51
+[  490735ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1933:1]
+ 1930 |                           )
+ 1931 |                         })}
+ 1932 |                       </div>
+ 1933 |                     ))}
+      :                      ^
+ 1934 |                   </div>
+ 1935 |                 </div>
+ 1935 |               </div>
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/dashboard/page.tsx @ webpack-internal:///(app-pages-browser)/./node_modules/next/dist/next-devtools/userspace/app/errors/intercept-console-error.js:51
+[  490994ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/dashboard?cliente=FRIGERI%20MARIA%20CRISTINA&_rsc=1fe9k:0
+[  491087ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/dashboard?cliente=FRIGERI+MARIA+CRISTINA:0
+[  491734ms] ModuleBuildError: Module build failed (from ./node_modules/next/dist/build/webpack/loaders/next-swc-loader.js):
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1933:1]
+ 1930 |                           )
+ 1931 |                         })}
+ 1932 |                       </div>
+ 1933 |                     ))}
+      :                      ^
+ 1934 |                   </div>
+ 1935 |                 </div>
+ 1935 |               </div>
+      `----
+
+
+Caused by:
+    Syntax Error
+    at processResult (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\webpack\bundle5.js:29:407096)
+    at <unknown> (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\webpack\bundle5.js:29:408891)
+    at <unknown> (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\loader-runner\LoaderRunner.js:1:8645)
+    at <unknown> (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\loader-runner\LoaderRunner.js:1:5019)
+    at r.callback (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\loader-runner\LoaderRunner.js:1:4039)
+[  491741ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1933:1]
+ 1930 |                           )
+ 1931 |                         })}
+ 1932 |                       </div>
+ 1933 |                     ))}
+      :                      ^
+ 1934 |                   </div>
+ 1935 |                 </div>
+ 1935 |               </div>
+      `----
+
+Caused by:
+    Syntax Error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/userspace/pages/pages-dev-overlay-setup.js:70
+[  499962ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/_next/static/webpack/abf0f472b70bdd0f.webpack.hot-update.json:0
+[  499962ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/shared/forward-logs-shared.js:27
+[  500243ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1932:1]
+ 1929 |                           )
+ 1930 |                         })}
+ 1931 |                       </div>
+ 1932 |                     ))}
+      :                      ^
+ 1933 |                   </div>
+ 1934 |                 </div>
+ 1934 |               </div>
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/dashboard/page.tsx @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/userspace/pages/pages-dev-overlay-setup.js:70
+[  500307ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/_next/static/webpack/abf0f472b70bdd0f.webpack.hot-update.json:0
+[  500308ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/shared/forward-logs-shared.js:27
+[  500533ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/_next/static/webpack/abf0f472b70bdd0f.webpack.hot-update.json:0
+[  500534ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/shared/forward-logs-shared.js:27
+[  500797ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1932:1]
+ 1929 |                           )
+ 1930 |                         })}
+ 1931 |                       </div>
+ 1932 |                     ))}
+      :                      ^
+ 1933 |                   </div>
+ 1934 |                 </div>
+ 1934 |               </div>
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/dashboard/page.tsx @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/userspace/pages/pages-dev-overlay-setup.js:70
+[  501163ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/dashboard?cliente=FRIGERI+MARIA+CRISTINA:0
+[  501599ms] ModuleBuildError: Module build failed (from ./node_modules/next/dist/build/webpack/loaders/next-swc-loader.js):
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1932:1]
+ 1929 |                           )
+ 1930 |                         })}
+ 1931 |                       </div>
+ 1932 |                     ))}
+      :                      ^
+ 1933 |                   </div>
+ 1934 |                 </div>
+ 1934 |               </div>
+      `----
+
+
+Caused by:
+    Syntax Error
+    at processResult (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\webpack\bundle5.js:29:407096)
+    at <unknown> (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\webpack\bundle5.js:29:408891)
+    at <unknown> (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\loader-runner\LoaderRunner.js:1:8645)
+    at <unknown> (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\loader-runner\LoaderRunner.js:1:5019)
+    at r.callback (file://C:\Users\rivas\Projects\imieiinvestimenti\node_modules\next\dist\compiled\loader-runner\LoaderRunner.js:1:4039)
+[  501600ms] [ERROR] ./app/dashboard/page.tsx
+Error:   x Expected '</', got ')'
+      ,-[C:\Users\rivas\Projects\imieiinvestimenti\app\dashboard\page.tsx:1932:1]
+ 1929 |                           )
+ 1930 |                         })}
+ 1931 |                       </div>
+ 1932 |                     ))}
+      :                      ^
+ 1933 |                   </div>
+ 1934 |                 </div>
+ 1934 |               </div>
+      `----
+
+Caused by:
+    Syntax Error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/userspace/pages/pages-dev-overlay-setup.js:70
+[  512130ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/_next/static/webpack/abf0f472b70bdd0f.webpack.hot-update.json:0
+[  512130ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/shared/forward-logs-shared.js:27
+[  512341ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/_next/static/webpack/abf0f472b70bdd0f.webpack.hot-update.json:0
+[  512341ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/shared/forward-logs-shared.js:27
+[  514433ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/_next/static/webpack/abf0f472b70bdd0f.webpack.hot-update.json:0
+[  514433ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///(pages-dir-browser)/./node_modules/next/dist/next-devtools/shared/forward-logs-shared.js:27
