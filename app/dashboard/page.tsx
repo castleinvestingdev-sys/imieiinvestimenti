@@ -1140,7 +1140,64 @@ function DashboardContent() {
     return acc;
   }, {} as Record<string, BankGroup>);
 
-  const bankGroups = Object.values(bankGroupsMap);
+  // --- 5. Merge gruppi con stesso intestatario + stessa banca canonica ---
+  const KNOWN_BANKS = [
+    'Intesa Sanpaolo', 'UniCredit', 'Banco BPM', 'BPER Banca', 'Monte dei Paschi di Siena',
+    'Crédit Agricole Italia', 'Cariparma', 'Friuladria', 'BNL', 'Credem', 'Banca Mediolanum',
+    'FinecoBank', 'Banca Generali', 'Azimut', 'CheBanca!', 'Mediobanca Premier', 'Banca Sella',
+    'Banca Popolare di Sondrio', 'Banco di Desio', 'Banca di Asti', 'Banca Passadore',
+    'Cassa di Risparmio di Bolzano', 'Volksbank Alto Adige', 'Banca del Piemonte', 'Banca Carige',
+    'Banca Ifis', 'Illimity Bank', 'Banca Progetto', 'Banca CF+', 'Banca Sistema',
+    'Banca Valsabbina', 'Cassa Centrale Banca', 'Raiffeisen', 'Cassa Rurale', 'BCC',
+    'Iccrea Banca', 'Deutsche Bank Italia', 'Deutsche Bank', 'ING Italia', 'ING', 'N26', 'Revolut',
+    'Widiba', 'Webank', 'Buddybank', 'BBVA Italia', 'Santander Consumer Bank',
+    'Banca Aletti', 'Banca Euromobiliare', 'Fideuram', 'Sanpaolo Invest', 'IW Bank'
+  ];
+  // Mappa alias → canonico (es. Cariparma → Crédit Agricole Italia)
+  const BANK_ALIASES: Record<string, string> = {
+    'Cariparma': 'Crédit Agricole Italia', 'Friuladria': 'Crédit Agricole Italia',
+    'Mediobanca Premier': 'CheBanca!', 'Deutsche Bank': 'Deutsche Bank Italia',
+    'ING': 'ING Italia', 'Banca Carige': 'BPER Banca',
+  };
+  const canonicalizeBankName = (name: string): string => {
+    const key = getBankKey(name);
+    for (const known of KNOWN_BANKS) {
+      const knownKey = getBankKey(known);
+      if (key === knownKey || key.includes(knownKey) || knownKey.includes(key)) {
+        return BANK_ALIASES[known] || known;
+      }
+    }
+    return name;
+  };
+  const getGroupHolder = (group: BankGroup): string => {
+    const all = [...group.dossiers.flatMap(d => d.analyses), ...group.liquidityAccounts.flatMap(l => l.analyses)];
+    const counts: Record<string, number> = {};
+    all.forEach(a => {
+      const h = (a.costs_breakdown?.holder || '').trim().toUpperCase();
+      if (h) counts[h] = (counts[h] || 0) + 1;
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  };
+  const mergedMap: Record<string, BankGroup> = {};
+  Object.values(bankGroupsMap).forEach(group => {
+    const holder = getGroupHolder(group);
+    const canonical = canonicalizeBankName(group.bankName);
+    const mergeKey = holder ? `${holder}|||${canonical.toUpperCase()}` : group.bankName;
+    if (!mergedMap[mergeKey]) {
+      mergedMap[mergeKey] = { ...group };
+    } else {
+      const existing = mergedMap[mergeKey];
+      group.dossiers.forEach(d => {
+        const match = existing.dossiers.find(ed => normalizeAcc(ed.identifier) === normalizeAcc(d.identifier));
+        if (match) { match.analyses.push(...d.analyses); } else { existing.dossiers.push(d); }
+      });
+      group.liquidityAccounts.forEach(l => {
+        const match = existing.liquidityAccounts.find(el => normalizeAcc(el.identifier) === normalizeAcc(l.identifier));
+        if (match) { match.analyses.push(...l.analyses); } else { existing.liquidityAccounts.push(l); }
+      });
+    }
+  });
+  const bankGroups = Object.values(mergedMap);
 
   const allYears = analyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(Boolean) as number[]
   const minYear = allYears.length > 0 ? Math.min(...allYears) : new Date().getFullYear() - 1
