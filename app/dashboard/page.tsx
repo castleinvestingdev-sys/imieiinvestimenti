@@ -1624,16 +1624,33 @@ function DashboardContent() {
                       {group.dossiers.length} Dossier Titoli | {group.liquidityAccounts.length} Conti Correnti
                     </div>
                   </div>
-                  <a
-                    href={`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`}
-                    className={styles.btnAnalysisPremium}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      safeNavigate(`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`)
-                    }}
-                  >
-                    VEDI ANALISI <span>→</span>
-                  </a>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button
+                      className={styles.btnDeleteBank}
+                      onClick={async () => {
+                        const allIds = [
+                          ...group.dossiers.flatMap(d => d.analyses.map(a => a.id)),
+                          ...group.liquidityAccounts.flatMap(l => l.analyses.map(a => a.id))
+                        ]
+                        const confirmed = await showConfirmModal(
+                          `Elimina ${group.bankName}`,
+                          `Vuoi spostare nel cestino tutti i ${allIds.length} documenti di ${group.bankName}?`
+                        )
+                        if (!confirmed) return
+                        handleDeleteMultiple(allIds)
+                      }}
+                    >🗑️</button>
+                    <a
+                      href={`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`}
+                      className={styles.btnAnalysisPremium}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        safeNavigate(`/analisi/${(group.dossiers[0]?.analyses[0] || group.liquidityAccounts[0]?.analyses[0])?.id}`)
+                      }}
+                    >
+                      VEDI ANALISI <span>→</span>
+                    </a>
+                  </div>
                 </div>
 
                 {/* Dual Timeline - compact layout like analysis page */}
@@ -1643,14 +1660,42 @@ function DashboardContent() {
                     <span className={styles.dualYearSpacer}>&nbsp;</span>
                     {group.dossiers.map((dossier, dIdx) => (
                       <div key={`dos-label-${dIdx}`} className={styles.dualLabelRow}>
-                        <span className={styles.dualBadgeDos}>Dossier Titoli</span>
-                        {group.dossiers.length > 1 && <span className={styles.dualAccNum}>{dossier.identifier}</span>}
+                        <div className={styles.dualLabelInfo}>
+                          <span className={styles.dualBadgeDos}>Dossier Titoli</span>
+                          {group.dossiers.length > 1 && <span className={styles.dualAccNum}>{dossier.identifier}</span>}
+                        </div>
+                        <button
+                          className={styles.dualDeleteBtn}
+                          title={`Elimina tutti i ${dossier.analyses.length} documenti del Dossier ${dossier.identifier}`}
+                          onClick={async () => {
+                            const confirmed = await showConfirmModal(
+                              'Elimina sezione Dossier',
+                              `Vuoi spostare nel cestino tutti i ${dossier.analyses.length} documenti del Dossier ${dossier.identifier}?`
+                            );
+                            if (!confirmed) return;
+                            handleDeleteMultiple(dossier.analyses.map(a => a.id));
+                          }}
+                        >🗑️</button>
                       </div>
                     ))}
                     {group.liquidityAccounts.map((liq, lIdx) => (
                       <div key={`liq-label-${lIdx}`} className={styles.dualLabelRow}>
-                        <span className={styles.dualBadgeLiq}>Liquidit&agrave;</span>
-                        {group.liquidityAccounts.length > 1 && <span className={styles.dualAccNum}>{liq.identifier}</span>}
+                        <div className={styles.dualLabelInfo}>
+                          <span className={styles.dualBadgeLiq}>Liquidit&agrave;</span>
+                          {group.liquidityAccounts.length > 1 && <span className={styles.dualAccNum}>{liq.identifier}</span>}
+                        </div>
+                        <button
+                          className={styles.dualDeleteBtn}
+                          title={`Elimina tutti i ${liq.analyses.length} documenti del Conto ${liq.identifier}`}
+                          onClick={async () => {
+                            const confirmed = await showConfirmModal(
+                              'Elimina sezione Liquidità',
+                              `Vuoi spostare nel cestino tutti i ${liq.analyses.length} documenti del Conto ${liq.identifier}?`
+                            );
+                            if (!confirmed) return;
+                            handleDeleteMultiple(liq.analyses.map(a => a.id));
+                          }}
+                        >🗑️</button>
                       </div>
                     ))}
                   </div>

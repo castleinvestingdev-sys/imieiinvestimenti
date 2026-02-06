@@ -823,6 +823,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 .eq('user_id', userId)
                 .eq('period_start', periodStart)
                 .eq('period_end', periodEnd)
+                .is('deleted_at', null)
 
             // Match normalizzato: gestisce prefissi filiale variabili (es. "19812/3100/1000811" vs "3100/1000811")
             const normalizedNew = normalizeAccountNumber(accountNumber)
