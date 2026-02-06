@@ -1,8 +1,37 @@
 "use client"
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { AreaChart, Area, XAxis, ResponsiveContainer } from 'recharts'
 
 export default function HomePage() {
+  const [patrimonio, setPatrimonio] = useState(100000)
+  const [inputFocused, setInputFocused] = useState(false)
+  const [inputRaw, setInputRaw] = useState('100000')
+
+  const chartData = useMemo(() => {
+    const p = patrimonio || 0
+    const marketReturn = 0.07
+    // Banca: commissioni annue 3% + sottoperformance 5% = 8% annuo, transazione 1% una tantum
+    const bankAnnual = marketReturn - 0.03 - 0.05 // -1% netto
+    const bankStart = p * (1 - 0.01) // -1% costi transazione iniziali
+    // Efficiente: commissioni annue 0.3% + sottoperformance 0.5% = 0.8% annuo, transazione 0.1% una tantum
+    const effAnnual = marketReturn - 0.003 - 0.005 // 6.2% netto
+    const effStart = p * (1 - 0.001) // -0.1% costi transazione iniziali
+    const data = []
+    for (let i = 0; i <= 30; i++) {
+      data.push({
+        year: 2026 + i,
+        banca: Math.round(bankStart * Math.pow(1 + bankAnnual, i)),
+        efficiente: Math.round(effStart * Math.pow(1 + effAnnual, i)),
+      })
+    }
+    return data
+  }, [patrimonio])
+
+  const finalBank = chartData[chartData.length - 1]?.banca || 0
+  const finalEff = chartData[chartData.length - 1]?.efficiente || 0
+  const finalDiff = finalEff - finalBank
   return (
     <>
       {/* Hero Section */}
@@ -10,7 +39,7 @@ export default function HomePage() {
         <div className="container">
           <div className="hero-header">
             <h1 className="hero-title">
-              I tuoi investimenti<br />rendono davvero?
+              I tuoi investimenti rendono davvero?
             </h1>
             <h2 className="hero-subtitle">
               La banca non te lo dice.<br />
@@ -18,27 +47,28 @@ export default function HomePage() {
             </h2>
           </div>
 
-          <div className="hero-flex">
+          <div className="hero-content-wrapper">
             {/* Left Column: Desc & List */}
-            <div className="hero-left">
-              <p className="hero-desc">
-                <span className="hero-brand">iMieiInvestimenti.it</span> trasforma i tuoi estratti conto bancari in rendiconti chiari, verificabili e indipendenti.
+            <div className="hero-left-col">
+              <p className="hero-note">
+                <span className="hero-brand">iMieiInvestimenti.it</span> ti dice:
               </p>
 
               <ul className="hero-list">
-                <li><span>👉</span> Performance reali</li>
-                <li><span>👉</span> Costi nascosti evidenti</li>
-                <li><span>👉</span> Numeri ricalcolabili da zero</li>
+                <li><span className="hero-icon">📈</span> Performance reali</li>
+                <li><span className="hero-icon">❌</span> Costi nascosti evidenti</li>
+                <li><span className="hero-icon">📊</span> Numeri ricalcolabili da zero</li>
               </ul>
             </div>
 
             {/* Right Column: CTA */}
-            <div className="hero-right">
+            <div className="hero-right-col">
               <h4 className="hero-cta-title">
                 Ti basta caricare un PDF.
               </h4>
               <Link href="/discover" className="hero-btn">
-                PROVALO ORA! →
+                PROVALO ORA!
+                <span className="hero-btn-icon">→</span>
               </Link>
             </div>
           </div>
@@ -46,22 +76,22 @@ export default function HomePage() {
       </section>
 
       {/* Problem Section */}
-      <section className="section-padding" id="problem-section">
+      <section className="section-padding" id="problem-section" style={{ background: '#f5f5f5' }}>
         <div className="container">
           <div className="flex-row-mobile">
             {/* Text Content */}
             <div style={{ flex: 1 }}>
-              <span className="section-label">
-                <span style={{ fontSize: '2rem' }}>📉</span> IL PROBLEMA
+              <span className="section-label" style={{ color: '#999', fontWeight: 700, fontSize: '2.8rem', letterSpacing: '0.05em' }}>
+                IL PROBLEMA
               </span>
-              <h2 className="section-title">
-                Perché non riesci a calcolare le tue performance?
+              <h2 className="section-title" style={{ marginTop: '1rem' }}>
+                La banca <span style={{ color: '#e07a6a' }}>trattiene</span> gran parte dei tuoi guadagni.
               </h2>
 
-              <p className="section-p">
-                Perché le banche non consegnano estratti conto esaustivi.
+              <p className="section-p" style={{ fontWeight: 700 }}>
+                Le banche spesso non te lo dicono.
               </p>
-              <p className="section-p">
+              <p className="section-p" style={{ fontWeight: 700 }}>
                 Non mancano i numeri.<br />
                 Mancano quelli giusti.
               </p>
@@ -81,177 +111,293 @@ export default function HomePage() {
       </section>
 
       {/* Why Banks Section */}
-      <section className="section-padding">
+      <section className="section-padding" style={{ background: '#f5f5f5' }}>
         <div className="container">
-          <div className="flex-row-mobile flip-mobile">
-            {/* Text Content (Right in desktop order) */}
-            <div style={{ flex: 1 }}>
-              <span className="section-label">
-                <span style={{ fontSize: '2rem' }}>🧠</span> PERCHÉ LE BANCHE NON LO FANNO?
-              </span>
-              <h2 className="section-title">
-                Perché la trasparenza ha un costo.
-              </h2>
+          <div style={{ borderBottom: '1px solid #d1d1d1', paddingBottom: '0.8rem', marginBottom: '2rem' }}>
+            <span className="section-label" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: 0 }}>
+              <span style={{ fontSize: '2rem' }}>🧠</span> PERCHÉ LE BANCHE NON SONO TRASPARENTI?
+            </span>
+          </div>
 
-              <p className="section-p">
-                E non lo paga la banca.<br />
-                Lo pagherebbe il suo modello di business.
+          <h2 className="section-title" style={{ marginBottom: '2.5rem' }}>
+            Perché le banche guadagnano,<br />
+            <span style={{ color: '#e07a6a' }}>con i tuoi soldi</span>.
+          </h2>
+
+          <div className="flex-row-mobile" style={{ alignItems: 'flex-start', gap: '4rem' }}>
+            <div style={{ flex: 1.2 }}>
+              <p style={{ fontWeight: 700, fontSize: '1rem', color: '#1d1d1f', marginBottom: '0.6rem' }}>
+                Cosa ti nascondono:
               </p>
-
-              <ul className="check-list">
-                <li>• Costi più evidenti</li>
-                <li>• Performance meno "belle"</li>
-                <li>• Clienti più consapevoli</li>
+              <ul style={{ listStyle: 'disc', paddingLeft: '1.5rem', margin: '0 0 2rem 0' }}>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>Commissioni non evidenti</li>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>Performance non chiare</li>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>Alternative che ti fanno guadagnare di più</li>
               </ul>
 
-              <p className="section-p" style={{ color: '#f59e0b', fontWeight: 900 }}>👉 Non conviene.</p>
+              <p style={{ fontWeight: 600, fontSize: '1rem', color: '#1d1d1f' }}>
+                → La banca ti propone SOLO gli strumenti su cui guadagna.
+              </p>
             </div>
 
-            {/* Image Content (Left in desktop order) */}
-            <div className="section-img-wrapper">
-              <Image src="/assets/confused_investor.png" alt="Investitore Confuso" width={400} height={400} style={{ mixBlendMode: 'multiply' }} />
-              <h3 className="img-caption">
-                Le banche guadagnano di più da clienti "inconsapevoli"
-              </h3>
+            <div style={{ flex: 0.6, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+              <Image src="/assets/confused_investor.png" alt="Investitore Confuso" width={220} height={220} style={{ mixBlendMode: 'multiply' }} />
             </div>
           </div>
+
+          <h3 style={{ textAlign: 'right', marginTop: '1.5rem', fontSize: '2.2rem', fontWeight: 900, lineHeight: 1.15, color: '#000' }}>
+            Le banche guadagnano di<br />più da clienti &ldquo;inconsapevoli&rdquo;
+          </h3>
         </div>
       </section>
 
       {/* Green Section (Solution) */}
-      <section className="green-section">
+      <section style={{ padding: '80px 0', background: 'linear-gradient(180deg, #e8f5e9 0%, #f1f8e9 100%)' }}>
         <div className="container">
-          <h2 className="green-title">COSA FACCIAMO NOI</h2>
-          <h3 className="green-subtitle">Ricostruiamo tutto. Da zero.</h3>
+          <div style={{ borderBottom: '1px solid rgba(0,0,0,0.12)', paddingBottom: '0.8rem', marginBottom: '2rem' }}>
+            <h2 style={{ fontSize: '2rem', fontWeight: 900, color: '#2e7d32', letterSpacing: '1px', margin: 0 }}>
+              COSA FACCIAMO NOI
+            </h2>
+          </div>
 
-          <div className="flex-row-mobile">
-            <div style={{ flex: 1 }}>
-              <p className="green-p">
-                Partiamo dai <strong>documenti ufficiali</strong> della tua banca.<br />
-                Li trasformiamo in <strong>dati leggibili</strong>.
+          <h3 style={{ fontSize: '2.2rem', fontWeight: 900, color: '#000', marginBottom: '2rem' }}>
+            Ricostruiamo tutto. Da zero.
+          </h3>
+
+          <div className="flex-row-mobile" style={{ alignItems: 'flex-start', gap: '4rem' }}>
+            <div style={{ flex: 1.2 }}>
+              <p style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1d1d1f', lineHeight: 1.5, marginBottom: '2rem' }}>
+                Partiamo esclusivamente dai documenti ufficiali della tua banca e li trasformiamo in dati leggibili e ricalcolabili.
               </p>
 
-              <p className="green-list-label">Ecco cosa otterrai:</p>
-              <ul className="green-list">
-                <li><strong>• Portafoglio iniziale reale</strong></li>
-                <li>• Tutti i movimenti normalizzati</li>
-                <li><strong>• Commissioni esplicite</strong></li>
-                <li>• Dividendi e cedole separati</li>
-                <li>• Performance vera (ricalcolata)</li>
-                <li style={{ marginTop: '2rem', fontWeight: 900, background: '#fff', color: '#00C853', padding: '12px 24px', borderRadius: '50px', display: 'inline-block', fontSize: '1.2rem' }}>
-                  👉 Quello che la banca non ti dice.
-                </li>
+              <p style={{ fontWeight: 700, fontSize: '1rem', color: '#1d1d1f', marginBottom: '0.6rem' }}>
+                iMieiInvestimenti.it ti mostra:
+              </p>
+              <ul style={{ listStyle: 'disc', paddingLeft: '2rem', margin: '0 0 2.5rem 0' }}>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>Il tuo patrimonio</li>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>I tuoi guadagni</li>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>Le commissioni che hai pagato (anche quelle nascoste)</li>
+                <li style={{ fontSize: '1rem', fontWeight: 500, color: '#1d1d1f', marginBottom: '0.3rem' }}>Performance reale, non dichiarata dalla banca</li>
               </ul>
+
+              <p style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1d1d1f', fontStyle: 'italic' }}>
+                Tutto quello che la banca non ha interesse a mostrarti.
+              </p>
             </div>
 
-            <div className="green-right">
-              <h3 className="green-cta-title">
-                Carica il tuo PDF.<br />Al resto pensiamo noi.
+            <div style={{ flex: 0.8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', textAlign: 'center', gap: '1.5rem', paddingTop: '8rem' }}>
+              <h3 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#000', lineHeight: 1.3 }}>
+                Ti basterà caricare l&apos;Estratto conto in formato PDF, al resto pensiamo noi*.
               </h3>
-              <p className="green-disclaimer">*I PDF verranno analizzati dall’AI.</p>
-              <Link href="/discover" className="green-btn">
-                PROVALO ORA →
+
+              <Link href="/discover" style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', background: '#000', color: '#fff', fontWeight: 800, padding: '14px 32px', borderRadius: '6px', fontSize: '1rem', textTransform: 'uppercase', textDecoration: 'none', letterSpacing: '1px' }}>
+                PROVALO ORA <span style={{ fontSize: '1.2rem' }}>→</span>
               </Link>
+
+              <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
+                *I PDF verranno analizzati dal nostro software AI
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Comparison Section */}
+      {/* Simulation Section */}
       <section className="section-padding">
         <div className="container">
-          <div className="comparison-flex">
-            {/* Left Column: LE BANCHE */}
-            <div className="comp-card card-red">
-              <h3 className="comp-title">LE BANCHE TI DANNO</h3>
-              <ul className="comp-list">
-                <li><span>🔴</span> Valore finale: <strong>24.950 €</strong></li>
-                <li><span>🔴</span> Performance: <strong className="text-danger">✗</strong></li>
-                <li><span>🔴</span> Costi: <strong className="text-danger">✗</strong></li>
-                <li><span>🔴</span> Metodo: <strong className="text-danger">✗</strong></li>
-              </ul>
-              <div className="comp-img">
-                <Image src="/assets/card_confused.png" alt="Investitore Confuso" width={180} height={180} />
-              </div>
+          {/* Header row */}
+          <div style={{ maxWidth: '750px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: '#000', margin: 0 }}>
+                Fai la tua simulazione
+              </h2>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Patrimonio iniziale €"
+                value={inputFocused ? inputRaw : (patrimonio ? patrimonio.toLocaleString('it-IT') + ' €' : '')}
+                onFocus={() => {
+                  setInputFocused(true)
+                  setInputRaw(patrimonio ? String(patrimonio) : '')
+                }}
+                onBlur={() => {
+                  setInputFocused(false)
+                  const val = parseInt(inputRaw) || 0
+                  setPatrimonio(val)
+                }}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^\d]/g, '')
+                  setInputRaw(val)
+                  setPatrimonio(val ? parseInt(val) : 0)
+                }}
+                style={{ padding: '10px 20px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '1rem', width: '240px', textAlign: 'center', color: '#666' }}
+              />
             </div>
 
-            {/* Right Column: CON IMIEIINVESTIMENTI.IT */}
-            <div className="comp-card card-green">
-              <h3 className="comp-title">CON IMIEIINVESTIMENTI.IT 📊</h3>
-              <ul className="comp-list">
-                <li><span>✅</span> Capitale investito: <strong>25.000 €</strong></li>
-                <li><span>✅</span> Commissioni totali: <strong>−50 €</strong></li>
-                <li><span>✅</span> Performance reale: <strong className="text-danger">−0,20%</strong></li>
-                <li><span>✅</span> Metodo: <strong className="text-primary">verificabile</strong></li>
-                <li className="comp-badge">📌 Numeri semplici. Ma veri.</li>
-              </ul>
-              <div className="comp-img">
-                <Image src="/assets/card_happy.png" alt="Investitore Soddisfatto" width={180} height={180} />
+            {/* Comparison Table */}
+            <div style={{ marginBottom: '1.5rem' }}>
+              {/* Column Headers */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
+                <div />
+                <h3 style={{ textAlign: 'center', fontWeight: 800, fontSize: '1.1rem', margin: 0 }}>Banca</h3>
+                <h3 style={{ textAlign: 'center', fontWeight: 800, fontSize: '1.1rem', margin: 0 }}>Investimenti efficienti</h3>
               </div>
+
+              {/* Rows */}
+              {[
+                { label: 'Commissioni annue', bank: '-3,00 %', efficient: '0,30 %' },
+                { label: 'Commissioni transazione', bank: '-1,00 %', efficient: '0,10 %' },
+                { label: 'Sottoperformance', bank: '-5,00%', efficient: '0,50 %' },
+              ].map((row, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: '0.5rem', alignItems: 'center', marginBottom: '0.7rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end', fontSize: '0.9rem', fontWeight: 600, color: '#333' }}>
+                    {row.label}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '16px', height: '16px', borderRadius: '50%', border: '1.5px solid #ccc', fontSize: '0.6rem', color: '#999' }}>i</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <span style={{ background: '#fef2f2', color: '#dc2626', padding: '6px 20px', borderRadius: '999px', fontWeight: 700, fontSize: '0.95rem', minWidth: '90px', textAlign: 'center' }}>{row.bank}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <span style={{ background: '#f0fdf4', color: '#1d1d1f', padding: '6px 20px', borderRadius: '999px', fontWeight: 700, fontSize: '0.95rem', minWidth: '90px', textAlign: 'center' }}>{row.efficient}</span>
+                  </div>
+                </div>
+              ))}
+
+            <p style={{ textAlign: 'center', fontSize: '0.85rem', color: '#bbb', marginTop: '1rem' }}>Fonte: analisi di mercato...</p>
+            </div>
+          </div>
+
+          {/* Simulation Chart */}
+          <div style={{ marginTop: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+              <span style={{ fontWeight: 800, fontSize: '0.95rem' }}>Simulazione a</span>
+              <span style={{ background: '#f5f5f5', padding: '8px 24px', borderRadius: '999px', fontWeight: 600, color: '#999', fontSize: '1rem' }}>30 anni</span>
+            </div>
+
+            <div style={{ background: '#f8f8f8', borderRadius: '16px', padding: '2rem 1rem 1rem', position: 'relative' }}>
+              <ResponsiveContainer width="100%" height={350}>
+                <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradEff" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#00C853" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#00C853" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="gradBank" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#dc2626" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#dc2626" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="year" tick={{ fontSize: 11, fill: '#999' }} axisLine={{ stroke: '#eee' }} tickLine={false} interval={5} />
+                  <Area type="monotone" dataKey="efficiente" stroke="#00C853" strokeWidth={2.5} fill="url(#gradEff)" />
+                  <Area type="monotone" dataKey="banca" stroke="#dc2626" strokeWidth={2.5} fill="url(#gradBank)" />
+                </AreaChart>
+              </ResponsiveContainer>
+
+              {patrimonio > 0 && (
+                <>
+                  <div style={{ position: 'absolute', right: '4rem', top: '20%', background: '#00C853', color: '#fff', padding: '8px 20px', borderRadius: '8px', fontWeight: 800, fontSize: '0.95rem' }}>
+                    {finalEff.toLocaleString('it-IT')} €
+                  </div>
+                  <div style={{ position: 'absolute', right: '4rem', top: '50%', background: '#dc2626', color: '#fff', padding: '8px 20px', borderRadius: '8px', fontWeight: 800, fontSize: '0.95rem' }}>
+                    -{finalDiff.toLocaleString('it-IT')} €
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
       </section>
 
-      {/* "Per chi è" Section */}
+      {/* Report Comparison Section */}
       <section className="section-padding">
         <div className="container">
-          <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-            {/* Top Headline */}
-            <h2 className="quote-title">
-              Valuta il tuo consulente per i suoi rendimenti, non per la sua simpatia*
-            </h2>
+          <div style={{ maxWidth: '950px', margin: '0 auto' }}>
+          <h2 style={{ textAlign: 'center', fontSize: '2.5rem', fontWeight: 900, color: '#000', marginBottom: '3.5rem', letterSpacing: '3px' }}>
+            REPORT
+          </h2>
 
-            <div className="flex-row-mobile">
-              {/* Left Column */}
-              <div style={{ flex: 1 }}>
-                <h2 className="punch-title">
-                  Noi ti aiutiamo<br />a farlo.
-                </h2>
-                <p className="quote-sub">
-                  *capacità di persuasione
-                </p>
-              </div>
+          <div style={{ display: 'flex', gap: '4rem' }}>
+            {/* Left: Con la banca */}
+            <div style={{ flex: 1 }}>
+              <h3 style={{ fontSize: '1.8rem', fontWeight: 900, color: '#000', marginBottom: '2.5rem' }}>
+                con la banca
+              </h3>
 
-              {/* Right Column */}
-              <div style={{ flex: 1, paddingTop: '20px' }}>
-                <h3 className="list-header">
-                  PER CHI È iMieiInvestimenti.it
-                </h3>
-                <ul className="target-list">
-                  <li className="t-1"><span>✓ Risparmiatori consapevoli</span></li>
-                  <li className="t-2"><span>✓ Investitori autonomi</span></li>
-                  <li className="t-3"><span>✓ Clienti bancari e private</span></li>
-                  <li className="t-4"><span>✓ Consulenti indipendenti</span></li>
-                  <li className="t-5"><span>✓ Chi vuole capire prima di fidarsi</span></li>
-                </ul>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1d1d1f', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>✅</span> Capitale investito: 50.000 €
+              </p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1d1d1f', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🔴</span> Commissioni: <span style={{ color: '#dc2626', fontStyle: 'italic', fontSize: '1.4rem' }}>?</span>
+              </p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1d1d1f', marginBottom: '2.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🔴</span> Performance reale: <span style={{ color: '#dc2626', fontStyle: 'italic', fontSize: '1.4rem' }}>?</span>
+              </p>
+
+              <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#000', marginBottom: '3rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>❌</span> Non si sa nulla
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <Image src="/assets/confused_investor.png" alt="Investitore Confuso" width={260} height={260} style={{ mixBlendMode: 'multiply' }} />
               </div>
             </div>
+
+            {/* Right: Con imieiinvestimenti.it */}
+            <div style={{ flex: 1 }}>
+              <h3 style={{ fontSize: '1.8rem', fontWeight: 900, color: '#000', marginBottom: '2.5rem' }}>
+                con <span style={{ color: '#00C853' }}>imieiinvestimenti.it</span> <span style={{ fontSize: '1.5rem' }}>📊</span>
+              </h3>
+
+              <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1d1d1f', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>✅</span> Capitale investito: 50.000 €
+              </p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1d1d1f', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>✅</span> Commissioni totali: −500 €
+              </p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1d1d1f', marginBottom: '2.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>✅</span> Performance reale: 3,75%
+              </p>
+
+              <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#000', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📌</span> Numeri semplici. Ma veri.
+              </p>
+              <p style={{ fontSize: '1.2rem', fontWeight: 700, color: '#00C853', marginBottom: '3rem' }}>
+                E scopri anche come guadagnare di più.
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <Image src="/assets/card_happy.png" alt="Investitore Soddisfatto" width={260} height={260} style={{ mixBlendMode: 'multiply' }} />
+              </div>
+            </div>
+          </div>
           </div>
         </div>
       </section>
 
       {/* Final CTA Section */}
-      <section className="cta-section">
+      <section style={{ padding: '100px 0 120px', background: '#fff', textAlign: 'center' }}>
         <div className="container">
-          <div className="cta-header">
-            <h2 className="cta-title-top">
-              Carica il tuo estratto conto<br />
-              e scopri quanto hai davvero guadagnato (o perso)
-            </h2>
-          </div>
+          <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#000', marginBottom: '2.5rem' }}>
+            I tuoi soldi meritano chiarezza.
+          </h2>
 
-          <div className="cta-flex">
-            <h3 className="cta-big-text">
-              Carica il tuo<br />estratto conto.
+          <p style={{ fontSize: '1.6rem', fontWeight: 800, color: '#000', lineHeight: 1.6, marginBottom: '5rem' }}>
+            Non grafici.<br />
+            Non promesse.<br />
+            Numeri verificabili.
+          </p>
+
+          <p style={{ fontSize: '1rem', fontWeight: 700, color: '#000', marginBottom: '5rem' }}>
+            Carica il tuo estratto conto<br />
+            e scopri quanto hai davvero guadagnato (o perso)
+          </p>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
+            <h3 style={{ fontSize: '2rem', fontWeight: 800, color: '#00C853', margin: 0 }}>
+              Carica il tuo estratto conto.
             </h3>
-
-            <Link href="/discover" className="cta-btn-large">
-              PROVALO ORA
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14" />
-                <path d="m12 5 7 7-7 7" />
-              </svg>
+            <Link href="/discover" style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', background: '#00C853', color: '#fff', fontWeight: 800, padding: '14px 28px', borderRadius: '999px', fontSize: '1rem', textTransform: 'uppercase', textDecoration: 'none', whiteSpace: 'nowrap' }}>
+              PROVALO ORA <span>→</span>
             </Link>
           </div>
         </div>
@@ -259,30 +405,34 @@ export default function HomePage() {
 
       <style jsx>{`
         .hero-section {
-          padding: 180px 0 80px;
+          padding: 0;
           background: #fff;
         }
+        .hero-header {
+          max-width: 980px;
+          margin: 0 auto;
+        }
         .hero-title {
-          font-size: clamp(2.5rem, 8vw, 4.5rem);
-          font-weight: 900;
-          color: #1a1a1a;
-          line-height: 1;
-          letter-spacing: -2px;
-          margin-bottom: 1.5rem;
+          font-size: 3.5rem;
+          font-weight: 800;
+          color: #121212;
+          line-height: 1.05;
+          letter-spacing: -1px;
+          margin-bottom: 1rem;
         }
         .hero-subtitle {
-          font-size: clamp(1.8rem, 5vw, 3rem);
-          font-weight: 800;
-          color: #1a1a1a;
-          line-height: 1.1;
-          margin-bottom: 4rem;
+          font-size: 2.2rem;
+          font-weight: 700;
+          color: #121212;
+          line-height: 1.3;
+          margin-bottom: 2.4rem;
         }
         .hero-flex {
           display: flex;
-          gap: 4rem;
-          max-width: 1000px;
+          gap: 3.5rem;
+          max-width: 980px;
           margin: 0 auto;
-          align-items: flex-start;
+          align-items: flex-end;
         }
         .hero-left { flex: 1.2; }
         .hero-right {
@@ -291,14 +441,14 @@ export default function HomePage() {
           display: flex;
           flex-direction: column;
           align-items: flex-end;
-          padding-top: 10px;
+          padding-bottom: 6px;
         }
-        .hero-desc {
-          font-size: clamp(1.1rem, 3vw, 1.4rem);
-          line-height: 1.5;
-          color: #1a1a1a;
-          margin-bottom: 2rem;
-          font-weight: 500;
+        .hero-note {
+          font-size: 1rem;
+          line-height: 1.4;
+          color: #00C853;
+          margin-bottom: 1.2rem;
+          font-weight: 700;
         }
         .hero-list {
           list-style: none;
@@ -306,32 +456,51 @@ export default function HomePage() {
           margin: 0;
         }
         .hero-list li {
-          font-size: clamp(1rem, 2.5vw, 1.25rem);
+          font-size: clamp(1rem, 2.2vw, 1.2rem);
           font-weight: 700;
-          margin-bottom: 1rem;
+          margin-bottom: 0.85rem;
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
+          color: #121212;
+        }
+        .hero-icon {
+          font-size: 1.05rem;
+          line-height: 1;
         }
         .hero-cta-title {
-          font-size: 1.2rem;
+          font-size: 2.5rem;
           font-weight: 800;
-          color: #1a1a1a;
-          margin-bottom: 1.5rem;
-          text-transform: uppercase;
+          color: #121212;
+          margin-bottom: 0.9rem;
+          white-space: nowrap;
         }
-        .hero-btn {
-          display: inline-block;
+        :global(.hero-btn) {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
           background: #00C853;
           color: #fff;
           font-weight: 900;
-          padding: 20px 50px;
-          border-radius: 60px;
-          font-size: 1.4rem;
+          padding: 10px 18px 10px 18px;
+          border-radius: 999px;
+          font-size: 0.9rem;
           text-transform: uppercase;
           text-decoration: none;
-          box-shadow: 0 10px 30px rgba(0,200,83,0.3);
+          box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
           transition: all 0.3s ease;
+        }
+        :global(.hero-btn-icon) {
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          background: #fff;
+          color: #00C853;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.95rem;
+          font-weight: 900;
         }
 
         .section-padding { padding: 80px 0; background: #fff; }
@@ -353,188 +522,6 @@ export default function HomePage() {
           color: #1d1d1f;
           margin-bottom: 1.5rem;
           line-height: 1.4;
-        }
-
-        .green-section {
-          padding: 100px 0;
-          background: #00C853;
-          color: #fff;
-        }
-        .green-title {
-          font-size: clamp(2.5rem, 10vw, 5rem);
-          font-weight: 900;
-          color: #fff;
-          line-height: 1;
-          margin-bottom: 0.5rem;
-          letter-spacing: -3px;
-        }
-        .green-subtitle {
-          font-size: clamp(1.5rem, 5vw, 2.5rem);
-          font-weight: 700;
-          color: rgba(255,255,255,0.95);
-          line-height: 1.2;
-          margin-bottom: 4rem;
-        }
-        .green-p {
-          font-size: clamp(1.2rem, 3vw, 1.5rem);
-          line-height: 1.5;
-          margin-bottom: 2.5rem;
-          font-weight: 500;
-        }
-        .green-list-label {
-          font-size: 1.2rem;
-          font-weight: 800;
-          margin-bottom: 1rem;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-        }
-        .green-list { list-style: none; padding: 0; margin: 0; }
-        .green-list li {
-          font-size: clamp(1.1rem, 3vw, 1.35rem);
-          font-weight: 600;
-          margin-bottom: 0.6rem;
-        }
-        .green-right {
-          flex: 0.8;
-          text-align: right;
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-          justify-content: center;
-        }
-        .green-cta-title {
-          font-size: clamp(1.8rem, 5vw, 2.5rem);
-          font-weight: 900;
-          margin-bottom: 1.5rem;
-          line-height: 1.1;
-        }
-        .green-btn {
-          background: #fff;
-          color: #00C853;
-          font-weight: 900;
-          padding: 24px 60px;
-          border-radius: 60px;
-          font-size: 1.4rem;
-          text-transform: uppercase;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-          text-decoration: none;
-          transition: all 0.3s ease;
-        }
-
-        .comparison-flex {
-          display: flex;
-          gap: 3rem;
-          align-items: stretch;
-        }
-        .comp-card {
-          flex: 1;
-          border-radius: 24px;
-          padding: 3rem;
-          display: flex;
-          flex-direction: column;
-        }
-        .card-red {
-          background: linear-gradient(180deg, #fff 0%, #fef2f2 100%);
-          box-shadow: 0 10px 40px rgba(220, 38, 38, 0.15);
-          border: 2px solid #dc2626;
-        }
-        .card-green {
-          background: linear-gradient(180deg, #fff 0%, #f0fdf4 100%);
-          box-shadow: 0 10px 40px rgba(0,200,83,0.15);
-          border: 2px solid #00C853;
-        }
-        .comp-title {
-          font-size: 1.6rem;
-          font-weight: 900;
-          color: #1a1a1a;
-          margin-bottom: 2rem;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-        }
-        .comp-list { list-style: none; padding: 0; margin: 0; flex: 1; }
-        .comp-list li {
-          font-size: 1.2rem;
-          margin-bottom: 1.2rem;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          font-weight: 600;
-        }
-        .comp-badge {
-          margin-top: 1rem;
-          background: #e5f9e7;
-          padding: 12px 20px;
-          border-radius: 12px;
-          color: #00C853;
-          font-weight: 800;
-        }
-        .comp-img { text-align: center; margin-top: 3rem; }
-
-        .quote-title {
-          font-size: clamp(2rem, 6vw, 3.5rem);
-          font-weight: 900;
-          color: #1a1a1a;
-          line-height: 1.1;
-          margin-bottom: 2rem;
-          letter-spacing: -1.5px;
-        }
-        .punch-title {
-          font-size: clamp(2rem, 5vw, 3rem);
-          font-weight: 900;
-          color: #00C853;
-          line-height: 1.1;
-          margin-bottom: 1.5rem;
-          letter-spacing: -1px;
-        }
-        .target-list { list-style: none; padding: 0; margin: 0; }
-        .target-list li {
-          font-size: clamp(1.1rem, 3vw, 1.4rem);
-          font-weight: 850;
-          color: #1a1a1a;
-          margin-bottom: 0.4rem;
-        }
-        .t-2 { margin-left: 45px; }
-        .t-3 { margin-left: 15px; }
-        .t-4 { margin-left: 55px; }
-        .t-5 { margin-left: -15px; }
-
-        .cta-section { padding: 120px 0 160px; text-align: center; background: #fff; }
-        .cta-title-top {
-          font-size: clamp(1.5rem, 4vw, 2.2rem);
-          font-weight: 800;
-          color: #1a1a1a;
-          line-height: 1.4;
-          margin-bottom: 100px;
-        }
-        .cta-flex {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 50px;
-        }
-        .cta-big-text {
-          font-size: clamp(2.5rem, 10vw, 5.5rem);
-          font-weight: 950;
-          color: #00C853;
-          line-height: 0.9;
-          margin: 0;
-          letter-spacing: -4px;
-          text-align: left;
-        }
-        .cta-btn-large {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-          background: #00C853;
-          color: #fff;
-          font-weight: 950;
-          padding: 30px 60px;
-          border-radius: 80px;
-          font-size: clamp(1.2rem, 4vw, 1.8rem);
-          text-transform: uppercase;
-          text-decoration: none;
-          box-shadow: 0 15px 40px rgba(0,200,83,0.3);
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .text-primary { color: #00C853; }
@@ -566,7 +553,7 @@ export default function HomePage() {
         }
 
         @media (max-width: 1024px) {
-          .hero-section { padding: 160px 0 70px; }
+          .hero-section { padding: 90px 0 60px; }
           .hero-flex, .flex-row-mobile, .comparison-flex, .cta-flex {
             flex-direction: column;
             text-align: center;
@@ -577,7 +564,11 @@ export default function HomePage() {
             text-align: center;
             align-items: center;
           }
-          .hero-btn, .green-btn, .cta-btn-large {
+          :global(.hero-btn) {
+            padding: 10px 18px;
+            font-size: 0.9rem;
+          }
+          .green-btn, .cta-btn-large {
             padding: 15px 40px;
             font-size: 1.2rem;
           }
@@ -587,7 +578,7 @@ export default function HomePage() {
 
         @media (max-width: 640px) {
           .hero-section {
-            padding: 110px 0 50px !important;
+            padding: 80px 0 50px !important;
           }
           .hero-title {
             font-size: 2rem;
@@ -597,20 +588,21 @@ export default function HomePage() {
             font-size: 1.4rem;
             margin-bottom: 2.5rem;
           }
-          .hero-desc {
+          .hero-note {
             font-size: 1rem;
           }
           .hero-list li {
             font-size: 0.95rem;
           }
           .hero-cta-title {
-            font-size: 1rem;
+            font-size: 1.4rem;
           }
-          .hero-btn {
+          :global(.hero-btn) {
             width: 100%;
-            padding: 16px 24px;
-            font-size: 1.1rem;
+            padding: 12px 18px;
+            font-size: 0.95rem;
             text-align: center;
+            justify-content: center;
           }
           .section-padding {
             padding: 50px 0;
