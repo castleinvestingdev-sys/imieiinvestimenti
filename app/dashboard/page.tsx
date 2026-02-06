@@ -1636,272 +1636,147 @@ function DashboardContent() {
                   </a>
                 </div>
 
-                <div className={styles.accountsContainer}>
-                  {/* Multiple Dossiers per Bank */}
-                  {group.dossiers.map((dossier, dIdx) => (
-                    <div key={`dossier-${dIdx}`} className={styles.accountSection}>
-                      <div className={styles.accountHeader}>
-                        <div className={styles.accountTitleInfo}>
-                          <span className={styles.accBadge}>Dossier Titoli</span>
-                          <div className={styles.accDetailsText}>
-                            Codice Dossier: <strong>{dossier.identifier}</strong><br />
-                            Rendicontazione: <strong>Variabile</strong>
-                          </div>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            const confirmed = await showConfirmModal(
-                              'Elimina sezione Dossier',
-                              `Vuoi spostare nel cestino tutti i ${dossier.analyses.length} documenti del Dossier ${dossier.identifier}?`
-                            );
-                            if (!confirmed) return;
-                            handleDeleteMultiple(dossier.analyses.map(a => a.id));
-                          }}
-                          className={styles.deleteSectionBtn}
-                          style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
-                        >
-                          🗑️
-                        </button>
+                {/* Dual Timeline - compact layout like analysis page */}
+                <div className={styles.dualTimeline}>
+                  {/* Fixed labels column */}
+                  <div className={styles.dualTimelineLabels}>
+                    <span className={styles.dualYearSpacer}>&nbsp;</span>
+                    {group.dossiers.map((dossier, dIdx) => (
+                      <div key={`dos-label-${dIdx}`} className={styles.dualLabelRow}>
+                        <span className={styles.dualBadgeDos}>Dossier Titoli</span>
+                        {group.dossiers.length > 1 && <span className={styles.dualAccNum}>{dossier.identifier}</span>}
                       </div>
+                    ))}
+                    {group.liquidityAccounts.map((liq, lIdx) => (
+                      <div key={`liq-label-${lIdx}`} className={styles.dualLabelRow}>
+                        <span className={styles.dualBadgeLiq}>Liquidit&agrave;</span>
+                        {group.liquidityAccounts.length > 1 && <span className={styles.dualAccNum}>{liq.identifier}</span>}
+                      </div>
+                    ))}
+                  </div>
 
-                      <div className={styles.timelineNavigation}>
-
-                        <div className={styles.timelineGrid} ref={registerTimeline} onScroll={handleSyncScroll}>
-                          {years.map(year => {
-                            // Build dynamic frequency map and slots
-                            const freqMap = buildYearFrequencyMap(dossier.analyses, year);
-                            const slots = buildYearSlots(freqMap, dossier.analyses, year);
-
-                            return (
-                              <div key={year} className={styles.yearBlock}>
-                                <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={styles.slotsRow} style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(100px, 140px))` }}>
-                                  {slots.map((slot, idx) => {
-                                    const isPresent = !!slot.file;
-                                    const isMonthly = slot.type === 'monthly';
-
-                                    // Find previous slot with a file to get period_end as start date
-                                    const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file);
-
-                                    // Get display label and dates
-                                    let displayLabel: string;
-                                    let dates: { start: string; end: string };
-
-                                    if (isMonthly) {
-                                      const monthNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
-                                      displayLabel = monthNames[slot.month];
-                                      dates = getSlotDates(year, slot.month + 1, 'monthly');
-                                    } else {
-                                      displayLabel = `Q${slot.quarter}`;
-                                      dates = getSlotDates(year, slot.quarter!, 'quarterly');
-                                    }
-
-                                    // Override: se il documento reale ha durata diversa dallo slot, correggi la label
-                                    if (isPresent && slot.file!.period_start && slot.file!.period_end) {
-                                      const docStart = new Date(slot.file!.period_start);
-                                      const docEnd = new Date(slot.file!.period_end);
-                                      const docDays = (docEnd.getTime() - docStart.getTime()) / (1000 * 60 * 60 * 24);
-                                      const monthNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
-                                      if (docDays < 45 && !isMonthly) {
-                                        displayLabel = monthNames[docEnd.getMonth()];
-                                        dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly');
-                                      } else if (docDays >= 45 && isMonthly) {
-                                        const q = Math.ceil((docEnd.getMonth() + 1) / 3);
-                                        displayLabel = `Q${q}`;
-                                        dates = getSlotDates(year, q, 'quarterly');
-                                      }
-                                    }
-
-                                    // Calculate start date: use previous document's period_end if available
-                                    const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
-                                      ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                                      : (isPresent && slot.file!.period_start
-                                        ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                                        : dates.start);
-
-                                    return (
-                                      <div key={idx}
-                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
-                                        data-has-analysis={isPresent ? 'true' : 'false'}
-                                        data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                        onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
-
-                                        <div className={styles.tileDates}>
-                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
-                                          {isPresent ? (
-                                            <>
-                                              {startDateDisplay}<br />
-                                              <span className={styles.arrowIconSmall}>↓</span>
-                                              {new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                            </>
-                                          ) : (
-                                            <>
-                                              {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
-                                            </>
-                                          )}
+                  {/* Scrollable timeline area */}
+                  <div className={styles.dualTimelineScroller} ref={registerTimeline} onScroll={handleSyncScroll}>
+                    {years.map(year => (
+                      <div key={year} className={styles.dualYearGroup}>
+                        <span className={styles.dualYearLabel}>{year}</span>
+                        {/* One row per dossier account */}
+                        {group.dossiers.map((dossier, dIdx) => {
+                          const freqMap = buildYearFrequencyMap(dossier.analyses, year)
+                          const slots = buildYearSlots(freqMap, dossier.analyses, year)
+                          return (
+                            <div key={`dos-${dIdx}`} className={styles.dualYearCards}>
+                              {slots.map((slot, idx) => {
+                                const isPresent = !!slot.file
+                                const isMonthly = slot.type === 'monthly'
+                                const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
+                                let displayLabel: string
+                                let dates: { start: string; end: string }
+                                if (isMonthly) {
+                                  const mn = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
+                                  displayLabel = mn[slot.month]
+                                  dates = getSlotDates(year, slot.month + 1, 'monthly')
+                                } else {
+                                  displayLabel = `Q${slot.quarter}`
+                                  dates = getSlotDates(year, slot.quarter!, 'quarterly')
+                                }
+                                if (isPresent && slot.file!.period_start && slot.file!.period_end) {
+                                  const docEnd = new Date(slot.file!.period_end)
+                                  const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
+                                  const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
+                                  if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
+                                  else if (docDays >= 45 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                }
+                                const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
+                                  ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                  : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
+                                return (
+                                  <div key={idx}
+                                    className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
+                                    <span className={styles.dualCardType}>{displayLabel}</span>
+                                    <div className={styles.dualCardDates}>
+                                      <span>{startDateDisplay || dates.start}</span>
+                                      <span className={styles.dualCardArrow}>&darr;</span>
+                                      <span>{isPresent ? new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.end}</span>
+                                    </div>
+                                    {isPresent ? (
+                                      <div className={styles.dualCardBottom}>
+                                        <span className={styles.dualCardValue}>€{formatCurrency(slot.file!.portfolio_value || 0)}</span>
+                                        <div className={styles.dualCardActions}>
+                                          <button className={styles.dualCardBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
+                                          <button className={styles.dualCardBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
                                         </div>
-
-                                        {isPresent ? (
-                                          <div className={styles.valueContainer}>
-                                            <span className={styles.valueLabelSmall}>{slot.file!.account_type === 'DOSSIER' ? 'Portafoglio' : 'Rendimento'}</span>
-                                            <div className={styles.valueDataLarge}>
-                                              {slot.file!.account_type === 'DOSSIER'
-                                                ? `€${formatCurrency(slot.file!.portfolio_value || 0)}`
-                                                : (slot.file!.forensic_summary?.performance_pct || 'N/D')}
-                                            </div>
-                                            <div className={styles.tileActions}>
-                                              {slot.file!.coherenceWarning && (
-                                                <button
-                                                  className={styles.tileWarningBtn}
-                                                  onClick={(e) => { e.stopPropagation(); alert(slot.file!.coherenceWarning); }}
-                                                  title="Incongruenza con periodo precedente"
-                                                  style={{ background: 'rgba(251,191,36,0.15)', color: '#f59e0b', border: 'none', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
-                                                >⚠️</button>
-                                              )}
-                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
-                                              <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className={styles.uploadCircleBtn} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
-                                        )}
                                       </div>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Multiple Liquidity Accounts per Bank */}
-                  {group.liquidityAccounts.map((liquidity, lIdx) => (
-                    <div key={`liquidity-${lIdx}`} className={styles.accountSection}>
-                      <div className={styles.accountHeader}>
-                        <div className={styles.accountTitleInfo}>
-                          <span className={styles.accBadge} style={{ background: 'rgba(59,130,246,0.08)', color: '#3b82f6' }}>LIQUIDITÀ</span>
-                          <div className={styles.accDetailsText}>
-                            Conto corrente: <strong>{liquidity.identifier}</strong><br />
-                            Rendicontazione: <strong>Variabile</strong>
-                          </div>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            const confirmed = await showConfirmModal(
-                              'Elimina sezione Liquidità',
-                              `Vuoi spostare nel cestino tutti i ${liquidity.analyses.length} documenti del Conto ${liquidity.identifier}?`
-                            );
-                            if (!confirmed) return;
-                            handleDeleteMultiple(liquidity.analyses.map(a => a.id));
-                          }}
-                          style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
-                        >
-                          🗑️
-                        </button>
-                      </div>
-
-                      <div className={styles.timelineNavigation}>
-                        <div className={styles.timelineGrid} ref={registerTimeline} onScroll={handleSyncScroll}>
-                          {years.map(year => {
-                            // Build dynamic frequency map and slots
-                            const freqMap = buildYearFrequencyMap(liquidity.analyses, year);
-                            const slots = buildYearSlots(freqMap, liquidity.analyses, year);
-
-                            return (
-                              <div key={year} className={styles.yearBlock}>
-                                <div className={styles.yearLabelPremium}>{year}</div>
-                                <div className={styles.slotsRow} style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(100px, 140px))` }}>
-                                  {slots.map((slot, idx) => {
-                                    const isPresent = !!slot.file;
-                                    const isMonthly = slot.type === 'monthly';
-
-                                    // Find previous slot with a file to get period_end as start date
-                                    const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file);
-
-                                    // Get display label and dates
-                                    let displayLabel: string;
-                                    let dates: { start: string; end: string };
-
-                                    if (isMonthly) {
-                                      const monthNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
-                                      displayLabel = monthNames[slot.month];
-                                      dates = getSlotDates(year, slot.month + 1, 'monthly');
-                                    } else {
-                                      displayLabel = `Q${slot.quarter}`;
-                                      dates = getSlotDates(year, slot.quarter!, 'quarterly');
-                                    }
-
-                                    // Override: se il documento reale ha durata diversa dallo slot, correggi la label
-                                    if (isPresent && slot.file!.period_start && slot.file!.period_end) {
-                                      const docStart = new Date(slot.file!.period_start);
-                                      const docEnd = new Date(slot.file!.period_end);
-                                      const docDays = (docEnd.getTime() - docStart.getTime()) / (1000 * 60 * 60 * 24);
-                                      const monthNames2 = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
-                                      if (docDays < 45 && !isMonthly) {
-                                        displayLabel = monthNames2[docEnd.getMonth()];
-                                        dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly');
-                                      } else if (docDays >= 45 && isMonthly) {
-                                        const q = Math.ceil((docEnd.getMonth() + 1) / 3);
-                                        displayLabel = `Q${q}`;
-                                        dates = getSlotDates(year, q, 'quarterly');
-                                      }
-                                    }
-
-                                    // Calculate start date: use previous document's period_end if available
-                                    const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
-                                      ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                                      : (isPresent && slot.file!.period_start
-                                        ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                                        : dates.start);
-
-                                    return (
-                                      <div key={idx}
-                                        className={`${styles.tilePremium} ${isPresent ? styles.present : styles.absent}`}
-                                        data-has-analysis={isPresent ? 'true' : 'false'}
-                                        data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                        onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
-
-                                        <div className={styles.tileDates}>
-                                          <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>{displayLabel}</div>
-                                          {isPresent ? (
-                                            <>
-                                              {startDateDisplay}<br />
-                                              <span className={styles.arrowIconSmall}>↓</span>
-                                              {new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                                            </>
-                                          ) : (
-                                            <>
-                                              {dates.start}<br /><span className={styles.arrowIconSmall}>↓</span>{dates.end}
-                                            </>
-                                          )}
+                                    ) : (
+                                      <div className={styles.dualCardUpload} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )
+                        })}
+                        {/* One row per liquidity account */}
+                        {group.liquidityAccounts.map((liq, lIdx) => {
+                          const freqMap = buildYearFrequencyMap(liq.analyses, year)
+                          const slots = buildYearSlots(freqMap, liq.analyses, year)
+                          return (
+                            <div key={`liq-${lIdx}`} className={styles.dualYearCards}>
+                              {slots.map((slot, idx) => {
+                                const isPresent = !!slot.file
+                                const isMonthly = slot.type === 'monthly'
+                                const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
+                                let displayLabel: string
+                                let dates: { start: string; end: string }
+                                if (isMonthly) {
+                                  const mn = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
+                                  displayLabel = mn[slot.month]
+                                  dates = getSlotDates(year, slot.month + 1, 'monthly')
+                                } else {
+                                  displayLabel = `Q${slot.quarter}`
+                                  dates = getSlotDates(year, slot.quarter!, 'quarterly')
+                                }
+                                if (isPresent && slot.file!.period_start && slot.file!.period_end) {
+                                  const docEnd = new Date(slot.file!.period_end)
+                                  const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
+                                  const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
+                                  if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
+                                  else if (docDays >= 45 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                }
+                                const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
+                                  ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                  : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
+                                return (
+                                  <div key={idx}
+                                    className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
+                                    <span className={styles.dualCardType}>{displayLabel}</span>
+                                    <div className={styles.dualCardDates}>
+                                      <span>{startDateDisplay || dates.start}</span>
+                                      <span className={styles.dualCardArrow}>&darr;</span>
+                                      <span>{isPresent ? new Date(slot.file!.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.end}</span>
+                                    </div>
+                                    {isPresent ? (
+                                      <div className={styles.dualCardBottom}>
+                                        <span className={styles.dualCardValue}>€{formatCurrency(slot.file!.portfolio_value || 0)}</span>
+                                        <div className={styles.dualCardActions}>
+                                          <button className={styles.dualCardBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
+                                          <button className={styles.dualCardBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
                                         </div>
-                                        {isPresent ? (
-                                          <div className={styles.valueContainer}>
-                                            <span className={styles.valueLabelSmall}>Saldo</span>
-                                            <div className={styles.valueDataLarge}>€{formatCurrency(slot.file!.portfolio_value || 0)}</div>
-                                            <div className={styles.tileActions}>
-                                              <button className={styles.tileInpectBtn} onClick={(e) => { e.stopPropagation(); setInspectorData(slot.file!); }}>🔍</button>
-                                              <button className={styles.tileDeleteBtn} onClick={(e) => { e.stopPropagation(); handleDelete(slot.file!.id); }}>🗑️</button>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className={styles.uploadCircleBtn} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
-                                        )}
                                       </div>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+                                    ) : (
+                                      <div className={styles.dualCardUpload} onClick={(e) => { e.stopPropagation(); document.getElementById('file-input')?.click(); }}>+</div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )
+                        })}
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
             )
@@ -2085,6 +1960,7 @@ function DashboardContent() {
                                     item.type === 'text' ? (val || '') :
                                     item.type === 'currency' && typeof val === 'number'
                                       ? `${val > 0 ? '+' : ''}${formatCurrency(val)} €`
+                                      : item.type === 'number' && typeof val === 'number' ? Math.round(val).toLocaleString('it-IT')
                                       : typeof val === 'number' ? formatCurrency(val) : val
                                   }
                                 />
@@ -2131,7 +2007,6 @@ function DashboardContent() {
                     const calculatedTotal = inspectorData.holdings?.reduce((acc: number, h: any) => acc + (h.marketValue || 0), 0) || 0
                     const extractedTotal = inspectorData.costs_breakdown?.portfolio_total_extracted || 0
                     const diff = Math.abs(calculatedTotal - extractedTotal)
-                    // Confronto esatto (tolleranza solo per errori floating point: 1 centesimo)
                     const isMatch = extractedTotal > 0 && diff < 0.01
                     return (
                       <div className={styles.infoItem}>
@@ -2151,6 +2026,145 @@ function DashboardContent() {
                   })()}
                 </div>
               )}
+
+              {/* Confronto Portafoglio Iniziale vs Periodo Precedente - per ISIN */}
+              {inspectorData.account_type === 'DOSSIER' && (() => {
+                const currentAccNorm = normalizeAcc(inspectorData.benchmark_comparison || '')
+                const prevDoc = analyses
+                  .filter(a =>
+                    a.id !== inspectorData.id &&
+                    a.account_type === 'DOSSIER' &&
+                    normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
+                    a.period_end && inspectorData.period_start &&
+                    new Date(a.period_end) <= new Date(inspectorData.period_start)
+                  )
+                  .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
+
+                if (!prevDoc) return null
+
+                // Portafoglio finale periodo precedente (per ISIN)
+                const prevHoldings: Record<string, { name: string; qty: number; value: number }> = {}
+                ;(prevDoc.holdings || []).forEach((h: any) => {
+                  const isin = h.isin || 'UNKNOWN'
+                  prevHoldings[isin] = { name: h.name || h.description || isin, qty: h.quantity || 0, value: h.marketValue || 0 }
+                })
+
+                // Portafoglio iniziale calcolato del periodo corrente (finale - acquisti + vendite)
+                const movements = inspectorData.costs_breakdown?.securityMovements || []
+                const movDeltas: Record<string, { buys: number; sells: number }> = {}
+                movements.forEach((m: any) => {
+                  const isin = m.isin || 'UNKNOWN'
+                  if (!movDeltas[isin]) movDeltas[isin] = { buys: 0, sells: 0 }
+                  if (m.operationType === 'Acquisto') movDeltas[isin].buys += m.quantity || 0
+                  else if (m.operationType === 'Vendita') movDeltas[isin].sells += m.quantity || 0
+                })
+                const calcInitial: Record<string, { name: string; qty: number; value: number }> = {}
+                ;(inspectorData.holdings || []).forEach((h: any) => {
+                  const isin = h.isin || 'UNKNOWN'
+                  const delta = movDeltas[isin] || { buys: 0, sells: 0 }
+                  const initQty = (h.quantity || 0) - delta.buys + delta.sells
+                  if (initQty !== 0 || prevHoldings[isin]) {
+                    calcInitial[isin] = { name: h.name || h.description || isin, qty: initQty, value: 0 }
+                  }
+                })
+                // Titoli venduti completamente (in prevDoc ma non nel finale corrente)
+                Object.entries(movDeltas).forEach(([isin, delta]) => {
+                  if (!calcInitial[isin] && (prevHoldings[isin] || delta.sells > 0)) {
+                    const initQty = 0 - delta.buys + delta.sells
+                    if (initQty !== 0) {
+                      calcInitial[isin] = { name: prevHoldings[isin]?.name || isin, qty: initQty, value: 0 }
+                    }
+                  }
+                })
+
+                // Confronto per ISIN
+                const allIsins = [...new Set([...Object.keys(prevHoldings), ...Object.keys(calcInitial)])]
+                type CompRow = { isin: string; name: string; prevQty: number; prevVal: number; calcQty: number; qtyDiff: number; match: boolean }
+                const rows: CompRow[] = allIsins.map(isin => {
+                  const prev = prevHoldings[isin] || { name: '', qty: 0, value: 0 }
+                  const calc = calcInitial[isin] || { name: '', qty: 0, value: 0 }
+                  const qtyDiff = calc.qty - prev.qty
+                  return {
+                    isin,
+                    name: prev.name || calc.name,
+                    prevQty: prev.qty,
+                    prevVal: prev.value,
+                    calcQty: calc.qty,
+                    qtyDiff,
+                    match: Math.abs(qtyDiff) < 0.0001
+                  }
+                })
+                const allMatch = rows.every(r => r.match)
+                const mismatches = rows.filter(r => !r.match)
+
+                // Totali euro
+                const prevTotalEur = Object.values(prevHoldings).reduce((s, h) => s + h.value, 0)
+                const currentInitialEur = inspectorData.initial_value || 0
+
+                return (
+                  <div style={{
+                    margin: '0.75rem 0',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '12px',
+                    border: `2px solid ${allMatch ? '#22c55e' : '#ef4444'}`,
+                    background: allMatch ? '#f0fdf4' : '#fef2f2',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: allMatch ? '#047857' : '#b91c1c' }}>
+                        {allMatch ? '✅ Portafoglio Iniziale verificato' : `❌ ${mismatches.length} strument${mismatches.length === 1 ? 'o' : 'i'} non quadra${mismatches.length === 1 ? '' : 'no'}`}
+                      </div>
+                      <span style={{ fontSize: '0.6rem', color: '#94a3b8' }}>
+                        vs {new Date(prevDoc.period_start).toLocaleDateString('it-IT')} - {new Date(prevDoc.period_end).toLocaleDateString('it-IT')}
+                      </span>
+                    </div>
+
+                    {/* Totali euro */}
+                    <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569' }}>
+                      <span>Ptf. finale prec.: <strong>€{formatCurrency(prevTotalEur)}</strong></span>
+                      <span>Ptf. iniziale calc.: <strong>€{formatCurrency(currentInitialEur)}</strong></span>
+                      {Math.abs(prevTotalEur - currentInitialEur) >= 0.01 && (
+                        <span style={{ color: '#ef4444', fontWeight: 700 }}>Diff: €{formatCurrency(Math.abs(prevTotalEur - currentInitialEur))}</span>
+                      )}
+                    </div>
+
+                    {/* Tabella differenze per ISIN */}
+                    {!allMatch && (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', fontSize: '0.65rem', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                              <th style={{ padding: '0.3rem 0.5rem' }}>ISIN</th>
+                              <th style={{ padding: '0.3rem 0.5rem' }}>Strumento</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Qty Finale Prec.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>€ Finale Prec.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Qty Iniziale Calc.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Diff Qty</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mismatches.map(r => (
+                              <tr key={r.isin} style={{ borderBottom: '1px solid #fecaca', background: '#fff5f5' }}>
+                                <td style={{ padding: '0.3rem 0.5rem', fontFamily: 'monospace', fontSize: '0.6rem' }}>{r.isin}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.prevQty.toLocaleString('it-IT')}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>€{formatCurrency(r.prevVal)}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.calcQty.toLocaleString('it-IT')}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#b91c1c' }}>{r.qtyDiff > 0 ? '+' : ''}{r.qtyDiff.toLocaleString('it-IT')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {allMatch && (
+                      <div style={{ fontSize: '0.65rem', color: '#047857' }}>
+                        Tutti i {rows.length} strumenti hanno le stesse quantit&agrave; nel ptf. finale precedente e nel ptf. iniziale calcolato.
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {inspectorData.account_type === 'DOSSIER' && inspectorData.costs_breakdown?.securityMovements && (
                 <>

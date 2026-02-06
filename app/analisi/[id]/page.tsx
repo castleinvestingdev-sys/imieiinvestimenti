@@ -51,6 +51,12 @@ interface Metrics {
   has_liquidity: boolean
 }
 
+interface AccountGroup {
+  identifier: string
+  normKey: string
+  analyses: Analysis[]
+}
+
 interface TimelineSlot {
   key: string
   label: string
@@ -292,6 +298,8 @@ function AnalysisContent() {
   const [holder, setHolder] = useState('')
   const [allDossiers, setAllDossiers] = useState<Analysis[]>([])
   const [allLiquidity, setAllLiquidity] = useState<Analysis[]>([])
+  const [dossierGroups, setDossierGroups] = useState<AccountGroup[]>([])
+  const [liquidityGroups, setLiquidityGroups] = useState<AccountGroup[]>([])
   const [slots, setSlots] = useState<TimelineSlot[]>([])
   const [selectedSlot, setSelectedSlot] = useState<string>('')
   const [metrics, setMetrics] = useState<Metrics | null>(null)
@@ -355,8 +363,24 @@ function AnalysisContent() {
       const dossiers = related.filter(a => a.account_type === 'DOSSIER')
       const liquidity = related.filter(a => a.account_type === 'LIQUIDITY')
 
+      // Group by account number (like dashboard does)
+      function groupByAccount(analyses: Analysis[]): AccountGroup[] {
+        const map: Record<string, AccountGroup> = {}
+        for (const a of analyses) {
+          const rawAcc = a.benchmark_comparison || 'N/D'
+          const normAcc = normalizeAcc(rawAcc)
+          if (!map[normAcc]) {
+            map[normAcc] = { identifier: rawAcc, normKey: normAcc, analyses: [] }
+          }
+          map[normAcc].analyses.push(a)
+        }
+        return Object.values(map)
+      }
+
       setAllDossiers(dossiers)
       setAllLiquidity(liquidity)
+      setDossierGroups(groupByAccount(dossiers))
+      setLiquidityGroups(groupByAccount(liquidity))
 
       // 4. Build full timeline with gap-filling
       const timelineSlots = buildTimeline(dossiers, liquidity)
@@ -824,17 +848,25 @@ function AnalysisContent() {
         {(() => {
           const years = [...new Set(slots.map(s => s.year))]
           const byYear = years.map(yr => ({ year: yr, items: slots.filter(s => s.year === yr) }))
+          const dosGroups = dossierGroups.length > 0 ? dossierGroups : [{ identifier: '', normKey: '', analyses: allDossiers }]
+          const liqGroups = liquidityGroups.length > 0 ? liquidityGroups : [{ identifier: '', normKey: '', analyses: allLiquidity }]
           return (
             <div className={styles.dualTimeline}>
               {/* Fixed labels column */}
               <div className={styles.timelineLabels}>
                 <span className={styles.yearLabelSpacer}>&nbsp;</span>
-                <div className={styles.timelineLabelRow}>
-                  <span className={styles.trackBadgeDos}>Dossier Titoli</span>
-                </div>
-                <div className={styles.timelineLabelRow}>
-                  <span className={styles.trackBadgeLiq}>Liquidit&agrave;</span>
-                </div>
+                {dosGroups.map((g, i) => (
+                  <div key={`dos-label-${i}`} className={styles.timelineLabelRow}>
+                    <span className={styles.trackBadgeDos}>Dossier Titoli</span>
+                    {g.identifier && dosGroups.length > 1 && <span className={styles.trackAccNum}>{g.identifier}</span>}
+                  </div>
+                ))}
+                {liqGroups.map((g, i) => (
+                  <div key={`liq-label-${i}`} className={styles.timelineLabelRow}>
+                    <span className={styles.trackBadgeLiq}>Liquidit&agrave;</span>
+                    {g.identifier && liqGroups.length > 1 && <span className={styles.trackAccNum}>{g.identifier}</span>}
+                  </div>
+                ))}
               </div>
 
               {/* Single scrollable area */}
@@ -842,52 +874,66 @@ function AnalysisContent() {
                 {byYear.map(({ year, items }) => (
                   <div key={year} className={styles.yearGroup}>
                     <span className={styles.yearLabel}>{year}</span>
-                    <div className={styles.yearCards}>
-                      {items.map(s => {
-                        const active = s.key === selectedSlot
-                        const loaded = s.dossierIds.length > 0
-                        return (
-                          <button key={s.key} className={`${styles.tCard} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
-                            <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
-                            <div className={styles.tCardDates}>
-                              <span>{formatDate(s.displayStart)}</span>
-                              <span className={styles.tCardArrow}>&darr;</span>
-                              <span>{formatDate(s.displayEnd)}</span>
-                            </div>
-                            <div className={styles.tCardStatus}>
-                              {loaded ? (
-                                <span className={styles.tCardCheck}>{s.dossierIds.length > 1 ? `${s.dossierIds.length} doc` : 'Caricato'}</span>
-                              ) : (
-                                <span className={styles.tCardMiss}>Non caricato</span>
-                              )}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <div className={styles.yearCards}>
-                      {items.map(s => {
-                        const active = s.key === selectedSlot
-                        const loaded = s.liquidityIds.length > 0
-                        return (
-                          <button key={s.key} className={`${styles.tCard} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
-                            <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
-                            <div className={styles.tCardDates}>
-                              <span>{formatDate(s.displayStart)}</span>
-                              <span className={styles.tCardArrow}>&darr;</span>
-                              <span>{formatDate(s.displayEnd)}</span>
-                            </div>
-                            <div className={styles.tCardStatus}>
-                              {loaded ? (
-                                <span className={styles.tCardCheck}>{s.liquidityIds.length > 1 ? `${s.liquidityIds.length} doc` : 'Caricato'}</span>
-                              ) : (
-                                <span className={styles.tCardMiss}>Non caricato</span>
-                              )}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
+                    {/* One row per dossier account */}
+                    {dosGroups.map((group, gIdx) => {
+                      const groupIds = new Set(group.analyses.map(a => a.id))
+                      return (
+                        <div key={`dos-${gIdx}`} className={styles.yearCards}>
+                          {items.map(s => {
+                            const active = s.key === selectedSlot
+                            const matchingIds = s.dossierIds.filter(did => groupIds.has(did))
+                            const loaded = matchingIds.length > 0
+                            return (
+                              <button key={s.key} className={`${styles.tCard} ${!s.isMonthly ? styles.tCardQuarterly : ''} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
+                                <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
+                                <div className={styles.tCardDates}>
+                                  <span>{formatDate(s.displayStart)}</span>
+                                  <span className={styles.tCardArrow}>&darr;</span>
+                                  <span>{formatDate(s.displayEnd)}</span>
+                                </div>
+                                <div className={styles.tCardStatus}>
+                                  {loaded ? (
+                                    <span className={styles.tCardCheck}>{matchingIds.length > 1 ? `${matchingIds.length} doc` : 'Caricato'}</span>
+                                  ) : (
+                                    <span className={styles.tCardMiss}>Non caricato</span>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+                    {/* One row per liquidity account */}
+                    {liqGroups.map((group, gIdx) => {
+                      const groupIds = new Set(group.analyses.map(a => a.id))
+                      return (
+                        <div key={`liq-${gIdx}`} className={styles.yearCards}>
+                          {items.map(s => {
+                            const active = s.key === selectedSlot
+                            const matchingIds = s.liquidityIds.filter(lid => groupIds.has(lid))
+                            const loaded = matchingIds.length > 0
+                            return (
+                              <button key={s.key} className={`${styles.tCard} ${!s.isMonthly ? styles.tCardQuarterly : ''} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
+                                <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
+                                <div className={styles.tCardDates}>
+                                  <span>{formatDate(s.displayStart)}</span>
+                                  <span className={styles.tCardArrow}>&darr;</span>
+                                  <span>{formatDate(s.displayEnd)}</span>
+                                </div>
+                                <div className={styles.tCardStatus}>
+                                  {loaded ? (
+                                    <span className={styles.tCardCheck}>{matchingIds.length > 1 ? `${matchingIds.length} doc` : 'Caricato'}</span>
+                                  ) : (
+                                    <span className={styles.tCardMiss}>Non caricato</span>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
                   </div>
                 ))}
               </div>

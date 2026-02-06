@@ -1654,3 +1654,305 @@
     padding: 0.875rem 1rem;
   }
 }
+
+/* ========================================
+   DUAL TIMELINE - Compact analysis-style
+   ======================================== */
+
+.dualTimeline {
+    display: flex;
+    padding: 0.75rem 1rem 0.5rem;
+    gap: 0;
+    background: #fafbfc;
+    border-radius: 0 0 16px 16px;
+}
+
+.dualTimelineLabels {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    padding-right: 0.5rem;
+    border-right: 1px solid #f1f5f9;
+    margin-right: 0.5rem;
+}
+
+.dualYearSpacer {
+    height: 1.1rem;
+    display: block;
+}
+
+.dualLabelRow {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    flex: 1;
+    gap: 0.1rem;
+    min-height: 68px;
+}
+
+.dualBadgeDos {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.55rem;
+    font-weight: 800;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    background: rgba(16, 185, 129, 0.1);
+    color: #047857;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.dualBadgeLiq {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.55rem;
+    font-weight: 800;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #1d4ed8;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.dualAccNum {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.45rem;
+    font-weight: 600;
+    color: #64748b;
+    white-space: nowrap;
+    padding-left: 0.5rem;
+}
+
+.dualTimelineScroller {
+    display: flex;
+    gap: 0.4rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: 1;
+    padding-bottom: 0.25rem;
+    scrollbar-width: auto;
+    scrollbar-color: #10b981 #e2e8f0;
+}
+
+.dualTimelineScroller::-webkit-scrollbar {
+    height: 18px;
+}
+
+.dualTimelineScroller::-webkit-scrollbar-track {
+    background: #e2e8f0;
+    border-radius: 9px;
+    margin: 0 4px;
+}
+
+.dualTimelineScroller::-webkit-scrollbar-thumb {
+    background: #10b981;
+    border-radius: 9px;
+    border: 3px solid #e2e8f0;
+}
+
+.dualTimelineScroller::-webkit-scrollbar-thumb:hover {
+    background: #059669;
+}
+
+.dualYearGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.dualYearLabel {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 900;
+    color: #64748b;
+    letter-spacing: 0.05em;
+    padding: 0 0.4rem;
+    height: 1.1rem;
+    display: flex;
+    align-items: center;
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: #fafbfc;
+    width: fit-content;
+    border-radius: 4px;
+}
+
+.dualYearCards {
+    display: flex;
+    gap: 0.3rem;
+    min-height: 68px;
+}
+
+/* Card */
+.dualCard {
+    font-family: 'Outfit', sans-serif;
+    flex-shrink: 0;
+    width: 110px;
+    padding: 0.35rem 0.5rem;
+    border-radius: 10px;
+    border: 1.5px solid #e2e8f0;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+}
+
+.dualCard:hover {
+    border-color: #94a3b8;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.04);
+}
+
+.dualCardQ {
+    width: calc(110px * 3 + 0.3rem * 2);
+}
+
+.dualCardLoaded {
+    background: #f0fdf4;
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.dualCardLoaded:hover {
+    border-color: #059669;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);
+}
+
+.dualCardEmpty {
+    background: #fcfdfe;
+    border-style: dashed;
+    opacity: 0.6;
+}
+
+.dualCardEmpty:hover {
+    opacity: 1;
+    border-style: solid;
+    border-color: #cbd5e1;
+}
+
+.dualCardType {
+    font-size: 0.55rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+}
+
+.dualCardLoaded .dualCardType {
+    color: #047857;
+}
+
+.dualCardDates {
+    font-size: 0.5rem;
+    font-weight: 600;
+    color: #94a3b8;
+    line-height: 1.3;
+}
+
+.dualCardArrow {
+    color: #cbd5e1;
+    display: block;
+    font-size: 0.6rem;
+    line-height: 1;
+}
+
+.dualCardBottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    width: 100%;
+}
+
+.dualCardValue {
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.dualCardActions {
+    display: flex;
+    gap: 0.2rem;
+}
+
+.dualCardBtn {
+    background: transparent;
+    border: none;
+    font-size: 0.55rem;
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+
+.dualCardBtn:hover {
+    background: #f1f5f9;
+}
+
+.dualCardUpload {
+    width: 22px;
+    height: 22px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 0.1rem;
+}
+
+.dualCardEmpty:hover .dualCardUpload {
+    background: #1e293b;
+    color: white;
+    border-color: #1e293b;
+}
+
+@media (max-width: 768px) {
+    .dualTimeline {
+        flex-direction: column;
+        padding: 0.5rem;
+    }
+
+    .dualTimelineLabels {
+        flex-direction: row;
+        border-right: none;
+        border-bottom: 1px solid #f1f5f9;
+        margin-right: 0;
+        margin-bottom: 0.5rem;
+        padding-right: 0;
+        padding-bottom: 0.5rem;
+        gap: 0.5rem;
+    }
+
+    .dualLabelRow {
+        min-height: auto;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.3rem;
+    }
+
+    .dualYearSpacer {
+        display: none;
+    }
+
+    .dualCard {
+        width: 95px;
+    }
+
+    .dualCardQ {
+        width: calc(95px * 3 + 0.3rem * 2);
+    }
+}

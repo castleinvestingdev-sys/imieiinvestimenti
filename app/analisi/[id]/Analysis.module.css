@@ -129,8 +129,11 @@
 
 .timelineLabelRow {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
     flex: 1;
+    gap: 0.1rem;
 }
 
 .trackBadgeDos {
@@ -157,6 +160,15 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
     white-space: nowrap;
+}
+
+.trackAccNum {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.5rem;
+    font-weight: 600;
+    color: #64748b;
+    white-space: nowrap;
+    padding-left: 0.6rem;
 }
 
 .timelineScroller {
@@ -192,6 +204,7 @@
     font-family: 'Outfit', sans-serif;
     flex-shrink: 0;
     min-width: 110px;
+    width: 110px;
     padding: 0.5rem 0.75rem;
     border-radius: 10px;
     border: 2px solid #e2e8f0;
@@ -202,6 +215,12 @@
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
+}
+
+.tCardQuarterly {
+    /* 3 monthly cards (110px each) + 2 gaps (0.4rem each) */
+    min-width: calc(110px * 3 + 0.4rem * 2);
+    width: calc(110px * 3 + 0.4rem * 2);
 }
 
 .tCard:hover {
@@ -252,7 +271,13 @@
     font-weight: 900;
     color: #64748b;
     letter-spacing: 0.05em;
-    padding-left: 0.25rem;
+    padding: 0 0.4rem;
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: white;
+    width: fit-content;
+    border-radius: 4px;
 }
 
 .yearCards {
@@ -916,5 +941,263 @@
     .dualTimeline {
         flex-direction: column;
         padding: 0 1rem 0.5rem;
+    }
+}
+
+/* ========================================
+   ACCOUNT SECTIONS - Dashboard-style layout
+   ======================================== */
+
+.accountSections {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0.75rem 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.accountSection {
+    background: #fafbfc;
+    border-radius: 14px;
+    padding: 0.75rem 1rem;
+    border: 1px solid #f1f5f9;
+}
+
+.accHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.accInfo {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.accBadgeDos {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #047857;
+    letter-spacing: 0.08em;
+    background: rgba(16, 185, 129, 0.1);
+    padding: 0.25rem 0.6rem;
+    border-radius: 50px;
+    white-space: nowrap;
+}
+
+.accBadgeLiq {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #1d4ed8;
+    letter-spacing: 0.08em;
+    background: rgba(59, 130, 246, 0.1);
+    padding: 0.25rem 0.6rem;
+    border-radius: 50px;
+    white-space: nowrap;
+}
+
+.accDetails {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.7rem;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.accDetails strong {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.accDetailSep {
+    color: #cbd5e1;
+    margin: 0 0.15rem;
+}
+
+/* Timeline scroll area */
+.accTimeline {
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0 0.5rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+.accTimeline::-webkit-scrollbar {
+    height: 6px;
+}
+
+.accTimeline::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.accTimeline::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+
+.accTimeline::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.accYearBlock {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    flex-shrink: 0;
+}
+
+.accYearLabel {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.65rem;
+    font-weight: 900;
+    color: #64748b;
+    letter-spacing: 0.05em;
+    padding-left: 0.15rem;
+}
+
+.accSlotsRow {
+    display: flex;
+    gap: 0.35rem;
+}
+
+/* Tile cards */
+.accTile {
+    font-family: 'Outfit', sans-serif;
+    flex-shrink: 0;
+    width: 100px;
+    padding: 0.4rem 0.5rem;
+    border-radius: 12px;
+    border: 1.5px solid #e2e8f0;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.accTile:hover {
+    border-color: #94a3b8;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.04);
+}
+
+/* Quarterly = 3x monthly width */
+.accTileQ {
+    width: calc(100px * 3 + 0.35rem * 2);
+}
+
+/* States */
+.accTileLoaded {
+    background: #f0fdf4;
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.accTileEmpty {
+    background: #fcfdfe;
+    border-style: dashed;
+    opacity: 0.6;
+}
+
+.accTileEmpty:hover {
+    opacity: 1;
+}
+
+.accTileActive {
+    border-color: #10b981 !important;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    opacity: 1;
+}
+
+.accTileActive.accTileLoaded {
+    background: #ecfdf5;
+}
+
+.accTileActive.accTileEmpty {
+    background: #fef2f2;
+}
+
+/* Tile inner elements */
+.accTileLabel {
+    font-size: 0.45rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #94a3b8;
+    background: #f1f5f9;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+}
+
+.accTileActive .accTileLabel {
+    background: rgba(16, 185, 129, 0.15);
+    color: #047857;
+}
+
+.accTileDates {
+    font-size: 0.55rem;
+    font-weight: 600;
+    color: #94a3b8;
+    line-height: 1.4;
+}
+
+.accTileArrow {
+    color: #cbd5e1;
+    display: block;
+    font-size: 0.7rem;
+    line-height: 1;
+}
+
+.accTileValue {
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #0f172a;
+    margin-top: 0.1rem;
+}
+
+.accTileStatus {
+    font-size: 0.5rem;
+    font-weight: 600;
+    color: #cbd5e1;
+    font-style: italic;
+}
+
+@media (max-width: 768px) {
+    .accountSections {
+        padding: 0.5rem 0.75rem;
+    }
+
+    .accountSection {
+        padding: 0.6rem 0.75rem;
+    }
+
+    .accInfo {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+    }
+
+    .accTile {
+        width: 85px;
+    }
+
+    .accTileQ {
+        width: calc(85px * 3 + 0.35rem * 2);
     }
 }
