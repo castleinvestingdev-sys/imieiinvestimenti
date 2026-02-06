@@ -1161,6 +1161,72 @@ function DashboardContent() {
   });
   const bankGroups = Object.values(mergedMap);
 
+  // --- 6. Mappa coerenza portafoglio: id → boolean (true = quadra, false = non quadra, undefined = nessun periodo precedente) ---
+  const coherenceMap: Record<string, boolean | 'missing'> = {}
+  analyses.filter(a => a.account_type === 'DOSSIER').forEach(doc => {
+    const normAcc = normalizeAcc(doc.benchmark_comparison || '')
+    if (!doc.period_start || !doc.period_end) return
+    // Se il conto non è identificabile, non possiamo verificare la coerenza
+    if (normAcc === 'ND') { coherenceMap[doc.id] = 'missing'; return }
+    const docStart = new Date(doc.period_start)
+    const docEnd = new Date(doc.period_end)
+    const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
+    // Trova il documento immediatamente precedente (stesso conto)
+    const prevDoc = analyses
+      .filter(a => a.id !== doc.id && a.account_type === 'DOSSIER'
+        && normalizeAcc(a.benchmark_comparison || '') === normAcc
+        && a.period_end && a.period_start
+        && new Date(a.period_end) <= docStart)
+      .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
+    if (!prevDoc) { coherenceMap[doc.id] = 'missing'; return }
+    // Verifica che il periodo precedente sia contiguo (gap max 5 giorni tra fine prev e inizio doc)
+    const prevEnd = new Date(prevDoc.period_end!)
+    const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
+    if (gapDays > 5) { coherenceMap[doc.id] = 'missing'; return }
+    // Verifica basata sui trimestri: prevDoc deve essere dal trimestre immediatamente precedente
+    // (es. Q4 deve avere predecessore Q3, non Q2 — anche se le date sembrano contigue)
+    const getQuarter = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
+    const docQ = getQuarter(docEnd)
+    const prevQ = getQuarter(prevEnd)
+    const expPrevQ = docQ.q === 0 ? 3 : docQ.q - 1
+    const expPrevY = docQ.q === 0 ? docQ.y - 1 : docQ.y
+    // Per documenti mensili (< 45gg) verifica il mese precedente
+    if (docDays < 45) {
+      const expPrevM = docEnd.getMonth() === 0 ? 11 : docEnd.getMonth() - 1
+      const expPrevMY = docEnd.getMonth() === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+      if (prevEnd.getMonth() !== expPrevM || prevEnd.getFullYear() !== expPrevMY) {
+        coherenceMap[doc.id] = 'missing'; return
+      }
+    } else if (prevQ.q !== expPrevQ || prevQ.y !== expPrevY) {
+      // Per trimestrali/semestrali: prevDoc deve finire nel trimestre precedente
+      coherenceMap[doc.id] = 'missing'; return
+    }
+    const prevH: Record<string, number> = {}
+    ;(prevDoc.holdings || []).forEach((h: any) => { prevH[h.isin || 'X'] = h.quantity || 0 })
+    const movD: Record<string, { b: number; s: number }> = {}
+    ;(doc.costs_breakdown?.securityMovements || []).forEach((m: any) => {
+      const isin = m.isin || 'X'
+      if (!movD[isin]) movD[isin] = { b: 0, s: 0 }
+      if (m.operationType === 'Acquisto') movD[isin].b += m.quantity || 0
+      else if (m.operationType === 'Vendita') movD[isin].s += m.quantity || 0
+    })
+    const calcInit: Record<string, number> = {}
+    ;(doc.holdings || []).forEach((h: any) => {
+      const isin = h.isin || 'X'
+      const d = movD[isin] || { b: 0, s: 0 }
+      calcInit[isin] = (h.quantity || 0) - d.b + d.s
+    })
+    Object.entries(movD).forEach(([isin, d]) => {
+      if (!(isin in calcInit)) { const q = 0 - d.b + d.s; if (q !== 0) calcInit[isin] = q }
+    })
+    const allIsins = new Set([...Object.keys(prevH), ...Object.keys(calcInit)])
+    let ok = true
+    allIsins.forEach(isin => {
+      if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) ok = false
+    })
+    coherenceMap[doc.id] = ok
+  })
+
   const allYears = analyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(Boolean) as number[]
   const minYear = allYears.length > 0 ? Math.min(...allYears) : new Date().getFullYear() - 1
   const currentYear = new Date().getFullYear()
@@ -1734,6 +1800,7 @@ function DashboardContent() {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
+                                const coh = isPresent ? coherenceMap[slot.file!.id] : undefined
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
                                 if (isMonthly) {
@@ -1758,8 +1825,14 @@ function DashboardContent() {
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
                                     className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    style={coh === false ? { borderColor: '#ef4444', borderWidth: '2px' } : coh === 'missing' ? { borderColor: '#f59e0b', borderWidth: '2px' } : undefined}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
-                                    <span className={styles.dualCardType}>{displayLabel}</span>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span className={styles.dualCardType}>{displayLabel}</span>
+                                      {coh === true && <span title="Portafoglio iniziale verificato" style={{ fontSize: '0.55rem' }}>✅</span>}
+                                      {coh === false && <span title="Portafoglio iniziale non quadra" style={{ fontSize: '0.55rem' }}>❌</span>}
+                                      {coh === 'missing' && <span title="Portafoglio iniziale assente" style={{ fontSize: '0.55rem' }}>⚠️</span>}
+                                    </div>
                                     <div className={styles.dualCardDates}>
                                       <span>{startDateDisplay || dates.start}</span>
                                       <span className={styles.dualCardArrow}>&darr;</span>
@@ -2163,10 +2236,6 @@ function DashboardContent() {
                 const allMatch = rows.every(r => r.match)
                 const mismatches = rows.filter(r => !r.match)
 
-                // Totali euro
-                const prevTotalEur = Object.values(prevHoldings).reduce((s, h) => s + h.value, 0)
-                const currentInitialEur = inspectorData.initial_value || 0
-
                 return (
                   <div style={{
                     margin: '0.75rem 0',
@@ -2184,13 +2253,11 @@ function DashboardContent() {
                       </span>
                     </div>
 
-                    {/* Totali euro */}
-                    <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569' }}>
-                      <span>Ptf. finale prec.: <strong>€{formatCurrency(prevTotalEur)}</strong></span>
-                      <span>Ptf. iniziale calc.: <strong>€{formatCurrency(currentInitialEur)}</strong></span>
-                      {Math.abs(prevTotalEur - currentInitialEur) >= 0.01 && (
-                        <span style={{ color: '#ef4444', fontWeight: 700 }}>Diff: €{formatCurrency(Math.abs(prevTotalEur - currentInitialEur))}</span>
-                      )}
+                    {/* Riepilogo quote */}
+                    <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569', flexWrap: 'wrap' }}>
+                      <span>Strumenti confrontati: <strong>{rows.length}</strong></span>
+                      <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.filter(r => r.match).length}</strong></span>
+                      {mismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{mismatches.length}</strong></span>}
                     </div>
 
                     {/* Tabella differenze per ISIN */}
@@ -2201,10 +2268,9 @@ function DashboardContent() {
                             <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
                               <th style={{ padding: '0.3rem 0.5rem' }}>ISIN</th>
                               <th style={{ padding: '0.3rem 0.5rem' }}>Strumento</th>
-                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Qty Finale Prec.</th>
-                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>€ Finale Prec.</th>
-                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Qty Iniziale Calc.</th>
-                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Diff Qty</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Quote Finale Prec.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Quote Iniziale Calc.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Differenza</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2212,10 +2278,9 @@ function DashboardContent() {
                               <tr key={r.isin} style={{ borderBottom: '1px solid #fecaca', background: '#fff5f5' }}>
                                 <td style={{ padding: '0.3rem 0.5rem', fontFamily: 'monospace', fontSize: '0.6rem' }}>{r.isin}</td>
                                 <td style={{ padding: '0.3rem 0.5rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.prevQty.toLocaleString('it-IT')}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>€{formatCurrency(r.prevVal)}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.calcQty.toLocaleString('it-IT')}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#b91c1c' }}>{r.qtyDiff > 0 ? '+' : ''}{r.qtyDiff.toLocaleString('it-IT')}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.prevQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.calcQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#b91c1c' }}>{r.qtyDiff > 0 ? '+' : ''}{r.qtyDiff.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -2483,7 +2548,7 @@ function DashboardContent() {
                               <td>{h.name || ''}</td>
                               <td>{h.currency || ''}</td>
                               <td>{h.exchangeRate != null ? h.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : missingVal}</td>
-                              <td>{h.initialQty.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
+                              <td>{h.initialQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
                               <td>{h.price != null ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : missingVal}</td>
                               <td>{h.marketValue != null ? `€${formatCurrency(h.marketValue)}` : missingVal}</td>
                             </tr>
@@ -2506,7 +2571,7 @@ function DashboardContent() {
                             <td>{h.name || ''}</td>
                             <td>{h.currency || 'EUR'}</td>
                             <td>{(h.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                            <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 }) : ''}</td>
+                            <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''}</td>
                             <td>{h.price && h.price !== 0 ? formatCurrency(h.price) : '0,00'}</td>
                             <td>€{formatCurrency(h.marketValue || 0)}</td>
                           </tr>
@@ -2559,7 +2624,7 @@ function DashboardContent() {
                                   </td>
                                   <td style={{ color: isVendita ? '#ef4444' : '#22c55e' }}>
                                     {typeof m.quantity === 'number' && m.quantity !== 0
-                                      ? `${isVendita ? '-' : '+'}${formatCurrency(m.quantity)}`
+                                      ? `${isVendita ? '-' : '+'}${m.quantity.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
                                       : missingVal}
                                   </td>
                                   <td>{typeof m.price === 'number' && m.price !== 0 ? formatCurrency(m.price) : missingVal}</td>
