@@ -58,6 +58,7 @@ function DashboardContent() {
   const [commissionsModalData, setCommissionsModalData] = useState<any>(null)
   const [editingTransactions, setEditingTransactions] = useState<any[]>([])
   const [portfolioTab, setPortfolioTab] = useState<'initial' | 'final' | 'movements'>('final')
+  const [recalculatingCosts, setRecalculatingCosts] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
   const clienteFilter = searchParams.get('cliente')
@@ -516,6 +517,84 @@ function DashboardContent() {
       [field]: originalValue,
       [`${field}_is_modified`]: false
     }))
+  }
+
+  const handleRecalculateCosts = async () => {
+    if (!inspectorData || !user) return
+    setRecalculatingCosts(true)
+
+    try {
+      const response = await fetch('/api/recalculate-costs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysisId: inspectorData.id })
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        alert('Errore: ' + result.error)
+        return
+      }
+
+      // Re-fetch the specific document to get updated data
+      const { data: updatedDoc } = await supabase
+        .from('analyses')
+        .select('*')
+        .eq('id', inspectorData.id)
+        .single()
+
+      if (updatedDoc) {
+        setInspectorData(updatedDoc)
+        // Also update in the analyses list
+        setAnalyses(prev => prev.map(a => a.id === updatedDoc.id ? updatedDoc : a))
+      }
+
+      alert(`Ricalcolo completato: ${result.movementsUpdated} movimenti aggiornati`)
+    } catch (err: any) {
+      alert('Errore: ' + err.message)
+    } finally {
+      setRecalculatingCosts(false)
+    }
+  }
+
+  const handleRecalculateSingle = async () => {
+    if (!user || !inspectorData) return
+
+    if (!confirm(`Ri-analizzare questo documento dal PDF originale?\n\n${inspectorData.bank_name} - ${new Date(inspectorData.period_start).toLocaleDateString('it-IT')} / ${new Date(inspectorData.period_end).toLocaleDateString('it-IT')}`)) return
+
+    setRecalculatingCosts(true)
+
+    try {
+      const formData = new FormData()
+      formData.append('reanalyzeId', inspectorData.id)
+      formData.append('userId', user.id)
+
+      const response = await fetch('/api/parse-pdf', {
+        method: 'POST',
+        body: formData
+      })
+      const result = await response.json()
+
+      if (result.success) {
+        await fetchAnalyses(user.id)
+        const { data: updatedDoc } = await supabase
+          .from('analyses')
+          .select('*')
+          .eq('id', inspectorData.id)
+          .single()
+        if (updatedDoc) setInspectorData(updatedDoc)
+        alert('Ri-analisi completata!')
+      } else if (response.status === 404) {
+        alert('PDF originale non trovato nello storage.')
+      } else {
+        alert('Errore nella ri-analisi: ' + (result.error || 'errore sconosciuto'))
+      }
+    } catch (err: any) {
+      alert('Errore: ' + err.message)
+    } finally {
+      setRecalculatingCosts(false)
+    }
   }
 
   const handleSaveInspector = async () => {
@@ -1163,6 +1242,7 @@ function DashboardContent() {
 
   // --- 6. Mappa coerenza portafoglio: id → boolean (true = quadra, false = non quadra, undefined = nessun periodo precedente) ---
   const coherenceMap: Record<string, boolean | 'missing'> = {}
+  const coherenceDetails: Record<string, string> = {} // Detailed tooltip info for non-ok cases
   analyses.filter(a => a.account_type === 'DOSSIER').forEach(doc => {
     const normAcc = normalizeAcc(doc.benchmark_comparison || '')
     if (!doc.period_start || !doc.period_end) return
@@ -1197,8 +1277,17 @@ function DashboardContent() {
       if (prevEnd.getMonth() !== expPrevM || prevEnd.getFullYear() !== expPrevMY) {
         coherenceMap[doc.id] = 'missing'; return
       }
+    } else if (docDays > 150) {
+      // Per semestrali (> 150gg): il predecessore deve finire nel semestre precedente
+      const getHalf = (d: Date) => ({ h: d.getMonth() < 6 ? 0 : 1, y: d.getFullYear() })
+      const dH = getHalf(docEnd), pH = getHalf(prevEnd)
+      const expH = dH.h === 0 ? 1 : 0
+      const expHY = dH.h === 0 ? dH.y - 1 : dH.y
+      if (pH.h !== expH || pH.y !== expHY) {
+        coherenceMap[doc.id] = 'missing'; return
+      }
     } else if (prevQ.q !== expPrevQ || prevQ.y !== expPrevY) {
-      // Per trimestrali/semestrali: prevDoc deve finire nel trimestre precedente
+      // Per trimestrali: prevDoc deve finire nel trimestre precedente
       coherenceMap[doc.id] = 'missing'; return
     }
     const prevH: Record<string, number> = {}
@@ -1220,10 +1309,21 @@ function DashboardContent() {
       if (!(isin in calcInit)) { const q = 0 - d.b + d.s; if (q !== 0) calcInit[isin] = q }
     })
     const allIsins = new Set([...Object.keys(prevH), ...Object.keys(calcInit)])
-    let ok = true
+    let matchCount = 0
+    let totalCount = 0
+    const mismatchIsins: string[] = []
     allIsins.forEach(isin => {
-      if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) ok = false
+      totalCount++
+      if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) {
+        mismatchIsins.push(isin)
+      } else {
+        matchCount++
+      }
     })
+    const ok = mismatchIsins.length === 0
+    if (!ok) {
+      coherenceDetails[doc.id] = `Portafoglio iniziale non quadra: ${matchCount}/${totalCount} titoli ok. Mismatch: ${mismatchIsins.join(', ')}`
+    }
     coherenceMap[doc.id] = ok
   })
 
@@ -1235,31 +1335,35 @@ function DashboardContent() {
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  // Determine if a document is monthly (< 45 days) or quarterly/longer
-  const isDocMonthly = (a: Analysis) => {
-    if (!a.period_start || !a.period_end) return false;
+  // Determine document frequency: monthly (< 45 days), quarterly (45-150), semiannual (> 150)
+  type DocFrequency = 'monthly' | 'quarterly' | 'semiannual';
+  const getDocFrequency = (a: Analysis): DocFrequency => {
+    if (!a.period_start || !a.period_end) return 'quarterly';
     const start = new Date(a.period_start);
     const end = new Date(a.period_end);
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-    return diffDays < 45;
+    if (diffDays < 45) return 'monthly';
+    if (diffDays > 150) return 'semiannual';
+    return 'quarterly';
   };
+  const isDocMonthly = (a: Analysis) => getDocFrequency(a) === 'monthly';
 
   // Build a frequency map for the year: for each month, determine expected frequency
-  const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): ('monthly' | 'quarterly')[] => {
+  const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): DocFrequency[] => {
     // Array of 12 months, default to 'quarterly'
-    const freqMap: ('monthly' | 'quarterly')[] = Array(12).fill('quarterly');
+    const freqMap: DocFrequency[] = Array(12).fill('quarterly');
 
     // Get all documents for this year, sorted by end date
     const yearDocs = accountAnalyses
       .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year)
       .sort((a, b) => new Date(a.period_end).getTime() - new Date(b.period_end).getTime());
 
-    let currentFreq: 'monthly' | 'quarterly' = 'quarterly';
+    let currentFreq: DocFrequency = 'quarterly';
     let lastDocEndMonth = 0;
 
     yearDocs.forEach(doc => {
       const endMonth = new Date(doc.period_end).getMonth(); // 0-11
-      const docIsMonthly = isDocMonthly(doc);
+      const docFreq = getDocFrequency(doc);
 
       // Fill from last document end to this document end with current frequency
       for (let m = lastDocEndMonth; m < endMonth; m++) {
@@ -1267,10 +1371,19 @@ function DashboardContent() {
       }
 
       // This document's month uses its own frequency
-      freqMap[endMonth] = docIsMonthly ? 'monthly' : 'quarterly';
+      freqMap[endMonth] = docFreq;
+
+      // For semiannual, mark all months in the half-year
+      if (docFreq === 'semiannual') {
+        const halfStart = endMonth < 6 ? 0 : 6;
+        const halfEnd = endMonth < 6 ? 5 : 11;
+        for (let m = halfStart; m <= halfEnd; m++) {
+          freqMap[m] = 'semiannual';
+        }
+      }
 
       // Update current frequency for future months
-      currentFreq = docIsMonthly ? 'monthly' : 'quarterly';
+      currentFreq = docFreq;
       lastDocEndMonth = endMonth + 1;
     });
 
@@ -1282,15 +1395,62 @@ function DashboardContent() {
     return freqMap;
   };
 
+  // Build a merged frequency map across ALL accounts in a bank group for a given year.
+  // If ANY account has 'monthly' for a given month, the merged result is 'monthly'.
+  // This ensures all rows within the same year group share the same slot structure → vertical alignment.
+  const buildMergedFrequencyMap = (group: BankGroup, year: number): DocFrequency[] => {
+    const merged: DocFrequency[] = Array(12).fill('quarterly');
+    const allAccounts = [...group.dossiers, ...group.liquidityAccounts];
+    allAccounts.forEach(account => {
+      const accountMap = buildYearFrequencyMap(account.analyses, year);
+      accountMap.forEach((freq, m) => {
+        // Priority: monthly > quarterly > semiannual (most granular wins for alignment)
+        if (freq === 'monthly') merged[m] = 'monthly';
+        else if (freq === 'semiannual' && merged[m] === 'quarterly') merged[m] = 'semiannual';
+      });
+    });
+    return merged;
+  };
+
   // Build the slots to render based on frequency map
-  const buildYearSlots = (freqMap: ('monthly' | 'quarterly')[], accountAnalyses: Analysis[], year: number) => {
-    const slots: { type: 'monthly' | 'quarterly'; month: number; quarter?: number; file?: Analysis }[] = [];
+  const buildYearSlots = (freqMap: DocFrequency[], accountAnalyses: Analysis[], year: number) => {
+    const slots: { type: DocFrequency; month: number; quarter?: number; half?: number; file?: Analysis }[] = [];
     let m = 0;
 
     while (m < 12) {
       const freq = freqMap[m];
 
-      if (freq === 'quarterly') {
+      if (freq === 'semiannual') {
+        // Semiannual: H1 = Jan-Jun (months 0-5), H2 = Jul-Dec (months 6-11)
+        const half = m < 6 ? 1 : 2;
+        const halfStart = half === 1 ? 0 : 6;
+        const halfEnd = half === 1 ? 5 : 11;
+
+        // Check if any month in this half is more granular
+        const hasMonthly = freqMap.slice(halfStart, halfEnd + 1).includes('monthly');
+        const hasQuarterly = freqMap.slice(halfStart, halfEnd + 1).includes('quarterly');
+
+        if (hasMonthly || hasQuarterly) {
+          // Fall back to more granular rendering for this half
+          // Don't skip — let the loop process each month individually with its actual freq
+          const file = accountAnalyses.find(a => {
+            if (!a.period_end) return false;
+            const d = new Date(a.period_end);
+            return d.getFullYear() === year && d.getMonth() === m;
+          });
+          slots.push({ type: 'monthly', month: m, file });
+          m++;
+        } else {
+          // Pure semiannual — create single wide slot
+          const file = accountAnalyses.find(a => {
+            if (!a.period_end) return false;
+            const d = new Date(a.period_end);
+            return d.getFullYear() === year && d.getMonth() >= halfStart && d.getMonth() <= halfEnd;
+          });
+          slots.push({ type: 'semiannual', month: halfEnd, half, file });
+          m = halfEnd + 1;
+        }
+      } else if (freq === 'quarterly') {
         // Find which quarter this month belongs to
         const quarter = Math.floor(m / 3) + 1; // 1-4
         const quarterStartMonth = (quarter - 1) * 3; // 0, 3, 6, 9
@@ -1365,7 +1525,7 @@ function DashboardContent() {
     })
   }
 
-  const getSlotDates = (year: number, slotIndex: number, frequency: 'monthly' | 'quarterly') => {
+  const getSlotDates = (year: number, slotIndex: number, frequency: DocFrequency) => {
     const fmt = (d: Date) => d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
     if (frequency === 'monthly') {
       // Start: last day of previous month, End: last day of current month
@@ -1373,6 +1533,12 @@ function DashboardContent() {
       const endDate = new Date(year, slotIndex, 0);       // Last day of current month
       const labelDate = new Date(year, slotIndex - 1, 1); // For getting month name
       return { start: fmt(startDate), end: fmt(endDate), label: labelDate.toLocaleString('it-IT', { month: 'short' }).toUpperCase() };
+    } else if (frequency === 'semiannual') {
+      // Semiannual: H1 (Jan-Jun) or H2 (Jul-Dec)
+      const half = slotIndex; // 1 or 2
+      const startDate = half === 1 ? new Date(year - 1, 11, 31) : new Date(year, 5, 30);
+      const endDate = half === 1 ? new Date(year, 5, 30) : new Date(year, 11, 31);
+      return { start: fmt(startDate), end: fmt(endDate), label: `H${half}` };
     } else {
       // Quarterly: Start from last day of previous quarter
       const endMonth = slotIndex * 3;       // e.g., Q4 = month 12
@@ -1787,23 +1953,28 @@ function DashboardContent() {
 
                   {/* Scrollable timeline area */}
                   <div className={styles.dualTimelineScroller} ref={registerTimeline} onScroll={handleSyncScroll}>
-                    {years.map(year => (
+                    {years.map(year => {
+                      const mergedFreqMap = buildMergedFrequencyMap(group, year)
+                      return (
                       <div key={year} className={styles.dualYearGroup}>
                         <span className={styles.dualYearLabel}>{year}</span>
                         {/* One row per dossier account */}
                         {group.dossiers.map((dossier, dIdx) => {
-                          const freqMap = buildYearFrequencyMap(dossier.analyses, year)
-                          const slots = buildYearSlots(freqMap, dossier.analyses, year)
+                          const slots = buildYearSlots(mergedFreqMap, dossier.analyses, year)
                           return (
                             <div key={`dos-${dIdx}`} className={styles.dualYearCards}>
                               {slots.map((slot, idx) => {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
+                                const isSemiannual = slot.type === 'semiannual'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
                                 const coh = isPresent ? coherenceMap[slot.file!.id] : undefined
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
-                                if (isMonthly) {
+                                if (isSemiannual) {
+                                  displayLabel = `H${slot.half}`
+                                  dates = getSlotDates(year, slot.half!, 'semiannual')
+                                } else if (isMonthly) {
                                   const mn = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
                                   displayLabel = mn[slot.month]
                                   dates = getSlotDates(year, slot.month + 1, 'monthly')
@@ -1816,21 +1987,23 @@ function DashboardContent() {
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays >= 45 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
+                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
+                                const sizeClass = isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                    className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    className={`${styles.dualCard} ${sizeClass} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
                                     style={coh === false ? { borderColor: '#ef4444', borderWidth: '2px' } : coh === 'missing' ? { borderColor: '#f59e0b', borderWidth: '2px' } : undefined}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                       <span className={styles.dualCardType}>{displayLabel}</span>
                                       {coh === true && <span title="Portafoglio iniziale verificato" style={{ fontSize: '0.55rem' }}>✅</span>}
-                                      {coh === false && <span title="Portafoglio iniziale non quadra" style={{ fontSize: '0.55rem' }}>❌</span>}
+                                      {coh === false && <span title={coherenceDetails[slot.file!.id] || 'Portafoglio iniziale non quadra'} style={{ fontSize: '0.55rem' }}>❌</span>}
                                       {coh === 'missing' && <span title="Portafoglio iniziale assente" style={{ fontSize: '0.55rem' }}>⚠️</span>}
                                     </div>
                                     <div className={styles.dualCardDates}>
@@ -1857,17 +2030,20 @@ function DashboardContent() {
                         })}
                         {/* One row per liquidity account */}
                         {group.liquidityAccounts.map((liq, lIdx) => {
-                          const freqMap = buildYearFrequencyMap(liq.analyses, year)
-                          const slots = buildYearSlots(freqMap, liq.analyses, year)
+                          const slots = buildYearSlots(mergedFreqMap, liq.analyses, year)
                           return (
                             <div key={`liq-${lIdx}`} className={styles.dualYearCards}>
                               {slots.map((slot, idx) => {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
+                                const isSemiannual = slot.type === 'semiannual'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
-                                if (isMonthly) {
+                                if (isSemiannual) {
+                                  displayLabel = `H${slot.half}`
+                                  dates = getSlotDates(year, slot.half!, 'semiannual')
+                                } else if (isMonthly) {
                                   const mn = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
                                   displayLabel = mn[slot.month]
                                   dates = getSlotDates(year, slot.month + 1, 'monthly')
@@ -1880,15 +2056,17 @@ function DashboardContent() {
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays >= 45 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
+                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
+                                const liqSizeClass = isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                    className={`${styles.dualCard} ${!isMonthly ? styles.dualCardQ : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    className={`${styles.dualCard} ${liqSizeClass} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
                                     <span className={styles.dualCardType}>{displayLabel}</span>
                                     <div className={styles.dualCardDates}>
@@ -1914,7 +2092,7 @@ function DashboardContent() {
                           )
                         })}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 </div>
               </div>
@@ -1935,7 +2113,28 @@ function DashboardContent() {
                   {inspectorData.account_type === 'LIQUIDITY' && <span className={styles.accBadge} style={{ marginLeft: '10px' }}>LIQUIDITÀ</span>}
                 </p>
               </div>
-              <button className={styles.closeBtn} onClick={() => setInspectorData(null)}>×</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  onClick={handleRecalculateSingle}
+                  disabled={recalculatingCosts}
+                  title="Ri-analizza questo PDF con il prompt migliorato"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '0.8rem',
+                    background: recalculatingCosts ? '#94a3b8' : '#3b82f6',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: recalculatingCosts ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {recalculatingCosts ? '⟳ Ri-analisi...' : '🔄 Ri-Analizza'}
+                </button>
+                <button className={styles.closeBtn} onClick={() => setInspectorData(null)}>×</button>
+              </div>
             </div>
             <div className={styles.modalBody}>
 
@@ -2166,9 +2365,11 @@ function DashboardContent() {
                 </div>
               )}
 
-              {/* Confronto Portafoglio Iniziale vs Periodo Precedente - per ISIN */}
+              {/* Capital Gain/Loss Card */}
               {inspectorData.account_type === 'DOSSIER' && (() => {
                 const currentAccNorm = normalizeAcc(inspectorData.benchmark_comparison || '')
+
+                // Trova il documento del periodo precedente
                 const prevDoc = analyses
                   .filter(a =>
                     a.id !== inspectorData.id &&
@@ -2178,6 +2379,211 @@ function DashboardContent() {
                     new Date(a.period_end) <= new Date(inspectorData.period_start)
                   )
                   .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
+
+                // Costruisci mappa portafoglio iniziale (dal periodo precedente)
+                const inizialeMap: Record<string, { qty: number; price: number; value: number; name: string }> = {}
+                if (prevDoc?.holdings?.length) {
+                  prevDoc.holdings.forEach((h: any) => {
+                    const isin = h.isin || 'UNKNOWN'
+                    inizialeMap[isin] = {
+                      qty: h.quantity || 0,
+                      price: h.price || 0,
+                      value: h.marketValue || 0,
+                      name: h.name || isin
+                    }
+                  })
+                }
+
+                // Costruisci mappa portafoglio finale
+                const finaleMap: Record<string, { qty: number; price: number; value: number; name: string }> = {}
+                ;(inspectorData.holdings || []).forEach((h: any) => {
+                  const isin = h.isin || 'UNKNOWN'
+                  finaleMap[isin] = {
+                    qty: h.quantity || 0,
+                    price: h.price || 0,
+                    value: h.marketValue || 0,
+                    name: h.name || isin
+                  }
+                })
+
+                // Costruisci mappa movimenti per ISIN
+                const movements = inspectorData.costs_breakdown?.securityMovements || []
+                const movimentiMap: Record<string, { acquisti: Array<{qty: number; price: number; value: number}>; vendite: Array<{qty: number; price: number; value: number}> }> = {}
+                movements.forEach((m: any) => {
+                  const isin = m.isin || 'UNKNOWN'
+                  if (!movimentiMap[isin]) movimentiMap[isin] = { acquisti: [], vendite: [] }
+                  const mov = {
+                    qty: m.quantity || 0,
+                    price: m.price || 0,
+                    value: (m.quantity || 0) * (m.price || 0)
+                  }
+                  if (m.operationType === 'Acquisto') {
+                    movimentiMap[isin].acquisti.push(mov)
+                  } else if (m.operationType === 'Vendita') {
+                    movimentiMap[isin].vendite.push(mov)
+                  }
+                })
+
+                // Raccogli tutti gli ISIN coinvolti
+                const allIsins = [...new Set([
+                  ...Object.keys(inizialeMap),
+                  ...Object.keys(finaleMap),
+                  ...Object.keys(movimentiMap)
+                ])]
+
+                // Calcola Capital Gain per ogni ISIN
+                // Formula: CG = (Qfin × Pfin) + Σ(Qvend × Pvend) - (Qiniz × Piniz) - Σ(Qacq × Pacq)
+                let totalCapitalGain = 0
+                let totalValoreIniziale = 0
+                let totalValoreFinale = 0
+                let totalCostoAcquisti = 0
+                let totalRicavoVendite = 0
+
+                const dettaglioPerIsin: Array<{
+                  isin: string
+                  name: string
+                  valoreIniziale: number
+                  costoAcquisti: number
+                  ricavoVendite: number
+                  valoreFinale: number
+                  capitalGain: number
+                }> = []
+
+                allIsins.forEach(isin => {
+                  const iniz = inizialeMap[isin] || { qty: 0, price: 0, value: 0, name: isin }
+                  const fin = finaleMap[isin] || { qty: 0, price: 0, value: 0, name: isin }
+                  const mov = movimentiMap[isin] || { acquisti: [], vendite: [] }
+
+                  // Valore iniziale: Qiniz × Piniz
+                  const valoreIniziale = iniz.value || (iniz.qty * iniz.price)
+
+                  // Valore finale: Qfin × Pfin
+                  const valoreFinale = fin.value || (fin.qty * fin.price)
+
+                  // Costo acquisti: Σ(Qacq × Pacq)
+                  const costoAcquisti = mov.acquisti.reduce((acc, a) => acc + a.value, 0)
+
+                  // Ricavo vendite: Σ(Qvend × Pvend)
+                  const ricavoVendite = mov.vendite.reduce((acc, v) => acc + v.value, 0)
+
+                  // Capital Gain per questo ISIN
+                  const capitalGain = valoreFinale + ricavoVendite - valoreIniziale - costoAcquisti
+
+                  totalValoreIniziale += valoreIniziale
+                  totalValoreFinale += valoreFinale
+                  totalCostoAcquisti += costoAcquisti
+                  totalRicavoVendite += ricavoVendite
+                  totalCapitalGain += capitalGain
+
+                  if (valoreIniziale > 0 || valoreFinale > 0 || costoAcquisti > 0 || ricavoVendite > 0) {
+                    dettaglioPerIsin.push({
+                      isin,
+                      name: fin.name || iniz.name || isin,
+                      valoreIniziale,
+                      costoAcquisti,
+                      ricavoVendite,
+                      valoreFinale,
+                      capitalGain
+                    })
+                  }
+                })
+
+                const capitalGainPercent = totalValoreIniziale > 0 ? (totalCapitalGain / totalValoreIniziale) * 100 : 0
+                const isPositive = totalCapitalGain >= 0
+                const hasPrevDoc = !!prevDoc?.holdings?.length
+
+                return (
+                  <div style={{
+                    margin: '1rem 0',
+                    padding: '1rem',
+                    borderRadius: '12px',
+                    background: isPositive ? 'linear-gradient(135deg, #ecfdf5, #d1fae5)' : 'linear-gradient(135deg, #fef2f2, #fee2e2)',
+                    border: `2px solid ${isPositive ? '#22c55e' : '#ef4444'}`
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                      <strong style={{ fontSize: '0.95rem', color: '#334155' }}>
+                        {isPositive ? '📈' : '📉'} Capital {isPositive ? 'Gain' : 'Loss'} del Periodo
+                      </strong>
+                      <span style={{
+                        fontSize: '1.25rem',
+                        fontWeight: 'bold',
+                        color: isPositive ? '#16a34a' : '#dc2626'
+                      }}>
+                        {isPositive ? '+' : ''}{formatCurrency(totalCapitalGain)} €
+                        {totalValoreIniziale > 0 && (
+                          <span style={{ fontSize: '0.85rem', marginLeft: '6px' }}>
+                            ({isPositive ? '+' : ''}{capitalGainPercent.toFixed(2)}%)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', fontSize: '0.8rem', color: '#64748b' }}>
+                      <div>
+                        <span>Σ(Q<sub>iniz</sub> × P<sub>iniz</sub>)</span>
+                        <span style={{ float: 'right', color: '#334155' }}>
+                          {formatCurrency(totalValoreIniziale)} €
+                          {!hasPrevDoc && <span style={{ fontSize: '0.65rem', marginLeft: '4px', color: '#f59e0b' }}>(no prev)</span>}
+                        </span>
+                      </div>
+                      <div>
+                        <span>Σ(Q<sub>fin</sub> × P<sub>fin</sub>)</span>
+                        <span style={{ float: 'right', color: '#334155' }}>{formatCurrency(totalValoreFinale)} €</span>
+                      </div>
+                      <div>
+                        <span>Σ(Q<sub>acq</sub> × P<sub>acq</sub>)</span>
+                        <span style={{ float: 'right', color: '#ef4444' }}>-{formatCurrency(totalCostoAcquisti)} €</span>
+                      </div>
+                      <div>
+                        <span>Σ(Q<sub>vend</sub> × P<sub>vend</sub>)</span>
+                        <span style={{ float: 'right', color: '#22c55e' }}>+{formatCurrency(totalRicavoVendite)} €</span>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(0,0,0,0.1)', fontSize: '0.7rem', color: '#94a3b8' }}>
+                      <strong>Formula per ogni ISIN:</strong> CG = (Q<sub>fin</sub>×P<sub>fin</sub>) + Σ(Q<sub>vend</sub>×P<sub>vend</sub>) - (Q<sub>iniz</sub>×P<sub>iniz</sub>) - Σ(Q<sub>acq</sub>×P<sub>acq</sub>)
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Confronto Portafoglio Iniziale vs Periodo Precedente - per ISIN */}
+              {inspectorData.account_type === 'DOSSIER' && (() => {
+                const currentAccNorm = normalizeAcc(inspectorData.benchmark_comparison || '')
+                // Trova predecessore valido: deve essere dal periodo immediatamente precedente
+                const prevDoc = (() => {
+                  if (!inspectorData.period_start || !inspectorData.period_end) return null
+                  const candidate = analyses
+                    .filter(a =>
+                      a.id !== inspectorData.id &&
+                      a.account_type === 'DOSSIER' &&
+                      normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
+                      a.period_end && a.period_start &&
+                      new Date(a.period_end) <= new Date(inspectorData.period_start)
+                    )
+                    .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
+                  if (!candidate) return null
+                  const docStart = new Date(inspectorData.period_start)
+                  const docEnd = new Date(inspectorData.period_end)
+                  const prevEnd = new Date(candidate.period_end!)
+                  const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
+                  if (gapDays > 5) return null
+                  const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
+                  const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
+                  const dQ = getQ(docEnd), pQ = getQ(prevEnd)
+                  if (docDays < 45) {
+                    const eM = docEnd.getMonth() === 0 ? 11 : docEnd.getMonth() - 1
+                    const eY = docEnd.getMonth() === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+                    if (prevEnd.getMonth() !== eM || prevEnd.getFullYear() !== eY) return null
+                  } else if (docDays > 150) {
+                    const dH = docEnd.getMonth() < 6 ? 0 : 1, pH = prevEnd.getMonth() < 6 ? 0 : 1
+                    const expH = dH === 0 ? 1 : 0, expHY = dH === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+                    if (pH !== expH || prevEnd.getFullYear() !== expHY) return null
+                  } else {
+                    const eQ = dQ.q === 0 ? 3 : dQ.q - 1
+                    const eY = dQ.q === 0 ? dQ.y - 1 : dQ.y
+                    if (pQ.q !== eQ || pQ.y !== eY) return null
+                  }
+                  return candidate
+                })()
 
                 if (!prevDoc) return null
 
@@ -2466,15 +2872,41 @@ function DashboardContent() {
                   {portfolioTab === 'initial' && (() => {
                     // Check if previous period exists for this account
                     const currentAccNorm = inspectorData.account_type === 'DOSSIER' ? normalizeAcc(inspectorData.benchmark_comparison || '') : ''
-                    const prevDoc = currentAccNorm ? analyses
-                      .filter(a =>
-                        a.id !== inspectorData.id &&
-                        a.account_type === inspectorData.account_type &&
-                        normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
-                        a.period_end && inspectorData.period_start &&
-                        new Date(a.period_end) <= new Date(inspectorData.period_start))
-                      .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
-                      : null
+                    // Trova predecessore valido: deve essere dal periodo immediatamente precedente
+                    const prevDoc = (() => {
+                      if (!currentAccNorm || !inspectorData.period_start || !inspectorData.period_end) return null
+                      const candidate = analyses
+                        .filter(a =>
+                          a.id !== inspectorData.id &&
+                          a.account_type === inspectorData.account_type &&
+                          normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
+                          a.period_end && a.period_start &&
+                          new Date(a.period_end) <= new Date(inspectorData.period_start))
+                        .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
+                      if (!candidate) return null
+                      const docStart = new Date(inspectorData.period_start)
+                      const docEnd = new Date(inspectorData.period_end)
+                      const prevEnd = new Date(candidate.period_end!)
+                      const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
+                      if (gapDays > 5) return null
+                      const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
+                      const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
+                      const dQ = getQ(docEnd), pQ = getQ(prevEnd)
+                      if (docDays < 45) {
+                        const eM = docEnd.getMonth() === 0 ? 11 : docEnd.getMonth() - 1
+                        const eY = docEnd.getMonth() === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+                        if (prevEnd.getMonth() !== eM || prevEnd.getFullYear() !== eY) return null
+                      } else if (docDays > 150) {
+                        const dH = docEnd.getMonth() < 6 ? 0 : 1, pH = prevEnd.getMonth() < 6 ? 0 : 1
+                        const expH = dH === 0 ? 1 : 0, expHY = dH === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+                        if (pH !== expH || prevEnd.getFullYear() !== expHY) return null
+                      } else {
+                        const eQ = dQ.q === 0 ? 3 : dQ.q - 1
+                        const eY = dQ.q === 0 ? dQ.y - 1 : dQ.y
+                        if (pQ.q !== eQ || pQ.y !== eY) return null
+                      }
+                      return candidate
+                    })()
 
                     const isImported = !!prevDoc
                     const movements = inspectorData.costs_breakdown?.securityMovements || [];
@@ -2583,6 +3015,7 @@ function DashboardContent() {
                   {/* Tab Content: Movimenti Titoli */}
                   {portfolioTab === 'movements' && (
                     inspectorData.costs_breakdown?.securityMovements && inspectorData.costs_breakdown.securityMovements.length > 0 ? (
+                      <>
                       <table className={styles.inspectorTable}>
                         <thead>
                           <tr>
@@ -2630,9 +3063,30 @@ function DashboardContent() {
                                   <td>{typeof m.price === 'number' && m.price !== 0 ? formatCurrency(m.price) : missingVal}</td>
                                   <td>{(m.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                                   <td>{m.currency || 'EUR'}</td>
-                                  <td style={{ color: '#ef4444' }}>{(() => {
+                                  <td>{(() => {
                                       const totalCosts = (m.fees || 0) + (m.taxes || 0);
-                                      return totalCosts !== 0 ? `-${formatCurrency(totalCosts)}` : missingVal;
+                                      const extracted = m.costsExtracted || 0;
+                                      const calculated = m.costsCalculated || 0;
+                                      const isFromPdf = m.costsSource === 'extracted';
+                                      const tolerance = 0.02; // 2 centesimi di tolleranza
+                                      const matches = Math.abs(extracted - calculated) <= tolerance;
+
+                                      if (totalCosts < 0.01) return missingVal;
+
+                                      return (
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ color: '#ef4444' }}>-{formatCurrency(totalCosts)}</span>
+                                          {isFromPdf ? (
+                                            matches ? (
+                                              <span title={`PDF: ${formatCurrency(extracted)} | Calc: ${formatCurrency(calculated)}`} style={{ color: '#22c55e', fontSize: '14px' }}>✓</span>
+                                            ) : (
+                                              <span title={`PDF: ${formatCurrency(extracted)} ≠ Calc: ${formatCurrency(calculated)}`} style={{ color: '#f59e0b', fontSize: '14px', cursor: 'help' }}>⚠</span>
+                                            )
+                                          ) : (
+                                            <span title="Calcolato: netto - lordo" style={{ color: '#64748b', fontSize: '11px' }}>(calc)</span>
+                                          )}
+                                        </span>
+                                      );
                                     })()}</td>
                                   <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{typeof m.netAmount === 'number' && m.netAmount !== 0 ? `${isVendita ? '+' : '-'}€${formatCurrency(Math.abs(m.netAmount))}` : missingVal}</td>
                                   <td style={{ color: isVendita ? '#22c55e' : '#ef4444' }}>{(() => {
@@ -2644,6 +3098,7 @@ function DashboardContent() {
                             })}
                         </tbody>
                       </table>
+                      </>
                     ) : (
                       <p style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '40px' }}>
                         Non ci sono movimenti in questo periodo

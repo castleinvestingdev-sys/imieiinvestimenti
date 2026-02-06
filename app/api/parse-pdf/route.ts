@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import * as https from 'https'
 import crypto from 'crypto'
 
-// Allow up to 5 minutes for Gemini PDF processing
+// Allow up to 5 minutes for OpenAI PDF processing
 export const maxDuration = 300
 
 // Funzione per riparare JSON troncato (spostata fuori per evitare errori strict mode)
@@ -77,30 +77,140 @@ function repairTruncatedJson(jsonStr: string): string | null {
     return repaired
 }
 
-function callGeminiDirect(apiKey: string, model: string, prompt: string, pdfBase64: string): Promise<string> {
+// === PORTFOLIO VALIDATION HELPERS ===
+
+function validatePortfolioTotals(parsed: any): {
+    needsRetry: boolean
+    gap: number
+    gapPercent: number
+    sumOfMarketValues: number
+    extractedTotal: number
+} {
+    const holdings = parsed.finalPortfolio || []
+    const extractedTotal = parsed.summary?.portfolio_total_extracted || 0
+
+    if (extractedTotal <= 0 || holdings.length === 0) {
+        return { needsRetry: false, gap: 0, gapPercent: 0, sumOfMarketValues: 0, extractedTotal }
+    }
+
+    const sumOfMarketValues = holdings.reduce(
+        (acc: number, h: any) => acc + (h.marketValue || 0), 0
+    )
+
+    const gap = Math.abs(extractedTotal - sumOfMarketValues)
+    const gapPercent = (gap / extractedTotal) * 100
+
+    // Trigger retry if gap > 1€ (tolleranza solo per arrotondamenti floating point)
+    const needsRetry = gap > 1
+
+    return { needsRetry, gap, gapPercent, sumOfMarketValues, extractedTotal }
+}
+
+function findSuspiciousMissingIsins(
+    currentHoldings: any[],
+    currentSecurityMovements: any[],
+    prevHoldings: any[]
+): Array<{ isin: string; name: string; prevQuantity: number }> {
+    const currentIsinSet = new Set(
+        currentHoldings.map((h: any) => h.isin).filter(Boolean)
+    )
+
+    const soldIsins = new Set(
+        currentSecurityMovements
+            .filter((m: any) => m.operationType === 'Vendita')
+            .map((m: any) => m.isin)
+            .filter(Boolean)
+    )
+
+    const suspicious: Array<{ isin: string; name: string; prevQuantity: number }> = []
+
+    for (const h of prevHoldings) {
+        if (!h.isin) continue
+        if (currentIsinSet.has(h.isin)) continue
+        if (soldIsins.has(h.isin)) continue
+        if ((h.quantity || 0) <= 0) continue
+        if ((h.marketValue || 0) <= 0) continue
+
+        suspicious.push({
+            isin: h.isin,
+            name: h.name || h.isin,
+            prevQuantity: h.quantity || 0
+        })
+    }
+
+    return suspicious
+}
+
+function mergeTargetedFindings(
+    parsed: any,
+    findings: any[]
+): { merged: number; skipped: number } {
+    const existingIsins = new Set(
+        (parsed.finalPortfolio || []).map((h: any) => h.isin).filter(Boolean)
+    )
+
+    let merged = 0
+    let skipped = 0
+
+    for (const f of findings) {
+        if (!f.isin) { skipped++; continue }
+        if (existingIsins.has(f.isin)) { skipped++; continue }
+        if (!f.quantity || f.quantity <= 0) { skipped++; continue }
+        if (!f.marketValue || f.marketValue <= 0) { skipped++; continue }
+
+        if (!parsed.finalPortfolio) parsed.finalPortfolio = []
+        parsed.finalPortfolio.push({
+            isin: f.isin,
+            name: f.name || f.isin,
+            assetType: f.assetType || 'Fondo',
+            currency: f.currency || 'EUR',
+            exchangeRate: f.exchangeRate || 1,
+            quantity: f.quantity,
+            price: f.price || 0,
+            marketValue: f.marketValue
+        })
+        existingIsins.add(f.isin)
+        merged++
+    }
+
+    return { merged, skipped }
+}
+
+function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase64: string): Promise<string> {
     return new Promise((resolve, reject) => {
         const requestBody = JSON.stringify({
-            contents: [{
-                parts: [
-                    { text: prompt },
-                    { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
-                ]
-            }],
-            generationConfig: {
-                temperature: 0,
-                topP: 1,
-                topK: 1,
-                maxOutputTokens: 65536
-            }
+            model,
+            temperature: 0,
+            max_completion_tokens: 65536,
+            messages: [
+                {
+                    role: 'system',
+                    content: systemPrompt
+                },
+                {
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'Analizza questo documento PDF ed estrai i dati in formato JSON.' },
+                        {
+                            type: 'file',
+                            file: {
+                                filename: 'documento.pdf',
+                                file_data: `data:application/pdf;base64,${pdfBase64}`
+                            }
+                        }
+                    ]
+                }
+            ]
         })
 
         const options = {
-            hostname: 'generativelanguage.googleapis.com',
+            hostname: 'api.openai.com',
             port: 443,
-            path: `/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            path: '/v1/chat/completions',
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
                 'Content-Length': Buffer.byteLength(requestBody)
             },
         }
@@ -112,7 +222,7 @@ function callGeminiDirect(apiKey: string, model: string, prompt: string, pdfBase
                 if (res.statusCode === 200) {
                     try {
                         const json = JSON.parse(data)
-                        const text = json.candidates?.[0]?.content?.parts?.[0]?.text || ''
+                        const text = json.choices?.[0]?.message?.content || ''
                         resolve(text)
                     } catch (e: any) {
                         reject(new Error(`JSON parse error: ${e.message}`))
@@ -130,7 +240,7 @@ function callGeminiDirect(apiKey: string, model: string, prompt: string, pdfBase
 }
 
 export async function POST(request: NextRequest) {
-    const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
     const startTime = Date.now()
     const logProgress = (stage: string, details?: string) => {
@@ -147,29 +257,58 @@ export async function POST(request: NextRequest) {
         const userId = formData.get('userId') as string
         const guestEmail = formData.get('guestEmail') as string
         const forceRecalculate = formData.get('force') === 'true'
-        const fileName = file?.name || 'documento.pdf'
+        const reanalyzeId = formData.get('reanalyzeId') as string // ID analisi da ri-analizzare
 
-        logProgress('RICHIESTA RICEVUTA', `${fileName} (${(file?.size / 1024).toFixed(0)}KB)`)
-        console.log(`👤 UserID: ${userId || 'Guest'} | Email: ${guestEmail || 'N/A'} | Force: ${forceRecalculate}`)
+        let fileName = file?.name || 'documento.pdf'
+        let pdfBuffer: Buffer
+        let isReanalysis = false
 
-        if (!file || (!userId && !guestEmail)) {
+        if (reanalyzeId && userId) {
+            // === RE-ANALYSIS MODE: Fetch PDF from Supabase Storage ===
+            isReanalysis = true
+            logProgress('🔄 RI-ANALISI', `Recupero PDF per analisi ${reanalyzeId}`)
+
+            const supabaseForStorage = await createClient()
+            const pdfStoragePath = `${userId}/${reanalyzeId}.pdf`
+            const { data: pdfData, error: downloadError } = await supabaseForStorage.storage
+                .from('documenti')
+                .download(pdfStoragePath)
+
+            if (downloadError || !pdfData) {
+                console.error(`[STORAGE] Download fallito: ${downloadError?.message}`)
+                return NextResponse.json({
+                    success: false,
+                    error: 'PDF non trovato nello storage. Potrebbe essere stato caricato prima dell\'attivazione dello storage.'
+                }, { status: 404 })
+            }
+
+            const arrayBuf = await pdfData.arrayBuffer()
+            pdfBuffer = Buffer.from(arrayBuf)
+            fileName = `reanalysis_${reanalyzeId}.pdf`
+            logProgress('📁 PDF RECUPERATO', `${(pdfBuffer.length / 1024).toFixed(0)}KB da storage`)
+        } else if (file && (userId || guestEmail)) {
+            // === NORMAL MODE: File from upload ===
+            const fileBuffer = await file.arrayBuffer()
+            pdfBuffer = Buffer.from(fileBuffer)
+        } else {
             console.error('[SERVER] ERRORE: File, UserId o Email mancante')
             return NextResponse.json({ success: false, error: 'File, UserId o Email mancante' }, { status: 400 })
         }
 
-        if (!GEMINI_API_KEY) {
-            console.error('ERRORE: GOOGLE_GEMINI_API_KEY non trovata in process.env')
+        logProgress('RICHIESTA RICEVUTA', `${fileName} (${(pdfBuffer.length / 1024).toFixed(0)}KB)`)
+        console.log(`👤 UserID: ${userId || 'Guest'} | Email: ${guestEmail || 'N/A'} | Force: ${forceRecalculate} | Reanalyze: ${reanalyzeId || 'no'}`)
+
+        if (!OPENAI_API_KEY) {
+            console.error('ERRORE: OPENAI_API_KEY non trovata in process.env')
             return NextResponse.json({
                 success: false,
-                error: 'Configurazione API Google mancante. Assicurati che GOOGLE_GEMINI_API_KEY sia impostata e riavvia il server.'
+                error: 'Configurazione API OpenAI mancante. Assicurati che OPENAI_API_KEY sia impostata in .env.local e riavvia il server.'
             }, { status: 500 })
         }
 
-        logProgress('API KEY CARICATA', `Lunghezza: ${GEMINI_API_KEY.length}`)
+        logProgress('API KEY CARICATA', `Lunghezza: ${OPENAI_API_KEY.length}`)
 
         logProgress('CONVERSIONE PDF', 'Encoding file in base64...')
-        const fileBuffer = await file.arrayBuffer()
-        const pdfBuffer = Buffer.from(fileBuffer)
         const base64Data = pdfBuffer.toString('base64')
         logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
 
@@ -441,7 +580,9 @@ Prima di restituire il JSON:
 - "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Altro", NON "Vendita".
 
 ### FASE 8: ESTRAZIONE PORTAFOGLIO TITOLI (SOLO PER type="DOSSIER")
-Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio:
+Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio.
+
+**QUESTA FASE È CRITICA - DEVI ESTRARRE TUTTI I TITOLI SENZA ECCEZIONI.**
 
 **8.1 CONTROVALORE TOTALE**
 Cerca nel PDF il valore "CONTROVALORE TOTALE APPARENTE" o "CONTROVALORE TOTALE" o simile.
@@ -450,8 +591,39 @@ Estrai:
 - Il valore numerico → summary.portfolio_total_extracted (es. 527413.10)
 - La valuta → summary.portfolio_currency (es. "EUR" se dice "Euro", "USD" se dice "Dollar", ecc.)
 
-**8.2 SINGOLI TITOLI**
-Per OGNI titolo nella sezione "CONSISTENZA" (AZIONI, OBBLIGAZIONI, FONDI, SICAV, ETF):
+**8.2 PROCEDURA STEP-BY-STEP PER ESTRARRE TUTTI I TITOLI**
+
+**STEP 1 - IDENTIFICA TUTTE LE SEZIONI DEL PORTAFOGLIO:**
+Il PDF può avere il portafoglio diviso in sezioni separate. DEVI cercare e leggere TUTTE queste sezioni:
+- "AZIONI" / "TITOLI AZIONARI"
+- "OBBLIGAZIONI" / "TITOLI OBBLIGAZIONARI" / "TITOLI DI STATO"
+- "FONDI COMUNI" / "FONDI" / "O.I.C.R." / "OICR"
+- "SICAV"
+- "ETF" / "ETC" / "ETN"
+- "CERTIFICATES" / "CERTIFICATI"
+- "GESTIONI PATRIMONIALI" / "GPM" / "GPF"
+- "POLIZZE" / "PRODOTTI ASSICURATIVI"
+- Qualsiasi altra sezione con titoli nella tabella "CONSISTENZA"
+
+**STEP 2 - LEGGI TUTTE LE PAGINE:**
+La sezione portafoglio può estendersi su PIÙ PAGINE del PDF. NON fermarti alla prima pagina!
+- Se una tabella continua nella pagina successiva, DEVI leggere anche quella
+- Cerca "segue" / "continua" / intestazioni ripetute che indicano continuazione
+- I titoli possono essere distribuiti su 2, 3 o più pagine
+
+**STEP 3 - CONTA I TITOLI:**
+Dopo aver estratto tutti i titoli, CONTA quanti ne hai trovati.
+Ogni riga della tabella con un codice ISIN è UN titolo da estrarre.
+
+**STEP 4 - VERIFICA LA SOMMA (OBBLIGATORIA):**
+Calcola: somma_controvalore = somma di tutti i marketValue estratti
+Confronta con portfolio_total_extracted (il totale dal PDF).
+- Se somma_controvalore ≈ portfolio_total_extracted (differenza < 1%) → OK, hai estratto tutto
+- Se somma_controvalore < portfolio_total_extracted → HAI PERSO DEI TITOLI! Torna allo Step 1 e cerca meglio
+- NON procedere finché la somma non corrisponde al totale (con tolleranza < 1%)
+
+**8.3 CAMPI DA ESTRARRE PER OGNI TITOLO**
+Per OGNI titolo nella sezione "CONSISTENZA":
 - **isin**: Codice ISIN del titolo (es. "FR0010245514", "IT0001047437")
 - **name**: Nome/Descrizione del titolo ESATTAMENTE come appare nel PDF (es. "LYXOR JAPAN (TOPIX)D", "EURIZON BREVE TERM $", "CARMIGNAC PATRIMOINE")
 - **currency**: Divisa/Valuta (es. "EUR", "USD") - dalla colonna "Divisa"
@@ -488,6 +660,8 @@ IMPORTANTE:
 - Per titoli in default (es. "Titolo in default"), metti marketValue = 0
 - I titoli in default NON contribuiscono al controvalore totale
 - Se la quotazione non è disponibile ("Non dispon."), metti price = 0
+- **ERRORE COMUNE**: saltare titoli che si trovano su pagine successive. LEGGI TUTTE LE PAGINE!
+- **VERIFICA FINALE**: il numero di elementi in finalPortfolio DEVE corrispondere al numero di righe nella tabella del PDF
 
 ### FASE 9: ESTRAZIONE MOVIMENTI TITOLI (SOLO PER type="DOSSIER")
 Se il documento è un DOSSIER TITOLI, estrai TUTTI i movimenti di acquisto/vendita titoli.
@@ -521,9 +695,14 @@ Per OGNI movimento titoli estrai:
 - **price**: Prezzo/Quotazione unitario
 - **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
 - **currency**: Valuta/Divisa (EUR, USD, etc.)
-- **fees**: Spese/Commissioni dell'operazione
-- **taxes**: Imposte, bolli, ritenute
+- **grossAmount**: Importo lordo dell'operazione (controvalore = quantity × price × exchangeRate)
+- **fees**: Spese/Commissioni dell'operazione (se presente nel PDF)
+- **taxes**: Imposte, bolli, ritenute (se presente nel PDF)
 - **netAmount**: Importo netto totale dell'operazione
+
+**CALCOLO SPESE/IMPOSTE:**
+- Se il PDF mostra una colonna "Spese", "Commissioni", "Imposte" o "Spese/Imposte" → estrai il valore direttamente
+- Se NON presente → lascia fees=0 e taxes=0, verranno calcolati come |netAmount - grossAmount|
 
 **9.3 NOTE IMPORTANTI**
 - La sezione movimenti può essere chiamata: "MOVIMENTI", "OPERAZIONI", "LISTA OPERAZIONI", "DETTAGLIO MOVIMENTI"
@@ -531,6 +710,19 @@ Per OGNI movimento titoli estrai:
 - Se non ci sono movimenti nel periodo, lascia l'array vuoto
 - Il netAmount per acquisti è l'importo pagato (positivo), per vendite è l'importo ricevuto (positivo)
 - fees e taxes potrebbero essere inclusi nel netAmount o mostrati separatamente
+
+**ATTENZIONE CRITICA - FORMATO NUMERI ITALIANI NEI MOVIMENTI:**
+Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
+- Il PUNTO "." è SEMPRE il separatore delle MIGLIAIA (NON il decimale!)
+- La VIRGOLA "," è SEMPRE il separatore DECIMALE
+- Esempi di conversione CORRETTA:
+  - "6.000" → quantity: 6000 (SEIMILA, non 6!)
+  - "1.000" → quantity: 1000 (MILLE, non 1!)
+  - "84.000" → quantity: 84000 (OTTANTAQUATTROMILA, non 84!)
+  - "5.000.000" → quantity: 5000000 (CINQUE MILIONI, non 5!)
+  - "2556,138" → quantity: 2556.138
+- ERRORE COMUNE: leggere "6.000" come 6.0 o "84.000" come 84.0. Questo è SBAGLIATO! Il punto è separatore migliaia.
+- VERIFICA: se la quantità del movimento è molto piccola rispetto al controvalore (es. qty=6, amount=14.707) probabilmente hai sbagliato. qty=6000 è corretto.
 
 ### STRUTTURA JSON RICHIESTA:
 {
@@ -599,6 +791,7 @@ Per OGNI movimento titoli estrai:
       "price": 0,
       "exchangeRate": 1,
       "currency": "EUR",
+      "grossAmount": 0,
       "fees": 0,
       "taxes": 0,
       "netAmount": 0
@@ -609,9 +802,7 @@ Per OGNI movimento titoli estrai:
 
 Restituisci SOLO il JSON, nessun altro testo.`;
 
-        // Gemini 2.5 Flash: Stable, fast (10-15s), production-ready
-        // Note: gemini-3-flash-preview is too slow (5+ min) - rolled back
-        const modelName = 'gemini-2.5-flash'
+        const modelName = 'gpt-5.2'
         const maxRetries = 3
 
         let resText = ''
@@ -620,9 +811,9 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName}`)
-                resText = await callGeminiDirect(GEMINI_API_KEY, modelName, systemPrompt, base64Data)
-                logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da Gemini`)
+                logProgress('CHIAMATA OPENAI', `Tentativo ${attempt}/${maxRetries} con ${modelName}`)
+                resText = await callOpenAI(OPENAI_API_KEY, modelName, systemPrompt, base64Data)
+                logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da OpenAI`)
 
                 if (resText && resText.length > 10) {
                     success = true
@@ -631,7 +822,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             } catch (err: any) {
                 const errMsg = err.message || ''
                 lastError = errMsg
-                console.error(`[GEMINI ERROR] Attempt ${attempt}/${maxRetries}: ${errMsg}`)
+                console.error(`[OPENAI ERROR] Attempt ${attempt}/${maxRetries}: ${errMsg}`)
 
                 if (errMsg.includes('not found') || errMsg.includes('404')) {
                     break
@@ -656,7 +847,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
         if (!success) {
             console.error('Tutti i modelli hanno fallito. Ultimo errore:', lastError)
-            return NextResponse.json({ success: false, error: 'Gemini AI fallito: ' + lastError }, { status: 500 })
+            return NextResponse.json({ success: false, error: 'OpenAI GPT fallito: ' + lastError }, { status: 500 })
         }
 
         // Parse JSON from response (single attempt with repair fallback)
@@ -808,13 +999,88 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         logProgress('✅ ANALISI COMPLETATA', fileName)
         console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
 
+        // === PHASE A: Self-contained Portfolio Total Validation ===
+        if (isDossier) {
+            try {
+                const phaseAResult = validatePortfolioTotals(parsed)
+
+                logProgress('PHASE A',
+                    `Somma titoli: ${phaseAResult.sumOfMarketValues.toFixed(2)}€ | ` +
+                    `Totale PDF: ${phaseAResult.extractedTotal.toFixed(2)}€ | ` +
+                    `Gap: ${phaseAResult.gap.toFixed(2)}€ (${phaseAResult.gapPercent.toFixed(1)}%)`
+                )
+
+                if (phaseAResult.needsRetry) {
+                    const holdingsCount = (parsed.finalPortfolio || []).length
+                    logProgress('PHASE A RETRY',
+                        `Gap significativo (${phaseAResult.gap.toFixed(0)}€, ${phaseAResult.gapPercent.toFixed(1)}%). Retry con prompt rinforzato.`
+                    )
+
+                    const phaseAPrompt = systemPrompt + `\n\n### ATTENZIONE - PORTAFOGLIO INCOMPLETO
+L'estrazione iniziale ha trovato ${holdingsCount} titoli con controvalore totale ${phaseAResult.sumOfMarketValues.toFixed(2)}€, ma il PDF riporta un controvalore totale di ${phaseAResult.extractedTotal.toFixed(2)}€. Mancano circa ${phaseAResult.gap.toFixed(0)}€ di titoli.
+DEVI ri-esaminare attentamente la sezione "CONSISTENZA" o "PORTAFOGLIO" del PDF e estrarre TUTTI i titoli, inclusi quelli su pagine successive.
+Verifica che la somma dei controvalore individuali sia uguale al controvalore totale del PDF.
+NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
+
+                    try {
+                        const retryText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseAPrompt, base64Data)
+                        const retryJsonMatch = retryText.match(/\{[\s\S]*\}/)
+
+                        if (retryJsonMatch) {
+                            let retryParsed: any
+                            try {
+                                retryParsed = JSON.parse(retryJsonMatch[0])
+                            } catch {
+                                const repaired = repairTruncatedJson(retryJsonMatch[0])
+                                if (repaired) retryParsed = JSON.parse(repaired)
+                            }
+
+                            if (retryParsed?.finalPortfolio?.length) {
+                                const retryValidation = validatePortfolioTotals(retryParsed)
+
+                                logProgress('PHASE A RESULT',
+                                    `Retry: ${retryParsed.finalPortfolio.length} titoli, gap ${retryValidation.gap.toFixed(0)}€ | ` +
+                                    `Originale: ${holdingsCount} titoli, gap ${phaseAResult.gap.toFixed(0)}€`
+                                )
+
+                                const retryBetter = (
+                                    retryParsed.finalPortfolio.length > holdingsCount &&
+                                    retryValidation.gap < phaseAResult.gap
+                                ) || (
+                                    retryParsed.finalPortfolio.length >= holdingsCount &&
+                                    retryValidation.gap < phaseAResult.gap * 0.5
+                                )
+
+                                if (retryBetter) {
+                                    logProgress('PHASE A ACCEPTED', 'Retry accettato (migliore copertura)')
+                                    parsed.finalPortfolio = retryParsed.finalPortfolio
+                                    parsed.securityMovements = retryParsed.securityMovements || parsed.securityMovements
+                                    if (retryParsed.summary?.portfolio_total_extracted) {
+                                        parsed.summary.portfolio_total_extracted = retryParsed.summary.portfolio_total_extracted
+                                    }
+                                } else {
+                                    logProgress('PHASE A KEPT ORIGINAL', 'Retry non migliora, mantengo originale')
+                                }
+                            }
+                        }
+                    } catch (phaseAErr: any) {
+                        logProgress('PHASE A ERROR', `Retry fallito: ${phaseAErr.message}. Proseguo con originale.`)
+                    }
+                } else {
+                    logProgress('PHASE A OK', 'Totali portafoglio corrispondono')
+                }
+            } catch (phaseAOuterErr: any) {
+                logProgress('PHASE A SKIP', `Errore: ${phaseAOuterErr.message}`)
+            }
+        }
+
         // Check for duplicate period BEFORE saving (unless force flag is set)
         const supabase = await createClient()
         const periodStart = parseDate(parsed.info?.period_start)
         const periodEnd = parseDate(parsed.info?.period_end)
         const accountNumber = parsed.info?.accountNumber
 
-        if (!forceRecalculate && userId && periodStart && periodEnd && accountNumber) {
+        if (!forceRecalculate && !isReanalysis && userId && periodStart && periodEnd && accountNumber) {
             logProgress('CHECK DUPLICATI', 'Verifico periodo già caricato')
             // Query per periodo senza filtro account esatto (il numero può variare tra PDF)
             const { data: existingAnalyses } = await supabase
@@ -841,8 +1107,130 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     period: { start: periodStart, end: periodEnd, account: accountNumber }
                 }, { status: 409 }) // 409 Conflict
             }
-        } else if (forceRecalculate) {
-            logProgress('🔄 RICALCOLO FORZATO', 'Skip check duplicati (richiesto dall\'utente)')
+        } else if (forceRecalculate || isReanalysis) {
+            logProgress('🔄 RICALCOLO FORZATO', `Skip check duplicati (${isReanalysis ? 'ri-analisi' : 'richiesto dall\'utente'})`)
+        }
+
+        // === PHASE B: Cross-period Portfolio Validation ===
+        if (isDossier && userId && periodStart && periodEnd) {
+            try {
+                logProgress('PHASE B', 'Verifica cross-period con periodo precedente')
+
+                const normalizedAcc = normalizeAccountNumber(accountNumber || '')
+
+                const { data: prevAnalyses } = await supabase
+                    .from('analyses')
+                    .select('id, period_start, period_end, holdings, costs_breakdown, benchmark_comparison')
+                    .eq('user_id', userId)
+                    .eq('account_type', 'DOSSIER')
+                    .lt('period_end', periodStart)
+                    .is('deleted_at', null)
+                    .order('period_end', { ascending: false })
+                    .limit(5)
+
+                const prevDoc = prevAnalyses?.find(a =>
+                    normalizeAccountNumber(a.benchmark_comparison || '') === normalizedAcc
+                )
+
+                if (!prevDoc || !prevDoc.holdings?.length) {
+                    logProgress('PHASE B SKIP', 'Nessun periodo precedente trovato per questo conto')
+                } else {
+                    logProgress('PHASE B FOUND',
+                        `Periodo precedente: ${prevDoc.period_start} - ${prevDoc.period_end} (${prevDoc.holdings.length} titoli)`
+                    )
+
+                    const suspicious = findSuspiciousMissingIsins(
+                        parsed.finalPortfolio || [],
+                        parsed.securityMovements || [],
+                        prevDoc.holdings
+                    )
+
+                    if (suspicious.length === 0) {
+                        logProgress('PHASE B OK', 'Tutti i titoli del periodo precedente sono presenti')
+                    } else {
+                        logProgress('PHASE B ALERT',
+                            `${suspicious.length} titoli sospetti mancanti: ${suspicious.map(s => s.isin).join(', ')}`
+                        )
+
+                        const isinList = suspicious.map(s =>
+                            `- ${s.isin} (${s.name}, quantità precedente: ${s.prevQuantity})`
+                        ).join('\n')
+
+                        const phaseBPrompt = `Esamina la sezione "CONSISTENZA" / "PORTAFOGLIO" di questo PDF dossier titoli.
+Cerca SPECIFICAMENTE i seguenti titoli e per ognuno rispondi se è PRESENTE o NO nel portafoglio:
+
+${isinList}
+
+Per ogni titolo PRESENTE nel PDF, estrai questi dati esattamente come compaiono nel documento:
+- isin: codice ISIN
+- name: nome del titolo dal PDF
+- quantity: quantità/consistenza (converti formato italiano: punto=migliaia, virgola=decimale → numero decimale)
+- price: prezzo/quotazione unitario
+- marketValue: controvalore in Euro
+- currency: divisa (EUR, USD, etc.)
+- exchangeRate: cambio (1 se EUR)
+
+IMPORTANTE: NON inventare dati. Se un titolo NON è presente nel PDF, mettilo in "not_found".
+
+Rispondi SOLO con questo JSON:
+{
+  "found": [{ "isin": "...", "name": "...", "quantity": 0, "price": 0, "marketValue": 0, "currency": "EUR", "exchangeRate": 1 }],
+  "not_found": ["ISIN1", "ISIN2"]
+}`
+
+                        try {
+                            const targetedText = await callOpenAI(
+                                OPENAI_API_KEY!, modelName, phaseBPrompt, base64Data
+                            )
+                            const targetedJsonMatch = targetedText.match(/\{[\s\S]*\}/)
+
+                            if (targetedJsonMatch) {
+                                let targetedResult: any
+                                try {
+                                    targetedResult = JSON.parse(targetedJsonMatch[0])
+                                } catch {
+                                    const repaired = repairTruncatedJson(targetedJsonMatch[0])
+                                    if (repaired) targetedResult = JSON.parse(repaired)
+                                }
+
+                                if (targetedResult) {
+                                    const found = targetedResult.found || []
+                                    const notFound = targetedResult.not_found || []
+
+                                    logProgress('PHASE B RESULTS',
+                                        `Trovati: ${found.length} | Non trovati: ${notFound.length}`
+                                    )
+
+                                    if (found.length > 0) {
+                                        const { merged, skipped } = mergeTargetedFindings(parsed, found)
+                                        logProgress('PHASE B MERGED',
+                                            `${merged} titoli aggiunti al portafoglio, ${skipped} scartati`
+                                        )
+
+                                        found.forEach((f: any) => {
+                                            if (f.isin && f.marketValue > 0) {
+                                                console.log(`  [PHASE B] + ${f.isin} (${f.name}): ${f.quantity} quote, ${f.marketValue}€`)
+                                            }
+                                        })
+                                    }
+
+                                    if (notFound.length > 0) {
+                                        console.log(`  [PHASE B] Titoli confermati assenti dal PDF: ${
+                                            Array.isArray(notFound) ? notFound.join(', ') : JSON.stringify(notFound)
+                                        }`)
+                                    }
+                                }
+                            }
+                        } catch (phaseBErr: any) {
+                            logProgress('PHASE B AI ERROR',
+                                `Verifica mirata fallita: ${phaseBErr.message}. Proseguo senza merge.`
+                            )
+                        }
+                    }
+                }
+            } catch (phaseBOuterErr: any) {
+                logProgress('PHASE B SKIP', `Errore: ${phaseBOuterErr.message}`)
+            }
         }
 
         // Salvataggio su Supabase
@@ -858,21 +1246,78 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             marketValue: h.marketValue || 0
         }))
 
-        // Normalize security movements - ensure exchangeRate defaults to 1
-        const normalizedSecurityMovements = (parsed.securityMovements || []).map((m: any) => ({
-            ...m,
-            exchangeRate: m.exchangeRate && m.exchangeRate !== 0 ? m.exchangeRate : 1,
-            currency: m.currency || 'EUR',
-            quantity: m.quantity || 0,
-            price: m.price || 0,
-            netAmount: m.netAmount || 0,
-            fees: m.fees || 0,
-            taxes: m.taxes || 0
-        }))
+        // Build holdings map for cross-validating movement quantities
+        const holdingsQtyMap: Record<string, number> = {}
+        normalizedHoldings.forEach((h: any) => {
+            if (h.isin) holdingsQtyMap[h.isin] = h.quantity || 0
+        })
 
-        const analysisData = {
-            document_id: crypto.randomUUID(),
-            user_id: userId || null,
+        // Normalize security movements - ensure exchangeRate defaults to 1
+        // Calculate fees/taxes from grossAmount - netAmount if not extracted from PDF
+        const normalizedSecurityMovements = (parsed.securityMovements || []).map((m: any) => {
+            const exchangeRate = m.exchangeRate && m.exchangeRate !== 0 ? m.exchangeRate : 1
+            let quantity = m.quantity || 0
+            const price = m.price || 0
+
+            // Fix Italian number format misinterpretation: "6.000" parsed as 6 instead of 6000
+            // Heuristic 1: if grossAmount is available and qty*price is way off, try qty*1000
+            if (quantity > 0 && price > 0 && m.grossAmount > 0) {
+                const expected = quantity * price * exchangeRate
+                const expected1000 = quantity * 1000 * price * exchangeRate
+                if (Math.abs(expected - m.grossAmount) / m.grossAmount > 0.5 &&
+                    Math.abs(expected1000 - m.grossAmount) / m.grossAmount < 0.1) {
+                    quantity = quantity * 1000
+                }
+            }
+            // Heuristic 2: if same ISIN in holdings has qty ~1000x this movement qty
+            if (quantity > 0 && quantity <= 100 && m.isin && holdingsQtyMap[m.isin]) {
+                const holdingQty = holdingsQtyMap[m.isin]
+                const ratio = holdingQty / quantity
+                if (ratio >= 900 && ratio <= 1100) {
+                    quantity = quantity * 1000
+                }
+            }
+            const netAmount = m.netAmount || 0
+
+            // grossAmount: use extracted value, or calculate from quantity × price × exchangeRate
+            const grossAmount = m.grossAmount || (quantity * price * exchangeRate)
+
+            // Save original extracted values for comparison
+            const feesExtracted = m.fees || 0
+            const taxesExtracted = m.taxes || 0
+            const costsExtracted = feesExtracted + taxesExtracted
+
+            // Calculate costs from difference: |netto - lordo|
+            const costsCalculated = grossAmount > 0 && netAmount !== 0
+                ? Math.abs(Math.abs(netAmount) - grossAmount)
+                : 0
+
+            // Use extracted if present, otherwise calculated
+            let fees = feesExtracted
+            let taxes = taxesExtracted
+
+            if (fees === 0 && taxes === 0 && costsCalculated > 0.01) {
+                fees = costsCalculated
+            }
+
+            return {
+                ...m,
+                exchangeRate,
+                currency: m.currency || 'EUR',
+                quantity,
+                price,
+                grossAmount,
+                netAmount,
+                fees,
+                taxes,
+                // Store both for UI comparison
+                costsExtracted,
+                costsCalculated: Math.round(costsCalculated * 100) / 100,
+                costsSource: costsExtracted > 0.01 ? 'extracted' : 'calculated'
+            }
+        })
+
+        const analysisFields = {
             bank_name: parsed.info?.bankName || 'Banca N/D',
             period_start: parseDate(parsed.info?.period_start),
             period_end: parseDate(parsed.info?.period_end),
@@ -904,15 +1349,54 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             benchmark_comparison: parsed.info?.accountNumber || 'N/D',
         }
 
-        const { data, error } = await supabase
-            .from('analyses')
-            .insert(analysisData)
-            .select()
-            .single()
+        let data: any
+        let error: any
+
+        if (isReanalysis && reanalyzeId) {
+            // RE-ANALYSIS: Update existing record
+            logProgress('🔄 UPDATE RECORD', `Aggiornamento analisi ${reanalyzeId}`)
+            const result = await supabase
+                .from('analyses')
+                .update(analysisFields)
+                .eq('id', reanalyzeId)
+                .select()
+                .single()
+            data = result.data
+            error = result.error
+        } else {
+            // NEW UPLOAD: Insert new record
+            const result = await supabase
+                .from('analyses')
+                .insert({ ...analysisFields, document_id: crypto.randomUUID(), user_id: userId || null })
+                .select()
+                .single()
+            data = result.data
+            error = result.error
+        }
 
         if (error) {
             logProgress('❌ ERRORE DATABASE', error.message)
             return NextResponse.json({ success: false, error: 'Errore salvataggio database' }, { status: 500 })
+        }
+
+        // Store PDF in Supabase Storage for future re-analysis (only for new uploads)
+        if (!isReanalysis && userId && data.id) {
+            try {
+                const pdfStoragePath = `${userId}/${data.id}.pdf`
+                const { error: storageError } = await supabase.storage
+                    .from('documenti')
+                    .upload(pdfStoragePath, pdfBuffer, {
+                        contentType: 'application/pdf',
+                        upsert: true
+                    })
+                if (storageError) {
+                    console.warn(`[STORAGE] Upload PDF fallito: ${storageError.message}`)
+                } else {
+                    logProgress('📁 PDF SALVATO', `Storage: pdfs/${pdfStoragePath}`)
+                }
+            } catch (storageErr: any) {
+                console.warn(`[STORAGE] Errore upload PDF: ${storageErr.message}`)
+            }
         }
 
         logProgress('✅ COMPLETATO', `Documento salvato con ID: ${data.id}`)
@@ -922,8 +1406,9 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             success: true,
             analysisId: data.id,
             documentId: data.id,
-            fileName: file.name,
+            fileName,
             status: 'ready',
+            isReanalysis,
             holder: parsed.info?.holder || null,
             // Dati per verifica (usati da batch_verify.js)
             data: {

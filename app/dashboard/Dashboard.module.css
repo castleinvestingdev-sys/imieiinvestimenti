@@ -1858,6 +1858,10 @@
     width: calc(110px * 3 + 0.3rem * 2);
 }
 
+.dualCardS {
+    width: calc(110px * 6 + 0.3rem * 5);
+}
+
 .dualCardLoaded {
     background: #f0fdf4;
     border-color: rgba(16, 185, 129, 0.3);
@@ -1995,5 +1999,9 @@
 
     .dualCardQ {
         width: calc(95px * 3 + 0.3rem * 2);
+    }
+
+    .dualCardS {
+        width: calc(95px * 6 + 0.3rem * 5);
     }
 }
