@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback, Suspense } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useParams } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
@@ -296,28 +296,6 @@ function AnalysisContent() {
   const [selectedSlot, setSelectedSlot] = useState<string>('')
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [generating, setGenerating] = useState(false)
-  const dossierTrackRef = useRef<HTMLDivElement>(null)
-  const liquidityTrackRef = useRef<HTMLDivElement>(null)
-  const scrollingRef = useRef(false)
-
-  // Sync horizontal scroll between dossier and liquidity tracks
-  const syncScroll = useCallback((source: HTMLDivElement, target: HTMLDivElement) => {
-    if (scrollingRef.current) return
-    scrollingRef.current = true
-    target.scrollLeft = source.scrollLeft
-    requestAnimationFrame(() => { scrollingRef.current = false })
-  }, [])
-
-  useEffect(() => {
-    const dTrack = dossierTrackRef.current
-    const lTrack = liquidityTrackRef.current
-    if (!dTrack || !lTrack) return
-    const onDos = () => syncScroll(dTrack, lTrack)
-    const onLiq = () => syncScroll(lTrack, dTrack)
-    dTrack.addEventListener('scroll', onDos, { passive: true })
-    lTrack.addEventListener('scroll', onLiq, { passive: true })
-    return () => { dTrack.removeEventListener('scroll', onDos); lTrack.removeEventListener('scroll', onLiq) }
-  }, [slots, syncScroll])
 
   // Fetch all data on mount
   useEffect(() => {
@@ -842,84 +820,76 @@ function AnalysisContent() {
           </div>
         </div>
 
-        {/* Dual Timeline */}
+        {/* Dual Timeline - single scrollable container */}
         {(() => {
           const years = [...new Set(slots.map(s => s.year))]
           const byYear = years.map(yr => ({ year: yr, items: slots.filter(s => s.year === yr) }))
           return (
             <div className={styles.dualTimeline}>
-              {/* Dossier Titoli track */}
-              <div className={styles.timelineTrack}>
-                <div className={styles.trackHeader}>
+              {/* Fixed labels column */}
+              <div className={styles.timelineLabels}>
+                <span className={styles.yearLabelSpacer}>&nbsp;</span>
+                <div className={styles.timelineLabelRow}>
                   <span className={styles.trackBadgeDos}>Dossier Titoli</span>
                 </div>
-                <div ref={dossierTrackRef} className={styles.trackCards}>
-                  {byYear.map(({ year, items }) => (
-                    <div key={year} className={styles.yearGroup}>
-                      <span className={styles.yearLabel}>{year}</span>
-                      <div className={styles.yearCards}>
-                        {items.map(s => {
-                          const active = s.key === selectedSlot
-                          const loaded = s.dossierIds.length > 0
-                          return (
-                            <button key={s.key} className={`${styles.tCard} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
-                              <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
-                              <div className={styles.tCardDates}>
-                                <span>{formatDate(s.displayStart)}</span>
-                                <span className={styles.tCardArrow}>&darr;</span>
-                                <span>{formatDate(s.displayEnd)}</span>
-                              </div>
-                              <div className={styles.tCardStatus}>
-                                {loaded ? (
-                                  <span className={styles.tCardCheck}>{s.dossierIds.length > 1 ? `${s.dossierIds.length} doc` : 'Caricato'}</span>
-                                ) : (
-                                  <span className={styles.tCardMiss}>Non caricato</span>
-                                )}
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                <div className={styles.timelineLabelRow}>
+                  <span className={styles.trackBadgeLiq}>Liquidit&agrave;</span>
                 </div>
               </div>
 
-              {/* Liquidit&agrave; track */}
-              <div className={styles.timelineTrack}>
-                <div className={styles.trackHeader}>
-                  <span className={styles.trackBadgeLiq}>Liquidit&agrave;</span>
-                </div>
-                <div ref={liquidityTrackRef} className={styles.trackCards}>
-                  {byYear.map(({ year, items }) => (
-                    <div key={year} className={styles.yearGroup}>
-                      <span className={styles.yearLabel}>{year}</span>
-                      <div className={styles.yearCards}>
-                        {items.map(s => {
-                          const active = s.key === selectedSlot
-                          const loaded = s.liquidityIds.length > 0
-                          return (
-                            <button key={s.key} className={`${styles.tCard} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
-                              <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
-                              <div className={styles.tCardDates}>
-                                <span>{formatDate(s.displayStart)}</span>
-                                <span className={styles.tCardArrow}>&darr;</span>
-                                <span>{formatDate(s.displayEnd)}</span>
-                              </div>
-                              <div className={styles.tCardStatus}>
-                                {loaded ? (
-                                  <span className={styles.tCardCheck}>{s.liquidityIds.length > 1 ? `${s.liquidityIds.length} doc` : 'Caricato'}</span>
-                                ) : (
-                                  <span className={styles.tCardMiss}>Non caricato</span>
-                                )}
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
+              {/* Single scrollable area */}
+              <div className={styles.timelineScroller}>
+                {byYear.map(({ year, items }) => (
+                  <div key={year} className={styles.yearGroup}>
+                    <span className={styles.yearLabel}>{year}</span>
+                    <div className={styles.yearCards}>
+                      {items.map(s => {
+                        const active = s.key === selectedSlot
+                        const loaded = s.dossierIds.length > 0
+                        return (
+                          <button key={s.key} className={`${styles.tCard} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
+                            <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
+                            <div className={styles.tCardDates}>
+                              <span>{formatDate(s.displayStart)}</span>
+                              <span className={styles.tCardArrow}>&darr;</span>
+                              <span>{formatDate(s.displayEnd)}</span>
+                            </div>
+                            <div className={styles.tCardStatus}>
+                              {loaded ? (
+                                <span className={styles.tCardCheck}>{s.dossierIds.length > 1 ? `${s.dossierIds.length} doc` : 'Caricato'}</span>
+                              ) : (
+                                <span className={styles.tCardMiss}>Non caricato</span>
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })}
                     </div>
-                  ))}
-                </div>
+                    <div className={styles.yearCards}>
+                      {items.map(s => {
+                        const active = s.key === selectedSlot
+                        const loaded = s.liquidityIds.length > 0
+                        return (
+                          <button key={s.key} className={`${styles.tCard} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
+                            <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
+                            <div className={styles.tCardDates}>
+                              <span>{formatDate(s.displayStart)}</span>
+                              <span className={styles.tCardArrow}>&darr;</span>
+                              <span>{formatDate(s.displayEnd)}</span>
+                            </div>
+                            <div className={styles.tCardStatus}>
+                              {loaded ? (
+                                <span className={styles.tCardCheck}>{s.liquidityIds.length > 1 ? `${s.liquidityIds.length} doc` : 'Caricato'}</span>
+                              ) : (
+                                <span className={styles.tCardMiss}>Non caricato</span>
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )

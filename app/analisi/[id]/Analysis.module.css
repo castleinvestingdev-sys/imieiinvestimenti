@@ -100,28 +100,37 @@
     color: #10b981;
 }
 
-/* DUAL TIMELINE */
+/* DUAL TIMELINE - single scrollable container */
 .dualTimeline {
     max-width: 1280px;
     margin: 0 auto;
-    padding: 0 1.5rem 1rem;
+    padding: 0 1.5rem 0.5rem;
     display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.timelineTrack {
-    display: flex;
+    flex-direction: row;
     align-items: stretch;
-    gap: 0;
 }
 
-.trackHeader {
+.timelineLabels {
     flex-shrink: 0;
     width: 110px;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    gap: 0.25rem;
     padding-right: 0.75rem;
+}
+
+.yearLabelSpacer {
+    font-size: 0.65rem;
+    font-weight: 900;
+    line-height: 1;
+    padding-left: 0.25rem;
+    visibility: hidden;
+}
+
+.timelineLabelRow {
+    display: flex;
+    align-items: center;
+    flex: 1;
 }
 
 .trackBadgeDos {
@@ -150,17 +159,33 @@
     white-space: nowrap;
 }
 
-.trackCards {
+.timelineScroller {
     display: flex;
     gap: 0.4rem;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
     flex: 1;
+    padding-bottom: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
 }
 
-.trackCards::-webkit-scrollbar {
-    display: none;
+.timelineScroller::-webkit-scrollbar {
+    height: 6px;
+}
+
+.timelineScroller::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 3px;
+}
+
+.timelineScroller::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+
+.timelineScroller::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
 }
 
 .tCard {
@@ -877,16 +902,19 @@
         font-size: 1.25rem;
     }
 
-    .trackHeader {
+    .timelineLabels {
         width: auto;
-        padding: 0 0 0.25rem 0;
+        flex-direction: row;
+        gap: 0.5rem;
+        padding: 0 0 0.5rem 0;
     }
 
-    .timelineTrack {
-        flex-direction: column;
+    .timelineLabelRow {
+        flex: unset;
     }
 
     .dualTimeline {
-        padding: 0 1rem 1rem;
+        flex-direction: column;
+        padding: 0 1rem 0.5rem;
     }
 }
