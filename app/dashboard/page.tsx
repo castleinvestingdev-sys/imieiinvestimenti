@@ -2241,7 +2241,7 @@ function DashboardContent() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <button
-                  onClick={handleRecalculateSingle}
+                  onClick={() => handleRecalculateSingle()}
                   disabled={recalculatingCosts}
                   title="Ri-analizza questo PDF con il prompt migliorato"
                   style={{
