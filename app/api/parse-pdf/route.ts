@@ -228,7 +228,7 @@ function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase
     return new Promise((resolve, reject) => {
         const requestBody = JSON.stringify({
             model,
-            temperature: 0,
+            temperature: 1,
             max_completion_tokens: 128000,
             messages: [
                 {
