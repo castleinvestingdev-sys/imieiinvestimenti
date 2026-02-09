@@ -714,30 +714,32 @@ function DashboardContent() {
 
       try {
         const uploadStartTime = Date.now()
-        let currentProgress = 5
+        const expectedDuration = 90 // secondi stimati per un PDF
         const progressInterval = setInterval(() => {
           setUploadQueue(prev => prev.map(f => {
             if (f.id === fileId && (f.status === 'uploading' || f.status === 'analyzing')) {
-              const elapsed = Math.floor((Date.now() - uploadStartTime) / 1000)
-              const allStages = [
-                'Caricamento PDF', 'Conversione documento', 'Invio a Gemini AI',
-                'Analisi con AI in corso', 'Estrazione movimenti', 'Lettura portafoglio titoli',
-                'Validazione dati', 'Calcolo rendimenti', 'Completamento analisi',
-                'Classificazione titoli', 'Verifica portafoglio', 'Calcolo commissioni',
-                'Analisi movimenti', 'Normalizzazione dati', 'Controllo coerenza',
-                'Estrazione dividendi', 'Verifica saldi', 'Quasi fatto',
-                'Ultimi controlli', 'Finalizzazione'
-              ]
-              const dots = '.'.repeat((elapsed % 3) + 1)
-              const stageIdx = Math.min(Math.floor(elapsed / 3), allStages.length - 1)
-              const stage = allStages[stageIdx % allStages.length] + dots
+              const elapsed = (Date.now() - uploadStartTime) / 1000
+              const stages = [
+                [0, 'Caricamento PDF'],
+                [5, 'Conversione documento'],
+                [10, 'Invio a OpenAI'],
+                [15, 'Analisi AI in corso'],
+                [30, 'Estrazione movimenti'],
+                [45, 'Lettura portafoglio titoli'],
+                [55, 'Validazione dati'],
+                [65, 'Calcolo commissioni'],
+                [75, 'Controllo coerenza'],
+                [85, 'Normalizzazione dati'],
+                [95, 'Finalizzazione'],
+              ] as const
+              const dots = '.'.repeat((Math.floor(elapsed) % 3) + 1)
+              const currentStage = [...stages].reverse().find(([t]) => elapsed >= t)?.[1] || stages[0][1]
 
-              const maxProgress = 97
-              const increment = currentProgress < 90
-                ? Math.max(0.5, (90 - currentProgress) / 20)
-                : 0.15
-              currentProgress = Math.min(maxProgress, currentProgress + increment)
-              return { ...f, progress: Math.round(currentProgress), stage, startTime: uploadStartTime }
+              // Curva logaritmica: avanza proporzionalmente al tempo, rallenta dolcemente verso 98%
+              const ratio = elapsed / expectedDuration
+              const progress = Math.min(98, Math.round(98 * (1 - Math.exp(-2.5 * ratio))))
+
+              return { ...f, progress, stage: currentStage + dots, startTime: uploadStartTime }
             }
             return f
           }))
