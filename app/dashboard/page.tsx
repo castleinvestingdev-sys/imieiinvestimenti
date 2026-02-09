@@ -584,10 +584,10 @@ function DashboardContent() {
     }
   }
 
-  const handleRecalculateSingle = async () => {
+  const handleRecalculateSingle = async (manualFile?: File) => {
     if (!user || !inspectorData) return
 
-    if (!confirm(`Ri-analizzare questo documento dal PDF originale?\n\n${inspectorData.bank_name} - ${new Date(inspectorData.period_start).toLocaleDateString('it-IT')} / ${new Date(inspectorData.period_end).toLocaleDateString('it-IT')}`)) return
+    if (!manualFile && !confirm(`Ri-analizzare questo documento dal PDF originale?\n\n${inspectorData.bank_name} - ${new Date(inspectorData.period_start).toLocaleDateString('it-IT')} / ${new Date(inspectorData.period_end).toLocaleDateString('it-IT')}`)) return
 
     setRecalculatingCosts(true)
 
@@ -595,6 +595,9 @@ function DashboardContent() {
       const formData = new FormData()
       formData.append('reanalyzeId', inspectorData.id)
       formData.append('userId', user.id)
+      if (manualFile) {
+        formData.append('file', manualFile)
+      }
 
       const response = await fetch('/api/parse-pdf', {
         method: 'POST',
@@ -612,7 +615,16 @@ function DashboardContent() {
         if (updatedDoc) setInspectorData(updatedDoc)
         alert('Ri-analisi completata!')
       } else if (response.status === 404) {
-        alert('PDF originale non trovato nello storage.')
+        // PDF not in storage — ask user to upload it manually
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.accept = '.pdf'
+        input.onchange = (e) => {
+          const file = (e.target as HTMLInputElement).files?.[0]
+          if (file) handleRecalculateSingle(file)
+        }
+        alert('PDF non trovato nello storage. Seleziona il PDF originale per ri-analizzare.')
+        input.click()
       } else {
         alert('Errore nella ri-analisi: ' + (result.error || 'errore sconosciuto'))
       }
@@ -849,9 +861,9 @@ function DashboardContent() {
         ))
       }
 
-      // Wait between files to avoid Gemini rate limiting
+      // Brief pause between files to avoid rate limiting
       if (fileQueueRef.current.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, 3000))
+        await new Promise(resolve => setTimeout(resolve, 500))
       }
     }
 
@@ -1374,7 +1386,7 @@ function DashboardContent() {
   // Calcola years per-gruppo banca (usato nel render di ogni bankGroup)
   const getGroupYears = (group: typeof bankGroups[0]): number[] => {
     const groupAnalyses = [...group.dossiers.flatMap(d => d.analyses), ...group.liquidityAccounts.flatMap(l => l.analyses)]
-    const groupYears = groupAnalyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(Boolean) as number[]
+    const groupYears = groupAnalyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(y => y !== null && y >= 2000) as number[]
     const minYear = groupYears.length > 0 ? Math.min(...groupYears) - 1 : currentYear - 1
     const maxYear = groupYears.length > 0 ? Math.max(...groupYears) : currentYear
     const endYear = Math.max(maxYear, currentYear)
