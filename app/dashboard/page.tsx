@@ -98,9 +98,25 @@ function DashboardContent() {
   const timelineRefs = useRef<Set<HTMLDivElement>>(new Set())
   const isSyncingRef = useRef(false)
 
+  const scrollRestoredRef = useRef(false)
   const registerTimeline = useCallback((el: HTMLDivElement | null) => {
     if (el) {
       timelineRefs.current.add(el)
+      // Restore scroll position from sessionStorage (once, on return from analysis page)
+      if (!scrollRestoredRef.current) {
+        try {
+          const saved = sessionStorage.getItem('dashboard_scroll')
+          if (saved) {
+            const { pageY, timelineX } = JSON.parse(saved)
+            sessionStorage.removeItem('dashboard_scroll')
+            scrollRestoredRef.current = true
+            requestAnimationFrame(() => {
+              timelineRefs.current.forEach(t => { t.scrollLeft = timelineX })
+              window.scrollTo(0, pageY)
+            })
+          }
+        } catch {}
+      }
     }
   }, [])
 
@@ -129,6 +145,14 @@ function DashboardContent() {
 
 
 
+  // Normalize holder name: "FRIGERI MARIA CRISTINA" → "Frigeri Maria Cristina"
+  const normalizeHolder = (raw: string) => {
+    if (!raw) return 'Cliente Sconosciuto'
+    return raw.trim().replace(/\s+/g, ' ').split(' ').map(
+      (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+    ).join(' ')
+  }
+
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
       .from('analyses')
@@ -142,11 +166,12 @@ function DashboardContent() {
       return
     }
 
-    // Filter by holder if clienteFilter is set
+    // Filter by holder if clienteFilter is set (case-insensitive match)
     let filteredData = data || []
     if (clienteFilter) {
+      const normalizedFilter = normalizeHolder(clienteFilter)
       filteredData = filteredData.filter(a =>
-        (a.costs_breakdown?.holder || 'Cliente Sconosciuto') === clienteFilter
+        normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
       )
     }
 
@@ -305,11 +330,12 @@ function DashboardContent() {
       .not('deleted_at', 'is', null)
       .order('deleted_at', { ascending: false })
 
-    // Also filter trashed data by holder
+    // Also filter trashed data by holder (case-insensitive match)
     let filteredTrashed = trashedData || []
     if (clienteFilter) {
+      const normalizedFilter = normalizeHolder(clienteFilter)
       filteredTrashed = filteredTrashed.filter(a =>
-        (a.costs_breakdown?.holder || 'Cliente Sconosciuto') === clienteFilter
+        normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
       )
     }
     setTrashedAnalyses(filteredTrashed)
@@ -833,8 +859,9 @@ function DashboardContent() {
 
     // --- Batch complete: navigate to holder if different ---
     if (successCount > 0 && lastHolder) {
-      if ((clienteFilter && lastHolder !== clienteFilter) || !clienteFilter) {
-        router.push(`/dashboard?cliente=${encodeURIComponent(lastHolder)}`)
+      const normalizedLastHolder = normalizeHolder(lastHolder)
+      if ((clienteFilter && normalizedLastHolder !== normalizeHolder(clienteFilter)) || !clienteFilter) {
+        router.push(`/dashboard?cliente=${encodeURIComponent(normalizedLastHolder)}`)
       }
     }
 
@@ -870,16 +897,29 @@ function DashboardContent() {
   }, [hasActiveUploads])
 
   // Safe navigation: warns user if uploads are in progress before navigating away
+  // Saves scroll positions (page + timelines) for restoration on return
   const safeNavigate = (href: string) => {
+    const doNavigate = () => {
+      // Save page scroll + first timeline scroll position
+      const scrollState: { pageY: number; timelineX: number } = {
+        pageY: window.scrollY,
+        timelineX: 0
+      }
+      const firstTimeline = timelineRefs.current.values().next().value
+      if (firstTimeline) scrollState.timelineX = firstTimeline.scrollLeft
+      try { sessionStorage.setItem('dashboard_scroll', JSON.stringify(scrollState)) } catch {}
+      router.push(href)
+    }
+
     if (hasActiveUploads) {
       showConfirmModal(
         'Upload in corso',
         'Ci sono PDF in fase di caricamento. Se esci ora, il caricamento verrà annullato. Vuoi uscire comunque?'
       ).then((confirmed) => {
-        if (confirmed) router.push(href)
+        if (confirmed) doNavigate()
       })
     } else {
-      router.push(href)
+      doNavigate()
     }
   }
 
@@ -1259,10 +1299,12 @@ function DashboardContent() {
         && new Date(a.period_end) <= docStart)
       .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
     if (!prevDoc) { coherenceMap[doc.id] = 'missing'; return }
-    // Verifica che il periodo precedente sia contiguo (gap max 5 giorni tra fine prev e inizio doc)
+    // Verifica che il periodo precedente sia contiguo
+    // Per documenti snapshot (period_start ≈ period_end), il gap tra mesi è ~30gg → tolleriamo fino a 35gg
     const prevEnd = new Date(prevDoc.period_end!)
     const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
-    if (gapDays > 5) { coherenceMap[doc.id] = 'missing'; return }
+    const maxGap = docDays < 2 ? 35 : 5
+    if (gapDays > maxGap) { coherenceMap[doc.id] = 'missing'; return }
     // Verifica basata sui trimestri: prevDoc deve essere dal trimestre immediatamente precedente
     // (es. Q4 deve avere predecessore Q3, non Q2 — anche se le date sembrano contigue)
     const getQuarter = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
@@ -1327,11 +1369,19 @@ function DashboardContent() {
     coherenceMap[doc.id] = ok
   })
 
-  const allYears = analyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(Boolean) as number[]
-  const minYear = allYears.length > 0 ? Math.min(...allYears) : new Date().getFullYear() - 1
   const currentYear = new Date().getFullYear()
-  const years: number[] = []
-  for (let y = minYear; y <= currentYear; y++) years.push(y)
+
+  // Calcola years per-gruppo banca (usato nel render di ogni bankGroup)
+  const getGroupYears = (group: typeof bankGroups[0]): number[] => {
+    const groupAnalyses = [...group.dossiers.flatMap(d => d.analyses), ...group.liquidityAccounts.flatMap(l => l.analyses)]
+    const groupYears = groupAnalyses.map(a => a.period_end ? new Date(a.period_end).getFullYear() : null).filter(Boolean) as number[]
+    const minYear = groupYears.length > 0 ? Math.min(...groupYears) - 1 : currentYear - 1
+    const maxYear = groupYears.length > 0 ? Math.max(...groupYears) : currentYear
+    const endYear = Math.max(maxYear, currentYear)
+    const years: number[] = []
+    for (let y = minYear; y <= endYear; y++) years.push(y)
+    return years
+  }
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
@@ -1602,14 +1652,14 @@ function DashboardContent() {
           >
             ← Torna ai Clienti
           </a>
-          <h2 className={styles.clientName}>Cliente: {clienteFilter}</h2>
+          <h2 className={styles.clientName}>Cliente: {normalizeHolder(clienteFilter)}</h2>
         </div>
       )}
 
       <header className={`${styles.dashHero} ${clienteFilter ? styles.withClientHeader : ''}`}>
         <div className={styles.dashHeroInner}>
           <div className={styles.dashWelcome}>
-            <h1>{clienteFilter ? `Portafoglio di ${clienteFilter}` : 'I Tuoi Investimenti Semplificati'}</h1>
+            <h1>{clienteFilter ? `Portafoglio di ${normalizeHolder(clienteFilter)}` : 'I Tuoi Investimenti Semplificati'}</h1>
             <p>
               Carica i PDF &quot;Estratto Conto&quot; originali per analizzare il tuo portafoglio.
               Se non li trovi, cercali nell&apos;<a href="#">Homebanking</a> nella sezione documenti.
@@ -1863,6 +1913,7 @@ function DashboardContent() {
           </div>
         ) : (
           bankGroups.map((group, idx) => {
+            const years = getGroupYears(group)
             return (
               <div key={idx} className={styles.bankGroupBlock}>
                 <div className={styles.bankHeader}>
@@ -1951,8 +2002,16 @@ function DashboardContent() {
                     ))}
                   </div>
 
-                  {/* Scrollable timeline area */}
-                  <div className={styles.dualTimelineScroller} ref={registerTimeline} onScroll={handleSyncScroll}>
+                  {/* Scrollable timeline area + custom scrollbar wrapper */}
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                  <div className={styles.dualTimelineScroller} ref={(el) => {
+                    registerTimeline(el)
+                    if (el) (el as any).__scrollbarUpdate?.()
+                  }} onScroll={(e) => {
+                    handleSyncScroll(e)
+                    const el = e.currentTarget as any
+                    el.__scrollbarUpdate?.()
+                  }}>
                     {years.map(year => {
                       const mergedFreqMap = buildMergedFrequencyMap(group, year)
                       return (
@@ -2094,6 +2153,61 @@ function DashboardContent() {
                       </div>
                     )})}
                   </div>
+                  {/* Custom scrollbar - always visible */}
+                  <div className={styles.customScrollbar} ref={(trackEl) => {
+                    if (!trackEl) return
+                    const scroller = trackEl.previousElementSibling as HTMLDivElement
+                    if (!scroller) return
+                    let thumb = trackEl.querySelector(`.${styles.customScrollbarThumb}`) as HTMLDivElement
+                    if (!thumb) {
+                      thumb = document.createElement('div')
+                      thumb.className = styles.customScrollbarThumb
+                      trackEl.appendChild(thumb)
+                    }
+                    const updateThumb = () => {
+                      const { scrollWidth, clientWidth, scrollLeft } = scroller
+                      if (scrollWidth <= clientWidth) { trackEl.style.display = 'none'; return }
+                      trackEl.style.display = 'block'
+                      const trackW = trackEl.clientWidth
+                      const thumbW = Math.max(30, (clientWidth / scrollWidth) * trackW)
+                      const thumbX = (scrollLeft / (scrollWidth - clientWidth)) * (trackW - thumbW)
+                      thumb.style.width = `${thumbW}px`
+                      thumb.style.left = `${thumbX}px`
+                    }
+                    ;(scroller as any).__scrollbarUpdate = updateThumb
+                    requestAnimationFrame(updateThumb)
+                    // Update on resize
+                    const ro = new ResizeObserver(updateThumb)
+                    ro.observe(scroller)
+                    // Initial delayed update (content may load after mount)
+                    setTimeout(updateThumb, 500)
+                    // Drag support
+                    let dragging = false, startX = 0, startScroll = 0
+                    const onMouseDown = (e: MouseEvent) => {
+                      if (e.target === thumb) {
+                        dragging = true; startX = e.clientX; startScroll = scroller.scrollLeft
+                        e.preventDefault()
+                      } else {
+                        // Click on track → jump
+                        const rect = trackEl.getBoundingClientRect()
+                        const clickRatio = (e.clientX - rect.left) / rect.width
+                        scroller.scrollLeft = clickRatio * (scroller.scrollWidth - scroller.clientWidth)
+                      }
+                    }
+                    const onMouseMove = (e: MouseEvent) => {
+                      if (!dragging) return
+                      const dx = e.clientX - startX
+                      const trackW = trackEl.clientWidth
+                      const thumbW = parseFloat(thumb.style.width)
+                      const scrollRatio = dx / (trackW - thumbW)
+                      scroller.scrollLeft = startScroll + scrollRatio * (scroller.scrollWidth - scroller.clientWidth)
+                    }
+                    const onMouseUp = () => { dragging = false }
+                    trackEl.addEventListener('mousedown', onMouseDown)
+                    document.addEventListener('mousemove', onMouseMove)
+                    document.addEventListener('mouseup', onMouseUp)
+                  }} />
+                  </div>{/* end scroller+scrollbar wrapper */}
                 </div>
               </div>
             )
@@ -2565,8 +2679,9 @@ function DashboardContent() {
                   const docEnd = new Date(inspectorData.period_end)
                   const prevEnd = new Date(candidate.period_end!)
                   const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
-                  if (gapDays > 5) return null
                   const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
+                  const maxGap = docDays < 2 ? 35 : 5
+                  if (gapDays > maxGap) return null
                   const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
                   const dQ = getQ(docEnd), pQ = getQ(prevEnd)
                   if (docDays < 45) {
@@ -2888,8 +3003,9 @@ function DashboardContent() {
                       const docEnd = new Date(inspectorData.period_end)
                       const prevEnd = new Date(candidate.period_end!)
                       const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
-                      if (gapDays > 5) return null
                       const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
+                      const maxGap = docDays < 2 ? 35 : 5
+                      if (gapDays > maxGap) return null
                       const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
                       const dQ = getQ(docEnd), pQ = getQ(prevEnd)
                       if (docDays < 45) {

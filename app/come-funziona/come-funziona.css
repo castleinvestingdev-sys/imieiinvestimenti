@@ -25,16 +25,16 @@
 
 /* --- HERO: SNAKE FLOW --- */
 .cf-hero-snake {
-    padding: clamp(160px, 18vw, 200px) 0 clamp(80px, 10vw, 120px);
+    padding: clamp(120px, 14vw, 160px) 0 clamp(60px, 8vw, 80px);
     background: var(--white);
     text-align: center;
 }
 
 .cf-hero-snake h1 {
-    font-size: clamp(2.5rem, 8vw, 5rem);
-    font-weight: 1000;
-    letter-spacing: -3px;
-    margin-bottom: 80px;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 60px;
     line-height: 1;
 }
 
@@ -44,17 +44,16 @@
 
 .cf-snake-visual {
     position: relative;
-    max-width: 1000px;
-    margin: 0 auto 100px;
+    max-width: 100%;
+    margin: 0 auto 60px;
     height: 400px;
-    /* Base height for the snake positioning */
 }
 
 .cf-snake-step {
     position: absolute;
-    font-size: 3.5rem;
-    font-weight: 1000;
-    letter-spacing: -2px;
+    font-size: 2.8rem;
+    font-weight: 800;
+    letter-spacing: -1px;
     white-space: nowrap;
 }
 
@@ -64,18 +63,18 @@
 }
 
 .cf-snake-step.step-2 {
-    top: 120px;
+    top: 110px;
     right: 0;
     text-align: right;
 }
 
 .cf-snake-step.step-3 {
-    top: 240px;
+    top: 220px;
     left: 0;
 }
 
 .cf-snake-step.step-4 {
-    top: 360px;
+    top: 330px;
     right: 0;
     color: var(--primary);
     text-align: right;
@@ -87,21 +86,19 @@
 }
 
 .cf-snake-arrow.a-1-2 {
-    top: 60px;
-    left: 50%;
-    transform: translateX(-50%);
+    top: 35px;
+    left: 45%;
 }
 
 .cf-snake-arrow.a-2-3 {
-    top: 180px;
-    left: 50%;
-    transform: translateX(-50%) scaleX(-1);
+    top: 145px;
+    left: 42%;
+    transform: scaleX(-1);
 }
 
 .cf-snake-arrow.a-3-4 {
-    top: 300px;
-    left: 50%;
-    transform: translateX(-50%);
+    top: 255px;
+    left: 52%;
 }
 
 .cf-snake-arrow path {
@@ -352,10 +349,10 @@
 .cf-btn-pill {
     background: var(--primary);
     color: var(--white);
-    padding: 18px 45px;
+    padding: 14px 28px;
     border-radius: 100px;
-    font-size: 1.3rem;
-    font-weight: 900;
+    font-size: 1rem;
+    font-weight: 800;
     text-decoration: none;
     transition: transform 0.2s ease;
     display: inline-flex;
@@ -368,9 +365,9 @@
 }
 
 .cf-cta-text {
-    font-size: 2.5rem;
-    font-weight: 900;
-    letter-spacing: -1px;
+    font-size: 1.8rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
     color: var(--primary);
 }
 

@@ -11,20 +11,22 @@ export default function HomePage() {
 
   const chartData = useMemo(() => {
     const p = patrimonio || 0
-    const marketReturn = 0.07
-    // Banca: commissioni annue 3% + sottoperformance 5% = 8% annuo, transazione 1% una tantum
-    const bankAnnual = marketReturn - 0.03 - 0.05 // -1% netto
-    const bankStart = p * (1 - 0.01) // -1% costi transazione iniziali
-    // Efficiente: commissioni annue 0.3% + sottoperformance 0.5% = 0.8% annuo, transazione 0.1% una tantum
-    const effAnnual = marketReturn - 0.003 - 0.005 // 6.2% netto
-    const effStart = p * (1 - 0.001) // -0.1% costi transazione iniziali
+    const marketReturn = 0.08
+    // Banca: 8% - (3% commissioni + 1% transazione + 2% sottoperf) = 8% - 6% = 2% netto annuo
+    const bankNet = marketReturn - 0.03 - 0.01 - 0.02 // 2%
+    // Efficiente: 8% - (0.3% + 0.1% + 0.5%) = 8% - 0.9% = 7.1% netto annuo
+    const effNet = marketReturn - 0.003 - 0.001 - 0.005 // 7.1%
     const data = []
+    let bankVal = p
+    let effVal = p
     for (let i = 0; i <= 30; i++) {
       data.push({
         year: 2026 + i,
-        banca: Math.round(bankStart * Math.pow(1 + bankAnnual, i)),
-        efficiente: Math.round(effStart * Math.pow(1 + effAnnual, i)),
+        banca: Math.round(bankVal),
+        efficiente: Math.round(effVal),
       })
+      bankVal = bankVal * (1 + bankNet)
+      effVal = effVal * (1 + effNet)
     }
     return data
   }, [patrimonio])
@@ -245,9 +247,9 @@ export default function HomePage() {
 
               {/* Rows */}
               {[
-                { label: 'Commissioni annue', bank: '-3,00 %', efficient: '0,30 %' },
-                { label: 'Commissioni transazione', bank: '-1,00 %', efficient: '0,10 %' },
-                { label: 'Sottoperformance', bank: '-5,00%', efficient: '0,50 %' },
+                { label: 'Commissioni annue', bank: '-3,00 %', efficient: '-0,30 %' },
+                { label: 'Commissioni transazione', bank: '-1,00 %', efficient: '-0,10 %' },
+                { label: 'Sottoperformance', bank: '-2,00 %', efficient: '0,50 %' },
               ].map((row, i) => (
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: '0.5rem', alignItems: 'center', marginBottom: '0.7rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end', fontSize: '0.9rem', fontWeight: 600, color: '#333' }}>
@@ -263,7 +265,7 @@ export default function HomePage() {
                 </div>
               ))}
 
-            <p style={{ textAlign: 'center', fontSize: '0.85rem', color: '#bbb', marginTop: '1rem' }}>Fonte: analisi di mercato...</p>
+            <p style={{ textAlign: 'center', fontSize: '0.85rem', color: '#bbb', marginTop: '1rem' }}>Fonte: analisi di mercato... · Rendimento di mercato annuo stimato: <span style={{ color: '#999', fontWeight: 600 }}>8%</span></p>
             </div>
           </div>
 

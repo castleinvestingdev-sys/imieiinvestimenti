@@ -421,16 +421,16 @@ p {
 
 .hero-content-wrapper {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
-    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
     text-align: left;
-    gap: 2rem;
+    gap: 4rem;
 }
 
 .hero-left-col {
-    flex: 2;
-    max-width: 60%;
+    flex: none;
 }
 
 .hero-right-col {
