@@ -1978,7 +1978,7 @@ function DashboardContent() {
                       <div key={`dos-label-${dIdx}`} className={styles.dualLabelRow}>
                         <div className={styles.dualLabelInfo}>
                           <span className={styles.dualBadgeDos}>Dossier Titoli</span>
-                          {group.dossiers.length > 1 && <span className={styles.dualAccNum}>{dossier.identifier}</span>}
+                          {dossier.identifier && dossier.identifier !== 'N/D' && <span className={styles.dualAccNum}>{dossier.identifier}</span>}
                         </div>
                         <button
                           className={styles.dualDeleteBtn}
@@ -1998,7 +1998,7 @@ function DashboardContent() {
                       <div key={`liq-label-${lIdx}`} className={styles.dualLabelRow}>
                         <div className={styles.dualLabelInfo}>
                           <span className={styles.dualBadgeLiq}>Liquidit&agrave;</span>
-                          {group.liquidityAccounts.length > 1 && <span className={styles.dualAccNum}>{liq.identifier}</span>}
+                          {liq.identifier && liq.identifier !== 'N/D' && <span className={styles.dualAccNum}>{liq.identifier}</span>}
                         </div>
                         <button
                           className={styles.dualDeleteBtn}
