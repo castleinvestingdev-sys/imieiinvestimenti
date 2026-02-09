@@ -230,7 +230,7 @@ function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase
             model,
             temperature: 1,
             max_completion_tokens: 128000,
-            reasoning_effort: 'low',
+            reasoning_effort: 'medium',
             messages: [
                 {
                     role: 'system',
@@ -372,66 +372,493 @@ export async function POST(request: NextRequest) {
         const base64Data = pdfBuffer.toString('base64')
         logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
 
-        const systemPrompt = `Analista finanziario italiano. Estrai dati da PDF bancari in JSON rigoroso.
+        const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
+Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON rigoroso.
 
-### 1. CLASSIFICAZIONE
-- "ESTRATTO CONTO"/"CONTO CORRENTE"/"E/C" → type="LIQUIDITY"
-- "DOSSIER TITOLI"/"ESTRATTO CONTO TITOLI" → type="DOSSIER"
-- Normalizza banca al nome ufficiale (Intesa Sanpaolo, UniCredit, Banco BPM, BPER, MPS, Crédit Agricole Italia, BNL, Credem, Mediolanum, FinecoBank, Banca Generali, Azimut, CheBanca!, Banca Sella, Pop. Sondrio, Banco Desio, Banca Asti, Passadore, Cassa Risp. Bolzano, Volksbank, Banca Piemonte, Carige, Ifis, Illimity, Progetto, CF+, Sistema, Valsabbina, Cassa Centrale, Raiffeisen, Cassa Rurale, BCC, Iccrea, Deutsche Bank Italia, ING, N26, Revolut, Widiba, Webank, Buddybank, BBVA, Santander, Aletti, Euromobiliare, Fideuram, Sanpaolo Invest, IW Bank)
+### FASE 1: CLASSIFICAZIONE DEL DOCUMENTO
+- "ESTRATTO CONTO", "CONTO CORRENTE", "E/C" → type = "LIQUIDITY"
+- "DOSSIER TITOLI", "ESTRATTO CONTO TITOLI" → type = "DOSSIER"
 
-### 2. PERIODO
-- LIQUIDITY: period_start=data SALDO INIZIALE, period_end=data SALDO FINALE (dalla tabella movimenti, NON intestazione). Può essere mensile/bimestrale/trimestrale.
-- DOSSIER: da "PERIODO RENDICONTATO" o frontespizio.
+**RICONOSCIMENTO BANCA**: Normalizza il nome della banca al nome ufficiale. Banche supportate:
+Intesa Sanpaolo, UniCredit, Banco BPM, BPER Banca, Monte dei Paschi di Siena, Crédit Agricole Italia (anche Cariparma, Friuladria, CA), BNL (BNP Paribas), Credem, Banca Mediolanum, FinecoBank, Banca Generali, Azimut, CheBanca! (Mediobanca Premier), Banca Sella, Banca Popolare di Sondrio, Banco di Desio, Banca di Asti, Banca Passadore, Cassa di Risparmio di Bolzano, Volksbank Alto Adige, Banca del Piemonte, Banca Carige (BPER), Banca Ifis, Illimity Bank, Banca Progetto, Banca CF+, Banca Sistema, Banca Valsabbina, Cassa Centrale Banca, Raiffeisen, Cassa Rurale, BCC (Banca di Credito Cooperativo), Iccrea Banca, Deutsche Bank Italia, ING Italia, N26, Revolut, Widiba, Webank, Buddybank, BBVA Italia, Santander Consumer Bank, Banca Aletti, Banca Euromobiliare, Fideuram, Sanpaolo Invest, IW Bank.
 
-### 3. LAYOUT E SEGNI (priorità decrescente)
-1. Colonne DARE/AVERE separate → DARE=negativo, AVERE=positivo
-2. Segno esplicito +/- → leggi direttamente
-3. Keywords: NEGATIVO=ADDEBITO,SDD,BOLLO,COMMISSIONI,SPESE,PRELIEVO,PAGAMENTO,BONIFICO A FAVORE,SOTTOSC,MAV,RAV,F24,CANONE | POSITIVO=ACCREDITO,STIPENDIO,PENSIONE,DIVIDENDO,CEDOLA,BONIFICO DA,VERSAMENTO,RIMBORSO,STORNO
-4. Verifica matematica: scegli segno che fa tornare SaldoFinale-SaldoIniziale=SommaMovimenti
-- Crédit Agricole: SEMPRE due colonne DARE(sx)=negativo / AVERE(dx)=positivo
+### FASE 1.5: DETERMINAZIONE DEL PERIODO (CRITICA)
+**Per LIQUIDITY**: Il periodo NON si deduce dall'intestazione ma dai MOVIMENTI.
+- **period_start**: La data della riga "SALDO INIZIALE" (o "SALDO AL", "SALDO CONTABILE INIZIALE") nella tabella movimenti. Questa è la data ESATTA di inizio periodo.
+- **period_end**: La data della riga "SALDO FINALE" (o "SALDO AL", "SALDO CONTABILE FINALE") nella tabella movimenti. Questa è la data ESATTA di fine periodo.
+- IMPORTANTE: Gli estratti conto possono essere trimestrali, bimestrali o mensili. NON assumere che siano sempre trimestrali. La data del saldo iniziale e finale ti dice esattamente il periodo.
+- Esempio: se il saldo iniziale ha data 31/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-31" e period_end = "2025-08-31" (è un estratto mensile).
+- Esempio: se il saldo iniziale ha data 01/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-01" e period_end = "2025-08-31" (è un estratto bimestrale).
 
-### 4. CLASSIFICAZIONE movement_type (5 categorie)
-- **"Commissioni"**: costi bancari + imposte (commissioni, spese E/C, canoni, bolli, ritenute, Tobin Tax, competenze fruttifere). NON include: pensione, stipendio, affitto, bollette, bonifici, prelievi, rimborsi>20€
-- **"Acquisto"**: sottoscrizione fondi, PAC, acquisto titoli
-- **"Vendita"**: riscatto fondi, vendita titoli, rimborso quote
-- **"Proventi"**: cedole, dividendi
-- **"Altro"**: tutto il resto (bonifici, pensioni, stipendi, utenze, prelievi)
+**Per DOSSIER**: Usa "PERIODO RENDICONTATO" o date dal frontespizio.
 
-### 5. ESTRAZIONE MOVIMENTI
-- Estrai OGNI riga, anche con stessa data/importo (sono transazioni diverse). NO deduplicazione.
-- Leggi TUTTE le pagine. Concatena descrizioni multi-riga.
-- Numeri: "1.234,56"→1234.56 (punto=migliaia, virgola=decimale). Date: restituisci GG/MM/AAAA.
-- Validazione: se abs(SaldoFinale-SaldoIniziale-SommaMovimenti)>0.01€ → hai sbagliato segni, correggi.
-- "BONIFICO A VOSTRO FAVORE" da fondi/SGR = "Altro", NON "Vendita".
+### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
+Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
+- Layout: DUE COLONNE SEPARATE per DARE e AVERE
+- **DARE** (colonna sinistra degli importi) = USCITE = **NEGATIVO**
+- **AVERE** (colonna destra degli importi) = ENTRATE = **POSITIVO**
+- Un importo può apparire SOLO in una delle due colonne, mai in entrambe
+- Se l'importo è nella posizione sinistra → è un DARE → **NEGATIVO**
+- Se l'importo è nella posizione destra → è un AVERE → **POSITIVO**
 
-### 6. DATI SCALARI (COMPETENZE - solo LIQUIDITY)
-Da "CONTO SCALARE": numeri_creditori e numeri_debitori (ULTIMO periodo, non sommare periodi diversi).
-Da "INTERESSI CREDITORI": conta righe con DATA nella colonna Decorrenza.
-- 1 riga con data → interessi_attivi_lordi = "Totale lordo"
-- 2+ righe con data → interessi_attivi_lordi = valore Interessi dell'ULTIMA riga con data (NON il Totale lordo che è la somma!)
-- interessi_creditori_periodi: array di {data, interessi} per OGNI riga con data
-- interessi_passivi_lordi: "Totale lordo" interessi debitori
-- tasso_attivo/passivo: dalla colonna TASSO
-- Movimenti titoli in LIQUIDITY: conta acquisti (ACQ/SOTTOSC/PAC) e vendite (VEND/RISCATTO/DISINV). RIMBORSO=vendita solo se seguito da FONDI/SICAV/QUOTE/ETF/OBBLIG. CEDOLA/DIVIDENDO=Proventi, non vendite.
+### FASE 2: ANALISI DEL LAYOUT (CRITICA - NON SALTARE)
+**PRIMA di estrarre i movimenti, DEVI analizzare il layout del documento:**
 
-### 7. PORTAFOGLIO (solo DOSSIER)
-Estrai TUTTI i titoli da TUTTE le sezioni (Azioni, Obbligazioni, Fondi/OICR, SICAV, ETF, Certificates, GPM, Polizze) e TUTTE le pagine.
-- portfolio_total_extracted: "CONTROVALORE TOTALE APPARENTE"
-- Per ogni titolo: isin, name (esattamente dal PDF), currency, exchangeRate (1 se EUR), quantity, price, marketValue, assetType (Azione/Obbligazione/Fondo/ETF/Altro)
-- VERIFICA: somma marketValue ≈ portfolio_total_extracted (tolleranza <1%). Se minore, hai perso titoli.
-- NUMERI ITALIANI: "1.000,000"=1000 (punto=migliaia!), "5.000"=5000, "28.355,00"=28355. Se qty×price≠marketValue, probabilmente qty è sbagliata.
-- Titoli in default: marketValue=0, price=0. Nomi esattamente dal PDF.
+1. **IDENTIFICA LE COLONNE**: Cerca le intestazioni delle colonne nella tabella dei movimenti.
+   - Possibili nomi per USCITE: "DARE", "ADDEBITI", "USCITE", "PRELIEVI", "-"
+   - Possibili nomi per ENTRATE: "AVERE", "ACCREDITI", "ENTRATE", "VERSAMENTI", "+"
 
-### 8. MOVIMENTI TITOLI (solo DOSSIER)
-Keywords ACQUISTO: ACQUISTO, ACQ, CARICO, SOTTOSCRIZIONE, VERSAMENTO QUOTE, CONFERIMENTO, PAC, NOTA INF. ACQ., SWITCH IN, INVESTIMENTO
-Keywords VENDITA: VENDITA, VEND, SCARICO, RISCATTO, RIMBORSO, LIQUIDAZIONE, DISINVESTIMENTO, NOTA INF. VEND., SWITCH OUT, PRELIEVO QUOTE, CONFERIMENTO A GPM
-OPERAZIONI STRAORDINARIE: RAGGRUPPAMENTO (qty negativa=Vendita, positiva=Acquisto), VERSAMENTO VALORI (=Acquisto), FRAZIONAMENTO/SPLIT, CONCAMBIO/CONVERSIONE. Spesso price=0, netAmount=0. FONDAMENTALE estrarre: influenzano saldi quantità.
-Per ogni movimento: isin, date(DD/MM/YYYY), name, operationType("Acquisto"|"Vendita"), quantity(positivo), price, exchangeRate(1 se EUR), currency, grossAmount(qty×price×exRate), fees, taxes, netAmount.
-Se fees/taxes non nel PDF → lascia 0.
-NUMERI ITALIANI: "6.000"=6000, "84.000"=84000, "1.000"=1000 (punto=migliaia!).
+2. **DETERMINA LA STRUTTURA**: Il documento può avere:
+   - **Due colonne separate** (DARE | AVERE) → importo nella colonna DARE = negativo, AVERE = positivo
+   - **Una colonna unica** con segno (+/-) → leggi il segno direttamente
+   - **Una colonna unica** senza segno → usa la posizione o il contesto per determinare il segno
 
-### STRUTTURA JSON:
-{"type":"DOSSIER"|"LIQUIDITY","layout_detected":"two_columns_dare_avere"|"single_column_with_sign"|"single_column_no_sign"|"other","info":{"bankName":"","accountNumber":"","period_start":"YYYY-MM-DD","period_end":"YYYY-MM-DD","holder":"","settlementAccount":"(DOSSIER: Conto Regolamento/C/EURO; LIQUIDITY: IBAN)"},"scalar_data":{"numeri_creditori":0,"numeri_debitori":0,"interessi_attivi_lordi":0,"interessi_passivi_lordi":0,"interessi_creditori_periodi":[{"data":"GG/MM/AAAA","interessi":0}],"tasso_attivo":"0%","tasso_passivo":"0%","acquisto_titoli_count":0,"vendita_titoli_count":0,"movimenti_titoli_count":0,"acquisto_titoli_amount":0,"vendita_titoli_amount":0},"movements":[{"date":"GG/MM/AAAA","description":"","amount":0,"sign_source":"column_position"|"explicit_sign"|"keyword"|"math_verification","movement_type":"Commissioni"|"Acquisto"|"Vendita"|"Proventi"|"Altro"}],"summary":{"initial_balance":{"value":0,"source":"extracted"},"final_balance":{"value":0,"source":"extracted"},"total_movements_amount":{"value":0,"source":"calculated"},"total_commissions":{"value":0,"source":"calculated"},"total_proventi":{"value":0,"source":"calculated"},"math_verification":{"expected_delta":0,"actual_sum":0,"matches":true},"portfolio_total_extracted":0,"portfolio_currency":"EUR"},"finalPortfolio":[{"isin":"","name":"","assetType":"Fondo","currency":"EUR","exchangeRate":1,"quantity":0,"price":0,"marketValue":0}],"securityMovements":[{"isin":"","date":"DD/MM/YYYY","name":"","operationType":"Acquisto"|"Vendita","quantity":0,"price":0,"exchangeRate":1,"currency":"EUR","grossAmount":0,"fees":0,"taxes":0,"netAmount":0}],"dividends":[]}
+3. **VERIFICA CON I SALDI**:
+   - Estrai SALDO INIZIALE e SALDO FINALE dal documento
+   - Calcola: Somma Movimenti = Saldo Finale - Saldo Iniziale
+   - Usa questa differenza per VERIFICARE che i segni siano corretti
+
+### FASE 3: DETERMINAZIONE DEL SEGNO (IN ORDINE DI PRIORITÀ)
+
+**PRIORITÀ 1 - LAYOUT COLONNE**: Se il documento ha colonne DARE/AVERE separate:
+- Importo in colonna DARE/ADDEBITI → NEGATIVO
+- Importo in colonna AVERE/ACCREDITI → POSITIVO
+
+**PRIORITÀ 2 - SEGNO ESPLICITO**: Se il documento mostra +/- davanti agli importi:
+- Leggi il segno direttamente
+
+**PRIORITÀ 3 - KEYWORDS NELLA DESCRIZIONE** (usa se il layout non è chiaro):
+- **NEGATIVO (-)**: "ADDEBITO", "SDD", "BOLLO", "COMMISSIONI", "SPESE", "PRELIEVO", "PREL.", "PAGAMENTO", "BONIFICO A FAVORE", "V/ORDINE", "PAGAM", "EMESSO", "SOTTOSC", "SOTTOSCRIZIONE", "MAV", "RAV", "F24", "CANONE"
+- **POSITIVO (+)**: "ACCREDITO", "STIPENDIO", "PENSIONE", "EMOLUMENTI", "DIVIDENDO", "CEDOLA", "BONIFICO DA", "VERSAMENTO", "RIMBORSO", "STORNO"
+
+**PRIORITÀ 4 - VERIFICA MATEMATICA**: Se ancora ambiguo:
+- Calcola la somma con entrambe le ipotesi di segno
+- Scegli il segno che fa tornare: Saldo Finale - Saldo Iniziale = Somma Movimenti
+
+**MAI ASSUMERE UN SEGNO DI DEFAULT** - Usa sempre una delle 4 priorità sopra.
+
+### FASE 3.5: CLASSIFICAZIONE movement_type (SOLO 5 CATEGORIE)
+
+**ESISTONO SOLO 5 CATEGORIE - USA ESCLUSIVAMENTE QUESTE:**
+
+**"Commissioni"** - TUTTI i costi bancari e imposte:
+- Commissioni di gestione e amministrazione
+- Spese rendiconto, spese E/C, spese emissione E/C
+- Canone mensile / canone fisso mensile
+- Canone carta di debito
+- Invio rendicontazione/contabili titoli
+- Costo emissione comunicazione di legge
+- Commissioni prelievo Bancocard
+- Commissioni bonifico (es. "Comm.ne bonifico")
+- Competenze Fruttifere / Competenze di chiusura (importo POSITIVO)
+- Rimborso canone/spese (solo importi piccoli < 20€)
+- Donazione su sportello automatico
+- Storno id. op. / storno operazione
+- **IMPOSTA DI BOLLO E/C e Rendiconto** → Commissioni
+- **IMPOSTA DI BOLLO su Prodotti Finanziari** → Commissioni
+- **Ritenuta fiscale** → Commissioni
+- **Imposta transazioni finanziarie (Tobin Tax)** → Commissioni
+
+**"Acquisto"** - Investimenti in titoli:
+- Sottoscrizione fondi, PAC, acquisto titoli/ETF/obbligazioni
+
+**"Vendita"** - Disinvestimenti:
+- Riscatto fondi, vendita titoli, rimborso quote
+
+**"Proventi"** - Rendite da investimenti:
+- Cedole, dividendi, proventi titoli
+
+**"Altro"** - TUTTO IL RESTO (categoria predefinita):
+- Bonifici in entrata/uscita
+- Pensione INPS, stipendio, emolumenti
+- Affitto, canone locazione
+- Premio polizza, assicurazione
+- Prelievo contante
+- Rimborsi > 20€
+- Pagamenti utenze, bollette, F24, MAV, RAV
+- Qualsiasi altro movimento non nelle categorie sopra
+
+**ATTENZIONE - NON SONO COMMISSIONI (usa "Altro"):**
+- Pensione INPS / Pensione / INPS
+- Stipendio / Emolumenti / Retribuzione
+- Affitto / Canone locazione
+- Premio polizza
+- Rimborsi > 20€
+- Bollette / Utenze / F24 / MAV / RAV
+- Prelievo contante / Prelievo ATM
+- Bonifici (sia in entrata che in uscita)
+
+**REGOLA D'ORO**: Le COMMISSIONI includono SOLO costi/spese bancarie E imposte/bolli. Tutto il resto va in "Altro"!
+
+### FASE 4: ESTRAZIONE MOVIMENTI
+
+**REGOLA CRITICA - ESTRARRE OGNI SINGOLO MOVIMENTO**:
+- DEVI estrarre OGNI SINGOLA riga della tabella movimenti, ANCHE se hanno la stessa data e importo.
+- Transazioni come "INVESTIMENTO IN FONDI COMUNI" spesso si ripetono con stessa data e stesso importo (es. 500€ per ciascun fondo). Queste sono transazioni DIVERSE e vanno estratte TUTTE.
+- NON deduplicare, NON raggruppare, NON saltare transazioni simili.
+- Se il PDF ha più pagine di movimenti, estrai i movimenti da TUTTE le pagine.
+- NON estrarre lo stesso movimento con segni diversi.
+- Se la somma non torna, probabilmente stai sbagliando i segni, NON duplicando.
+- SEGNI: Commissioni, spese, canoni, imposte, donazioni, storni sono ADDEBITI → importo NEGATIVO. Competenze Fruttifere e rimborsi → importo POSITIVO.
+
+1. **DESCRIZIONI MULTI-RIGA**:
+   - Molte transazioni hanno descrizioni su più righe
+   - CONCATENA le righe successive (senza data/importo) alla transazione precedente
+   - Cerca keywords anche nelle righe successive
+
+2. **FORMATI NUMERICI**:
+   - Converti "1.234,56" → 1234.56 (punto come decimale)
+   - Ignora simboli come \`*\` prima dei numeri
+   - Ignora simboli valuta (€, EUR)
+
+3. **FORMATI DATA**:
+   - Accetta: GG/MM/AAAA, GG.MM.AAAA, GG-MM-AAAA, AAAA-MM-GG
+   - Restituisci sempre: GG/MM/AAAA
+
+### FASE 5: ESTRAZIONE DATI SCALARI (COMPETENZE)
+
+**ISTRUZIONI DETTAGLIATE PER BANCA INTESA/INTESA SANPAOLO:**
+
+#### 5.1 NUMERI CREDITORI E DEBITORI
+Cerca nel documento la sezione "CONTO SCALARE" o "RIASSUNTO SCALARE".
+Trova la riga "TOTALE NUMERI" o cerca le righe individuali con "Numeri creditori" / "Numeri debitori".
+
+**Esempio tipico Banca Intesa:**
+[ESEMPIO]
+TOTALE NUMERI          0,00        5.737.125,02
+                    (Debitori)    (Creditori)
+[/ESEMPIO]
+oppure:
+[ESEMPIO]
+Numeri creditori    3.282.024,02
+Numeri debitori     11.113.738,56
+[/ESEMPIO]
+
+Estrai:
+- **numeri_creditori**: Il valore dei numeri creditori dell'ULTIMO periodo (ultima riga con data). Se la tabella ha più righe con date diverse (es. periodi precedenti + periodo corrente), estrai SOLO il valore dell'ULTIMA riga con data (quella del periodo corrente di questo estratto conto). NON sommare i valori di periodi diversi. Ignora la riga "Già liquidati" e "Invariati fino al".
+- **numeri_debitori**: Il valore totale dei numeri debitori (stessa regola: ultimo periodo)
+
+#### 5.2 INTERESSI CREDITORI E DEBITORI (LORDI)
+Cerca la sezione "ELEMENTI PER IL CONTEGGIO DELLE COMPETENZE" o "INTERESSI CREDITORI" / "INTERESSI DEBITORI".
+
+**PROCEDURA STEP-BY-STEP PER ESTRARRE GLI INTERESSI:**
+
+**STEP 1**: Individua la tabella "INTERESSI CREDITORI" nel PDF.
+**STEP 2**: Conta quante righe hanno una DATA nella colonna "Decorrenza" (formato GG.MM.AAAA).
+  - Le righe "Totale lordo", "Ritenuta fiscale", "Totale" NON hanno una data = NON contarle.
+  - Solo le righe con una data come "30.06.2018" o "30.09.2018" contano.
+**STEP 3**: Estrai TUTTE le righe con data come array interessi_creditori_periodi.
+**STEP 4**: Per interessi_attivi_lordi:
+  - Se hai trovato 1 SOLA riga con data → interessi_attivi_lordi = il valore "Totale lordo" dalla tabella
+  - Se hai trovato 2 O PIU' righe con data → interessi_attivi_lordi = valore "Interessi" dell'ULTIMA riga (data piu' recente). ATTENZIONE: il "Totale lordo" in questo caso e' la somma di tutte le righe, NON il valore che cerchi!
+
+**ESEMPIO CON 2 RIGHE (ATTENZIONE!):**
+[ESEMPIO]
+INTERESSI CREDITORI
+Decorrenza    Tasso    Numeri creditori    Interessi
+30.06.2018    0,0100   5.000.000,00        0,78     ← Riga 1 (ha data!)
+30.09.2018    0,0100   10.979.877,26       2,21     ← Riga 2 (ha data!)
+                       Totale lordo         2,99     ← SOMMA (NO data!) = 0,78+2,21
+                       Ritenuta fiscale    -0,78
+                       Totale               2,21
+[/ESEMPIO]
+Righe con data: 2 → interessi_attivi_lordi = 2.21 (valore dalla Riga 2, l'ultima con data)
+interessi_creditori_periodi: [{"data":"30/06/2018","interessi":0.78},{"data":"30/09/2018","interessi":2.21}]
+ERRORE COMUNE: estrarre 2.99 (il Totale lordo) come interessi_attivi_lordi. 2.99 e' SBAGLIATO perche' e' la somma.
+
+**ESEMPIO CON 1 RIGA:**
+[ESEMPIO]
+INTERESSI CREDITORI
+Decorrenza    Tasso    Numeri creditori    Interessi
+31.12.2018    0,0100   3.282.024,02        1,61     ← Riga 1 (unica con data)
+                       Totale lordo         1,61     ← SOMMA = 1,61 (coincide)
+                       Ritenuta fiscale    -0,42
+                       Totale               1,19
+[/ESEMPIO]
+Righe con data: 1 → interessi_attivi_lordi = 1.61 (Totale lordo)
+interessi_creditori_periodi: [{"data":"31/12/2018","interessi":1.61}]
+
+**VERIFICA OBBLIGATORIA**: Il numeri_creditori estratto dal Conto Scalare DEVE corrispondere al valore "Numeri creditori" dell'ULTIMA riga con data. Se non corrisponde, stai leggendo la riga sbagliata!
+
+Estrai:
+- **interessi_attivi_lordi**: Segui la procedura Step 1-4 sopra
+- **interessi_passivi_lordi**: Il "Totale lordo" degli interessi debitori
+- **interessi_creditori_periodi**: ARRAY con OGNI riga che ha una data nella colonna Decorrenza. Ogni elemento:
+  - "data": la data decorrenza (GG/MM/AAAA)
+  - "interessi": il valore dalla colonna Interessi di quella riga
+  CRITICO: Se la tabella ha 2 righe con data, DEVI restituire 2 elementi. Se restituisci 1 solo elemento con il valore del "Totale lordo", stai sbagliando!
+
+#### 5.3 TASSO ATTIVO E PASSIVO
+Il tasso si trova nella colonna "TASSO" della tabella interessi creditori/debitori.
+Cerca il valore percentuale (es. 0,0100 o 0,01%).
+
+Estrai:
+- **tasso_attivo**: Tasso applicato agli interessi creditori (es. "0.01%" o 0.0100)
+- **tasso_passivo**: Tasso applicato agli interessi debitori
+
+#### 5.4 MOVIMENTI TITOLI (Acquisti e Vendite)
+Analizza la lista movimenti e identifica operazioni su titoli:
+
+**ACQUISTI TITOLI (importi NEGATIVI - uscite di denaro):**
+Keywords: "ACQ.", "ACQUISTO", "SOTTOSC", "SOTTOSCRIZIONE", "NOTA INF. ACQ.", "PAC FONDI"
+
+**VENDITE TITOLI (importi POSITIVI - entrate di denaro):**
+Keywords per vendite: "NOTA INF. VEND.", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE", "DISINV", "DISINVESTIMENTO", "LIQUIDAZ FONDI", "SWITCH OUT"
+Keyword RIMBORSO: conta come vendita SOLO se seguito da: "FONDI", "SICAV", "QUOTE", "ETF", "OBBLIG"
+**ESCLUSIONI - NON contare come vendite:**
+- "CEDOLA", "DIVIDENDO", "STACCO CED" = PROVENTI
+- "RIMBORSO BUONO", "RIMBORSO SPESE", "RIMBORSO BOLLO" = NON sono vendite titoli
+- "RISCATTO" generico senza riferimento a fondi = verificare contesto
+
+Calcola e inserisci in scalar_data:
+- **acquisto_titoli_count**: numero di operazioni di acquisto
+- **vendita_titoli_count**: numero di operazioni di vendita
+- **movimenti_titoli_count**: acquisto_titoli_count + vendita_titoli_count
+- **acquisto_titoli_amount**: somma importi acquisti (sarà negativo)
+- **vendita_titoli_amount**: somma importi vendite (sarà positivo)
+
+**IMPORTANTE per interessi**: Estrai il valore "Totale lordo" (LORDO), NON il "Totale" finale netto.
+
+Se un valore non è presente, usa 0.
+
+### FASE 6: VALIDAZIONE FINALE (OBBLIGATORIA - ESEGUI SEMPRE)
+Prima di restituire il JSON:
+1. Calcola: expected_delta = Saldo Finale - Saldo Iniziale
+2. Calcola: actual_sum = Somma di tutti i movimenti.amount
+3. Se abs(expected_delta - actual_sum) > 0.01€:
+   - HAI SBAGLIATO I SEGNI DI UNO O PIÙ MOVIMENTI
+   - Calcola: errore = (expected_delta - actual_sum) / 2
+   - Cerca il movimento con importo ≈ abs(errore) e INVERTI IL SUO SEGNO
+   - Ripeti finché expected_delta ≈ actual_sum
+
+**CASO COMUNE DI ERRORE**: I "RIMBORSO" o "ACCREDITO" o "VERSAMENTO" in colonna AVERE sono POSITIVI ma spesso vengono erroneamente marcati negativi. Se il calcolo non torna, verifica questi movimenti.
+
+### FASE 7: COMPLETEZZA (OBBLIGATORIA)
+- Se il PDF ha più pagine, DEVI leggere e estrarre i movimenti da TUTTE le pagine.
+- Conta il numero totale di righe nella tabella movimenti nel PDF. Il tuo JSON DEVE avere lo STESSO numero di elementi nell'array "movements".
+- NON fermarti prima di aver estratto TUTTI i movimenti. Anche se ci sono 50+ movimenti, estraili TUTTI.
+- "BONIFICO A VOSTRO FAVORE" da fondi/SGR (es. Eurizon Capital) è un bonifico, NON una vendita titoli. Usa movement_type "Altro", NON "Vendita".
+
+### FASE 8: ESTRAZIONE PORTAFOGLIO TITOLI (SOLO PER type="DOSSIER")
+Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio.
+
+**QUESTA FASE È CRITICA - DEVI ESTRARRE TUTTI I TITOLI SENZA ECCEZIONI.**
+
+**8.1 CONTROVALORE TOTALE**
+Cerca nel PDF il valore "CONTROVALORE TOTALE APPARENTE" o "CONTROVALORE TOTALE" o simile.
+Esempio: "CONTROVALORE TOTALE APPARENTE AL 31/03/2019 Euro 527.413,10"
+Estrai:
+- Il valore numerico → summary.portfolio_total_extracted (es. 527413.10)
+- La valuta → summary.portfolio_currency (es. "EUR" se dice "Euro", "USD" se dice "Dollar", ecc.)
+
+**8.2 PROCEDURA STEP-BY-STEP PER ESTRARRE TUTTI I TITOLI**
+
+**STEP 1 - IDENTIFICA TUTTE LE SEZIONI DEL PORTAFOGLIO:**
+Il PDF può avere il portafoglio diviso in sezioni separate. DEVI cercare e leggere TUTTE queste sezioni:
+- "AZIONI" / "TITOLI AZIONARI"
+- "OBBLIGAZIONI" / "TITOLI OBBLIGAZIONARI" / "TITOLI DI STATO"
+- "FONDI COMUNI" / "FONDI" / "O.I.C.R." / "OICR"
+- "SICAV"
+- "ETF" / "ETC" / "ETN"
+- "CERTIFICATES" / "CERTIFICATI"
+- "GESTIONI PATRIMONIALI" / "GPM" / "GPF"
+- "POLIZZE" / "PRODOTTI ASSICURATIVI"
+- Qualsiasi altra sezione con titoli nella tabella "CONSISTENZA"
+
+**STEP 2 - LEGGI TUTTE LE PAGINE:**
+La sezione portafoglio può estendersi su PIÙ PAGINE del PDF. NON fermarti alla prima pagina!
+- Se una tabella continua nella pagina successiva, DEVI leggere anche quella
+- Cerca "segue" / "continua" / intestazioni ripetute che indicano continuazione
+- I titoli possono essere distribuiti su 2, 3 o più pagine
+
+**STEP 3 - CONTA I TITOLI:**
+Dopo aver estratto tutti i titoli, CONTA quanti ne hai trovati.
+Ogni riga della tabella con un codice ISIN è UN titolo da estrarre.
+
+**STEP 4 - VERIFICA LA SOMMA (OBBLIGATORIA):**
+Calcola: somma_controvalore = somma di tutti i marketValue estratti
+Confronta con portfolio_total_extracted (il totale dal PDF).
+- Se somma_controvalore ≈ portfolio_total_extracted (differenza < 1%) → OK, hai estratto tutto
+- Se somma_controvalore < portfolio_total_extracted → HAI PERSO DEI TITOLI! Torna allo Step 1 e cerca meglio
+- NON procedere finché la somma non corrisponde al totale (con tolleranza < 1%)
+
+**8.3 CAMPI DA ESTRARRE PER OGNI TITOLO**
+Per OGNI titolo nella sezione "CONSISTENZA":
+- **isin**: Codice ISIN del titolo (es. "FR0010245514", "IT0001047437")
+- **name**: Nome/Descrizione del titolo ESATTAMENTE come appare nel PDF (es. "LYXOR JAPAN (TOPIX)D", "EURIZON BREVE TERM $", "CARMIGNAC PATRIMOINE")
+- **currency**: Divisa/Valuta (es. "EUR", "USD") - dalla colonna "Divisa"
+- **exchangeRate**: Tasso di cambio (es. 1.1235) - dalla colonna "Cambio". Se vuoto o EUR, usa 1
+- **quantity**: Quantità/Consistenza (numero di quote/azioni)
+- **price**: Quotazione/Prezzo unitario - dalla colonna "Quotazione"
+- **marketValue**: Controvalore in Euro - dalla colonna "Controvalore Euro"
+- **assetType**: Classificazione del titolo. Deduci dal nome, dalla sezione del PDF o dall'ISIN:
+  - "Azione" → Titoli azionari individuali (es. "ENI SPA", "ENEL", "UNICREDIT")
+  - "Obbligazione" → BTP, BOT, CCT, obbligazioni corporate, titoli di stato (es. "BTP 01MG2023", "MEDIOBANCA 2025")
+  - "Fondo" → Fondi comuni di investimento, SICAV (es. "ANIMA FONDO TRADING", "EURIZON BREVE TERM", "CARMIGNAC PATRIMOINE", "PHARUS SICAV")
+  - "ETF" → Exchange Traded Fund (es. "LYXOR JAPAN (TOPIX)", "ISHARES CORE", "AMUNDI MSCI", "VANGUARD")
+  - "Altro" → Se non classificabile con certezza
+
+**ATTENZIONE CRITICA - FORMATO NUMERI ITALIANI NELLE QUANTITÀ:**
+I numeri nelle colonne "Consistenza" e "Quotazione" usano il formato italiano:
+- Il PUNTO "." è SEMPRE il separatore delle MIGLIAIA (NON il decimale!)
+- La VIRGOLA "," è SEMPRE il separatore DECIMALE
+- Esempi di conversione CORRETTA:
+  - "1.000,000" → quantity: 1000 (MILLE, non 1!)
+  - "5.000,000" → quantity: 5000 (CINQUEMILA, non 5!)
+  - "1.000" senza virgola → quantity: 1000 (MILLE, il punto è separatore migliaia!)
+  - "2556,138" → quantity: 2556.138
+  - "28,3550000" → price: 28.355
+  - "28.355,00" → marketValue: 28355
+- ERRORE COMUNE: leggere "1.000,000" come 1.0 o "5.000,000" come 5.0. Questo è SBAGLIATO!
+- VERIFICA: se quantity × price ≠ marketValue (con tolleranza), probabilmente hai sbagliato la quantità.
+  Esempio: se quantity=1, price=28.355 → 28.355 ≠ 28355 (marketValue) → ERRORE! Deve essere quantity=1000.
+
+IMPORTANTE:
+- Estrai il nome del titolo dalla colonna "Descrizione" del PDF
+- Il nome può essere abbreviato nel PDF (es. "ANIMA FONDO TRADING" o "LYXOR COMMOD. THOM.R")
+- NON inventare nomi - usa ESATTAMENTE quello che appare nel PDF
+- Per titoli in default (es. "Titolo in default"), metti marketValue = 0
+- I titoli in default NON contribuiscono al controvalore totale
+- Se la quotazione non è disponibile ("Non dispon."), metti price = 0
+- **ERRORE COMUNE**: saltare titoli che si trovano su pagine successive. LEGGI TUTTE LE PAGINE!
+- **VERIFICA FINALE**: il numero di elementi in finalPortfolio DEVE corrispondere al numero di righe nella tabella del PDF
+
+### FASE 9: ESTRAZIONE MOVIMENTI TITOLI (SOLO PER type="DOSSIER")
+Se il documento è un DOSSIER TITOLI, estrai TUTTI i movimenti di acquisto/vendita titoli.
+
+**9.1 IDENTIFICAZIONE OPERAZIONI**
+Le banche usano terminologie diverse per indicare acquisti e vendite:
+
+**ACQUISTO (Carico titoli)** - Keywords:
+- "ACQUISTO", "ACQ.", "ACQ", "CARICO", "CARICO TITOLI"
+- "SOTTOSCRIZIONE", "SOTTOSC.", "SOTTOSCR."
+- "VERSAMENTO QUOTE", "CONFERIMENTO"
+- "PAC" (Piano Accumulo Capitale)
+- "NOTA INF. ACQ.", "SWITCH IN"
+- "INVESTIMENTO", "INV."
+
+**VENDITA (Scarico titoli)** - Keywords:
+- "VENDITA", "VEND.", "SCARICO", "SCARICO TITOLI"
+- "RISCATTO", "RISCATTO QUOTE", "RISCATTO TOTALE", "RISCATTO PARZIALE"
+- "RIMBORSO", "RIMB.", "LIQUIDAZIONE", "LIQUIDAZ."
+- "DISINVESTIMENTO", "DISINV."
+- "NOTA INF. VEND.", "SWITCH OUT"
+- "PRELIEVO QUOTE"
+
+**9.2 STRUTTURA MOVIMENTI**
+Per OGNI movimento titoli estrai:
+- **isin**: Codice ISIN del titolo (se presente)
+- **date**: Data operazione (formato "DD/MM/YYYY")
+- **name**: Nome/Descrizione del titolo
+- **operationType**: "Acquisto" o "Vendita" (normalizza sempre a questi due valori)
+- **quantity**: Quantità/Numero quote (positivo)
+- **price**: Prezzo/Quotazione unitario
+- **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
+- **currency**: Valuta/Divisa (EUR, USD, etc.)
+- **grossAmount**: Importo lordo dell'operazione (controvalore = quantity × price × exchangeRate)
+- **fees**: Spese/Commissioni dell'operazione (se presente nel PDF)
+- **taxes**: Imposte, bolli, ritenute (se presente nel PDF)
+- **netAmount**: Importo netto totale dell'operazione
+
+**CALCOLO SPESE/IMPOSTE:**
+- Se il PDF mostra una colonna "Spese", "Commissioni", "Imposte" o "Spese/Imposte" → estrai il valore direttamente
+- Se NON presente → lascia fees=0 e taxes=0, verranno calcolati come |netAmount - grossAmount|
+
+**9.3 NOTE IMPORTANTI**
+- La sezione movimenti può essere chiamata: "MOVIMENTI", "OPERAZIONI", "LISTA OPERAZIONI", "DETTAGLIO MOVIMENTI"
+- Alcune banche mostrano solo il totale, altre mostrano il dettaglio per ogni titolo
+- Se non ci sono movimenti nel periodo, lascia l'array vuoto
+- Il netAmount per acquisti è l'importo pagato (positivo), per vendite è l'importo ricevuto (positivo)
+- fees e taxes potrebbero essere inclusi nel netAmount o mostrati separatamente
+
+**ATTENZIONE CRITICA - FORMATO NUMERI ITALIANI NEI MOVIMENTI:**
+Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
+- Il PUNTO "." è SEMPRE il separatore delle MIGLIAIA (NON il decimale!)
+- La VIRGOLA "," è SEMPRE il separatore DECIMALE
+- Esempi di conversione CORRETTA:
+  - "6.000" → quantity: 6000 (SEIMILA, non 6!)
+  - "1.000" → quantity: 1000 (MILLE, non 1!)
+  - "84.000" → quantity: 84000 (OTTANTAQUATTROMILA, non 84!)
+  - "5.000.000" → quantity: 5000000 (CINQUE MILIONI, non 5!)
+  - "2556,138" → quantity: 2556.138
+- ERRORE COMUNE: leggere "6.000" come 6.0 o "84.000" come 84.0. Questo è SBAGLIATO! Il punto è separatore migliaia.
+- VERIFICA: se la quantità del movimento è molto piccola rispetto al controvalore (es. qty=6, amount=14.707) probabilmente hai sbagliato. qty=6000 è corretto.
+
+### STRUTTURA JSON RICHIESTA:
+{
+  "type": "DOSSIER" | "LIQUIDITY",
+  "layout_detected": "two_columns_dare_avere" | "single_column_with_sign" | "single_column_no_sign" | "other",
+  "info": {
+    "bankName": "Nome Banca",
+    "accountNumber": "Numero Conto o Dossier Titoli (es. 445/0000004742990)",
+    "period_start": "YYYY-MM-DD",
+    "period_end": "YYYY-MM-DD",
+    "holder": "Intestatario",
+    "settlementAccount": "Per DOSSIER: cerca 'Conto di Regolamento', 'Conto Regolamento', 'Conto di appoggio', 'Conto corrente tecnico', 'Cash account', 'C/C Regolamento', 'Conto Corrente', 'N. Conto Corrente', 'C/EURO' (es. C/EURO 00445/00035652638). Per LIQUIDITY: IBAN"
+  },
+  "scalar_data": {
+    "numeri_creditori": 0,
+    "numeri_debitori": 0,
+    "interessi_attivi_lordi": 0,
+    "interessi_passivi_lordi": 0,
+    "interessi_creditori_periodi": [{"data": "GG/MM/AAAA", "interessi": 0}],
+    "tasso_attivo": "0%",
+    "tasso_passivo": "0%",
+    "acquisto_titoli_count": 0,
+    "vendita_titoli_count": 0,
+    "movimenti_titoli_count": 0,
+    "acquisto_titoli_amount": 0,
+    "vendita_titoli_amount": 0
+  },
+  "movements": [
+    {
+      "date": "GG/MM/AAAA",
+      "description": "Descrizione completa concatenata",
+      "amount": 0,
+      "sign_source": "column_position" | "explicit_sign" | "keyword" | "math_verification",
+      "movement_type": "Commissioni" | "Acquisto" | "Vendita" | "Proventi" | "Altro"
+    }
+  ],
+  "summary": {
+    "initial_balance": { "value": 0, "source": "extracted" },
+    "final_balance": { "value": 0, "source": "extracted" },
+    "total_movements_amount": { "value": 0, "source": "calculated" },
+    "total_commissions": { "value": 0, "source": "calculated" },
+    "total_proventi": { "value": 0, "source": "calculated" },
+    "math_verification": { "expected_delta": 0, "actual_sum": 0, "matches": true },
+    "portfolio_total_extracted": 0,
+    "portfolio_currency": "EUR"
+  },
+  "finalPortfolio": [
+    {
+      "isin": "CODICE_ISIN",
+      "name": "Nome del titolo dal PDF",
+      "assetType": "Fondo",
+      "currency": "EUR",
+      "exchangeRate": 1,
+      "quantity": 0,
+      "price": 0,
+      "marketValue": 0
+    }
+  ],
+  "securityMovements": [
+    {
+      "isin": "CODICE_ISIN",
+      "date": "DD/MM/YYYY",
+      "name": "Nome del titolo",
+      "operationType": "Acquisto" | "Vendita",
+      "quantity": 0,
+      "price": 0,
+      "exchangeRate": 1,
+      "currency": "EUR",
+      "grossAmount": 0,
+      "fees": 0,
+      "taxes": 0,
+      "netAmount": 0
+    }
+  ],
+  "dividends": []
+}
 
 Restituisci SOLO il JSON, nessun altro testo.`;
 
@@ -984,8 +1411,9 @@ Rispondi SOLO con questo JSON:
             const costsExtracted = feesExtracted + taxesExtracted
 
             // Calculate costs from difference: |netto - lordo|
-            const costsCalculated = grossAmount > 0 && netAmount !== 0
-                ? Math.abs(Math.abs(netAmount) - grossAmount)
+            const absGross = Math.abs(grossAmount)
+            const costsCalculated = absGross > 0 && netAmount !== 0
+                ? Math.abs(Math.abs(netAmount) - absGross)
                 : 0
 
             // Use extracted if present, otherwise calculated
