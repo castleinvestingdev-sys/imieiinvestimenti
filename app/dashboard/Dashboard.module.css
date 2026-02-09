@@ -1774,29 +1774,42 @@
     overflow-x: auto;
     overflow-y: hidden;
     flex: 1;
-    padding-bottom: 0.25rem;
-    scrollbar-width: auto;
-    scrollbar-color: #10b981 #e2e8f0;
+    padding-bottom: 4px;
+    scrollbar-width: none;
 }
 
 .dualTimelineScroller::-webkit-scrollbar {
-    height: 18px;
+    display: none;
 }
 
-.dualTimelineScroller::-webkit-scrollbar-track {
+.customScrollbar {
+    height: 12px;
     background: #e2e8f0;
-    border-radius: 9px;
-    margin: 0 4px;
+    border-radius: 6px;
+    margin: 4px 4px 0;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
 }
 
-.dualTimelineScroller::-webkit-scrollbar-thumb {
+.customScrollbarThumb {
+    height: 100%;
     background: #10b981;
-    border-radius: 9px;
-    border: 3px solid #e2e8f0;
+    border-radius: 6px;
+    position: absolute;
+    top: 0;
+    min-width: 30px;
+    cursor: grab;
+    transition: background 0.15s;
 }
 
-.dualTimelineScroller::-webkit-scrollbar-thumb:hover {
+.customScrollbarThumb:hover {
     background: #059669;
+}
+
+.customScrollbarThumb:active {
+    cursor: grabbing;
+    background: #047857;
 }
 
 .dualYearGroup {

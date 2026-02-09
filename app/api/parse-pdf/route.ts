@@ -10,71 +10,119 @@ export const maxDuration = 300
 function repairTruncatedJson(jsonStr: string): string | null {
     let repaired = jsonStr
 
-    // Conta parentesi aperte
-    let openBraces = 0
-    let openBrackets = 0
+    // Phase 1: Traccia stato stringa con gestione escape corretta
     let inString = false
+    let lastStringStart = -1
 
     for (let i = 0; i < repaired.length; i++) {
         const char = repaired[i]
-        const prevChar = i > 0 ? repaired[i - 1] : ''
-
-        if (char === '"' && prevChar !== '\\') {
-            inString = !inString
-        }
-
-        if (!inString) {
-            if (char === '{') openBraces++
-            else if (char === '}') openBraces--
-            else if (char === '[') openBrackets++
-            else if (char === ']') openBrackets--
-        }
-    }
-
-    // Se siamo dentro una stringa, tronca all'ultimo quote
-    if (inString) {
-        const lastQuote = repaired.lastIndexOf('"')
-        if (lastQuote > 0) {
-            repaired = repaired.substring(0, lastQuote)
-            repaired = repaired.replace(/,?\s*"[^"]*"?\s*:?\s*$/, '')
+        if (inString) {
+            if (char === '\\') {
+                i++ // skip carattere successivo (gestisce \\, \", \n, \t, etc.)
+                continue
+            }
+            if (char === '"') {
+                inString = false
+            }
+        } else {
+            if (char === '"') {
+                inString = true
+                lastStringStart = i
+            }
         }
     }
 
-    // Riconta dopo la potenziale troncatura
-    openBraces = 0
-    openBrackets = 0
+    // Phase 2: Se troncato dentro una stringa, taglia prima della chiave incompleta
+    if (inString && lastStringStart > 0) {
+        repaired = repaired.substring(0, lastStringStart)
+        repaired = repaired.replace(/,?\s*$/, '')
+    }
+
+    // Phase 3: Rimuovi valori primitivi incompleti (tru, fal, nul, numeri parziali)
+    repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*(tru|fal|nul|[\d.eE+-]*)?\s*$/, '')
+    repaired = repaired.replace(/:\s*(tru|fal|nul)?\s*$/, ': null')
+
+    // Phase 4: Rimuovi virgola finale
+    repaired = repaired.replace(/,\s*$/, '')
+
+    // Phase 5: Conta brackets/braces con scanning escape-aware
+    let openBraces = 0
+    let openBrackets = 0
     inString = false
 
     for (let i = 0; i < repaired.length; i++) {
         const char = repaired[i]
-        const prevChar = i > 0 ? repaired[i - 1] : ''
-
-        if (char === '"' && prevChar !== '\\') {
-            inString = !inString
-        }
-
-        if (!inString) {
-            if (char === '{') openBraces++
+        if (inString) {
+            if (char === '\\') { i++; continue }
+            if (char === '"') { inString = false }
+        } else {
+            if (char === '"') { inString = true }
+            else if (char === '{') openBraces++
             else if (char === '}') openBraces--
             else if (char === '[') openBrackets++
             else if (char === ']') openBrackets--
         }
     }
 
-    // Rimuovi virgola finale se presente
-    repaired = repaired.replace(/,\s*$/, '')
+    // Phase 6: Chiudi strutture non chiuse
+    while (openBrackets > 0) { repaired += ']'; openBrackets-- }
+    while (openBraces > 0) { repaired += '}'; openBraces-- }
 
-    // Chiudi parentesi non chiuse
-    while (openBrackets > 0) {
-        repaired += ']'
-        openBrackets--
+    // Phase 7: Valida che il risultato sia JSON valido
+    try {
+        JSON.parse(repaired)
+        return repaired
+    } catch {
+        return null
     }
-    while (openBraces > 0) {
-        repaired += '}'
-        openBraces--
+}
+
+// === ITALIAN NUMBER FORMAT FIX ===
+// Rileva "1.000" (italiano per 1000) interpretato come 1.0 dall'AI.
+// Testa moltiplicatori 1000 e 1000000, corregge solo se il rapporto originale
+// è sbagliato > 50% e quello corretto è vicino (< 15%).
+function normalizeItalianQuantity(
+    quantity: number,
+    price: number,
+    referenceValue: number,
+    exchangeRate: number = 1
+): number {
+    if (quantity <= 0 || price <= 0 || referenceValue <= 0) return quantity
+
+    for (const multiplier of [1000, 1000000]) {
+        const originalExpected = quantity * price * exchangeRate
+        const correctedExpected = quantity * multiplier * price * exchangeRate
+
+        const originalRatio = Math.abs(originalExpected - referenceValue) / referenceValue
+        const correctedRatio = Math.abs(correctedExpected - referenceValue) / referenceValue
+
+        if (originalRatio > 0.5 && correctedRatio < 0.15) {
+            return quantity * multiplier
+        }
     }
 
-    return repaired
+    return quantity
+}
+
+// === BOND PRICE NORMALIZATION ===
+// Obbligazioni (BTP, BOT, CCT, CTZ, corporate bonds) sono quotate in "centesimi"
+// ovvero percentuale del valore nominale (es. 98,79 = 98,79% del nominale).
+// Il prezzo reale è price / 100 (es. 0,9879 EUR per EUR nominale).
+function isBondQuotedInCentesimi(name: string): boolean {
+    if (!name) return false
+    const upper = name.toUpperCase()
+    // Titoli di stato italiani — sempre quotati in percentuale
+    if (/\b(BTP|BOT|CCT|CTZ)\b/.test(upper)) return true
+    // Obbligazioni dirette (non fondi obbligazionari)
+    if (/\bOBBLIGAZION[EI]\b/.test(upper) && !/OBBLIGAZIONARI/i.test(upper)) return true
+    // Bond con cedola nel nome (es. "ENI 4.75% 2028") — escludendo fondi/ETF
+    if (/\d+[,.]?\d*\s*%/.test(name) && !/\b(FUND|FONDO|ETF|SICAV|COMPARTO|CLASSE)\b/i.test(upper)) return true
+    return false
+}
+
+function normalizeBondPrice(price: number): number {
+    // Price quoted as percentage (e.g., 98.79) → real price (0.9879)
+    return price / 100
 }
 
 // === PORTFOLIO VALIDATION HELPERS ===
@@ -181,7 +229,7 @@ function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase
         const requestBody = JSON.stringify({
             model,
             temperature: 0,
-            max_completion_tokens: 65536,
+            max_completion_tokens: 128000,
             messages: [
                 {
                     role: 'system',
@@ -234,6 +282,9 @@ function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase
         })
 
         req.on('error', (e: Error) => reject(e))
+        req.setTimeout(240000, () => {
+            req.destroy(new Error('Request timeout after 240s'))
+        })
         req.write(requestBody)
         req.end()
     })
@@ -684,13 +735,22 @@ Le banche usano terminologie diverse per indicare acquisti e vendite:
 - "DISINVESTIMENTO", "DISINV."
 - "NOTA INF. VEND.", "SWITCH OUT"
 - "PRELIEVO QUOTE"
+- "CONFERIMENTO A GPM" (trasferimento titoli fuori dal dossier → trattare come Vendita)
+
+**OPERAZIONI STRAORDINARIE (Corporate Actions)** - Keywords:
+- "RAGGRUPPAMENTO" → azioni raggruppate: la quantità negativa è Vendita, la positiva è Acquisto (cambio ISIN)
+- "VERSAMENTO VALORI" → carico gratuito di titoli nel dossier → trattare come Acquisto
+- "FRAZIONAMENTO", "SPLIT" → simile a raggruppamento
+- "CONCAMBIO", "CONVERSIONE" → cambio ISIN: negativo = Vendita del vecchio, positivo = Acquisto del nuovo
+- Queste operazioni hanno spesso importo netto 0,00 EUR e nessun prezzo → metti price=0, fees=0, grossAmount=0, netAmount=0
+- È FONDAMENTALE estrarre queste operazioni: influenzano i saldi di quantità del portafoglio
 
 **9.2 STRUTTURA MOVIMENTI**
 Per OGNI movimento titoli estrai:
 - **isin**: Codice ISIN del titolo (se presente)
 - **date**: Data operazione (formato "DD/MM/YYYY")
 - **name**: Nome/Descrizione del titolo
-- **operationType**: "Acquisto" o "Vendita" (normalizza sempre a questi due valori)
+- **operationType**: "Acquisto" o "Vendita" (normalizza a questi due valori; per operazioni straordinarie: quantità positiva = "Acquisto", negativa = "Vendita")
 - **quantity**: Quantità/Numero quote (positivo)
 - **price**: Prezzo/Quotazione unitario
 - **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
@@ -829,18 +889,27 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 }
 
                 const isRateLimit = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('Resource')
-                const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up')
+                const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up') || errMsg.includes('timeout')
+                const isServerError = errMsg.includes('500') || errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('Internal Server Error')
 
                 if (isRateLimit) {
-                    const waitTime = attempt * 60000
+                    const waitTime = Math.pow(2, attempt) * 30000 // 60s, 120s, 240s
                     logProgress('⏳ RATE LIMIT', `Attendo ${waitTime/1000}s prima del prossimo tentativo`)
+                    await new Promise(resolve => setTimeout(resolve, waitTime))
+                } else if (isServerError) {
+                    const waitTime = attempt * 10000 // 10s, 20s, 30s
+                    logProgress('🔥 SERVER ERROR', `${errMsg.substring(0, 80)}, riprovo tra ${waitTime/1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isNetworkError) {
                     const waitTime = attempt * 15000
                     logProgress('🔌 ERRORE RETE', `Riprovo tra ${waitTime/1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else {
-                    break
+                    if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 5000))
+                    } else {
+                        break
+                    }
                 }
             }
         }
@@ -930,6 +999,38 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             }
         })
 
+        // Correzione segni conservativa: solo single-flip, tolerance 5%, solo se entrambi i saldi presenti
+        const initialBalance = parsed.summary?.initial_balance?.value || 0
+        const finalBalance = parsed.summary?.final_balance?.value || 0
+        const expectedDelta = finalBalance - initialBalance
+        let currentSum = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+
+        if (initialBalance !== 0 && finalBalance !== 0 && Math.abs(currentSum - expectedDelta) > 0.01) {
+            const error = currentSum - expectedDelta
+            const targetFlipAmount = Math.abs(error / 2)
+
+            let bestMatch = -1
+            let bestDiff = Infinity
+            for (let i = 0; i < movements.length; i++) {
+                const absAmount = Math.abs(movements[i].amount || 0)
+                const diff = Math.abs(absAmount - targetFlipAmount)
+                if (diff < bestDiff) {
+                    bestDiff = diff
+                    bestMatch = i
+                }
+            }
+
+            // Ultra-conservativo: solo se entro 5% del target, con floor 0.50€
+            const tolerance = Math.max(targetFlipAmount * 0.05, 0.50)
+            if (bestMatch >= 0 && bestDiff < tolerance) {
+                const before = movements[bestMatch].amount
+                movements[bestMatch].amount = -movements[bestMatch].amount
+                movements[bestMatch].sign_source = 'auto_corrected'
+                currentSum = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+                console.log(`[PARSE-PDF] Auto-corrected sign: ${before} -> ${movements[bestMatch].amount} (error: ${Math.abs(currentSum - expectedDelta).toFixed(2)}€)`)
+            }
+        }
+
         // Commissioni = abs(somma netta dei movimenti classificati "Commissioni")
         // Include già bolli, imposte, Tobin Tax (ora classificati direttamente come Commissioni)
         const periodEndStr = parsed.info?.period_end || ''
@@ -944,15 +1045,17 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 if (m.movement_type === 'Commissioni' &&
                     m.description?.toLowerCase().includes('spese emis') &&
                     m.description?.toLowerCase().includes('comunicazioni') &&
-                    Math.abs(m.amount || 0) > 0.80) {
+                    Math.abs(m.amount || 0) >= 0.80) {
                     m.amount = m.amount > 0 ? 0.70 : -0.70
                 }
             })
         }
 
-        let calculatedCommissions = Math.abs(movements
-            .filter((m: any) => m.movement_type === 'Commissioni')
-            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
+        // Split: somma solo i negativi (costi reali), ignora positivi (competenze/rimborsi)
+        const negativeCommissions = movements
+            .filter((m: any) => m.movement_type === 'Commissioni' && (m.amount || 0) < 0)
+            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+        let calculatedCommissions = Math.abs(negativeCommissions)
 
         // Dal 2017+ (escluso Q1/marzo): l'Excel usa il totale LORDO delle commissioni (non sottrae competenze)
         if (periodYear >= 2017 && periodMonth !== 3) {
@@ -1237,14 +1340,31 @@ Rispondi SOLO con questo JSON:
         logProgress('SALVATAGGIO DATABASE', 'Inserimento dati in Supabase')
 
         // Normalize holdings - ensure exchangeRate defaults to 1
-        const normalizedHoldings = (parsed.finalPortfolio || []).map((h: any) => ({
-            ...h,
-            exchangeRate: h.exchangeRate && h.exchangeRate !== 0 ? h.exchangeRate : 1,
-            currency: h.currency || 'EUR',
-            quantity: h.quantity || 0,
-            price: h.price || 0,
-            marketValue: h.marketValue || 0
-        }))
+        // Fix Italian number format in holdings quantity (e.g., "1.000" → 1.0 instead of 1000)
+        // Fix bond prices quoted in centesimi (percentage) → real price / 100
+        const normalizedHoldings = (parsed.finalPortfolio || []).map((h: any) => {
+            const exchangeRate = h.exchangeRate && h.exchangeRate !== 0 ? h.exchangeRate : 1
+            let price = h.price || 0
+            const marketValue = h.marketValue || 0
+            let quantity = h.quantity || 0
+
+            // Bond price normalization: 98.79 → 0.9879
+            if (isBondQuotedInCentesimi(h.name) && price > 1) {
+                price = normalizeBondPrice(price)
+            }
+
+            // Cross-validate quantity with marketValue via price
+            quantity = normalizeItalianQuantity(quantity, price, marketValue, exchangeRate)
+
+            return {
+                ...h,
+                exchangeRate,
+                currency: h.currency || 'EUR',
+                quantity,
+                price,
+                marketValue
+            }
+        })
 
         // Build holdings map for cross-validating movement quantities
         const holdingsQtyMap: Record<string, number> = {}
@@ -1254,22 +1374,23 @@ Rispondi SOLO con questo JSON:
 
         // Normalize security movements - ensure exchangeRate defaults to 1
         // Calculate fees/taxes from grossAmount - netAmount if not extracted from PDF
+        // Fix bond prices quoted in centesimi (percentage) → real price / 100
         const normalizedSecurityMovements = (parsed.securityMovements || []).map((m: any) => {
             const exchangeRate = m.exchangeRate && m.exchangeRate !== 0 ? m.exchangeRate : 1
             let quantity = m.quantity || 0
-            const price = m.price || 0
+            let price = m.price || 0
+
+            // Bond price normalization: 98.79 → 0.9879
+            if (isBondQuotedInCentesimi(m.name) && price > 1) {
+                price = normalizeBondPrice(price)
+            }
 
             // Fix Italian number format misinterpretation: "6.000" parsed as 6 instead of 6000
-            // Heuristic 1: if grossAmount is available and qty*price is way off, try qty*1000
+            // Method 1: Cross-validate with grossAmount
             if (quantity > 0 && price > 0 && m.grossAmount > 0) {
-                const expected = quantity * price * exchangeRate
-                const expected1000 = quantity * 1000 * price * exchangeRate
-                if (Math.abs(expected - m.grossAmount) / m.grossAmount > 0.5 &&
-                    Math.abs(expected1000 - m.grossAmount) / m.grossAmount < 0.1) {
-                    quantity = quantity * 1000
-                }
+                quantity = normalizeItalianQuantity(quantity, price, m.grossAmount, exchangeRate)
             }
-            // Heuristic 2: if same ISIN in holdings has qty ~1000x this movement qty
+            // Method 2: Cross-validate with holdings for same ISIN
             if (quantity > 0 && quantity <= 100 && m.isin && holdingsQtyMap[m.isin]) {
                 const holdingQty = holdingsQtyMap[m.isin]
                 const ratio = holdingQty / quantity

@@ -356,13 +356,22 @@ Le banche usano terminologie diverse per indicare acquisti e vendite:
 - "DISINVESTIMENTO", "DISINV."
 - "NOTA INF. VEND.", "SWITCH OUT"
 - "PRELIEVO QUOTE"
+- "CONFERIMENTO A GPM" (trasferimento titoli fuori dal dossier → trattare come Vendita)
+
+**OPERAZIONI STRAORDINARIE (Corporate Actions)** - Keywords:
+- "RAGGRUPPAMENTO" → azioni raggruppate: la quantità negativa è Vendita, la positiva è Acquisto (cambio ISIN)
+- "VERSAMENTO VALORI" → carico gratuito di titoli nel dossier → trattare come Acquisto
+- "FRAZIONAMENTO", "SPLIT" → simile a raggruppamento
+- "CONCAMBIO", "CONVERSIONE" → cambio ISIN: negativo = Vendita del vecchio, positivo = Acquisto del nuovo
+- Queste operazioni hanno spesso importo netto 0,00 EUR e nessun prezzo → metti price=0, fees=0, netAmount=0
+- È FONDAMENTALE estrarre queste operazioni: influenzano i saldi di quantità del portafoglio
 
 **9.2 STRUTTURA MOVIMENTI**
 Per OGNI movimento titoli estrai:
 - **isin**: Codice ISIN del titolo (se presente)
 - **date**: Data operazione (formato "DD/MM/YYYY")
 - **name**: Nome/Descrizione del titolo
-- **operationType**: "Acquisto" o "Vendita" (normalizza sempre a questi due valori)
+- **operationType**: "Acquisto" o "Vendita" (normalizza a questi due valori; per operazioni straordinarie: quantità positiva = "Acquisto", negativa = "Vendita")
 - **quantity**: Quantità/Numero quote (positivo)
 - **price**: Prezzo/Quotazione unitario
 - **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
@@ -538,18 +547,27 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
                 }
 
                 const isRateLimit = errMsg.includes('429') || errMsg.includes('rate limit') || errMsg.includes('quota') || errMsg.includes('Resource has been exhausted') || errMsg.includes('RATE_LIMIT')
-                const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up')
+                const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up') || errMsg.includes('timeout')
+                const isServerError = errMsg.includes('500') || errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('Internal Server Error')
 
                 if (isRateLimit) {
-                    const waitTime = attempt * 60000
+                    const waitTime = Math.pow(2, attempt) * 30000 // 60s, 120s, 240s
                     logProgress('⏳ RATE LIMIT', `Attendo ${waitTime/1000}s prima del prossimo tentativo`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
+                } else if (isServerError) {
+                    const waitTime = attempt * 10000 // 10s, 20s, 30s
+                    logProgress('🔥 SERVER ERROR', `${errMsg.substring(0, 80)}, riprovo tra ${waitTime/1000}s`)
+                    await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isNetworkError) {
-                    logProgress('🔌 ERRORE RETE', 'Riprovo tra 5s')
-                    await new Promise(resolve => setTimeout(resolve, 5000))
+                    const waitTime = attempt * 15000
+                    logProgress('🔌 ERRORE RETE', `Riprovo tra ${waitTime/1000}s`)
+                    await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else {
-                    // Unknown error, wait briefly and retry
-                    await new Promise(resolve => setTimeout(resolve, 5000))
+                    if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 5000))
+                    } else {
+                        break
+                    }
                 }
             }
         }
@@ -558,85 +576,85 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
             return NextResponse.json({ success: false, error: 'Gemini AI fallito: ' + lastError }, { status: 500 })
         }
 
+        // === BOND PRICE NORMALIZATION ===
+        function isBondQuotedInCentesimi(name: string): boolean {
+            if (!name) return false
+            const upper = name.toUpperCase()
+            if (/\b(BTP|BOT|CCT|CTZ)\b/.test(upper)) return true
+            if (/\bOBBLIGAZION[EI]\b/.test(upper) && !/OBBLIGAZIONARI/i.test(upper)) return true
+            if (/\d+[,.]?\d*\s*%/.test(name) && !/\b(FUND|FONDO|ETF|SICAV|COMPARTO|CLASSE)\b/i.test(upper)) return true
+            return false
+        }
+
         // Funzione per riparare JSON troncato
         function repairTruncatedJson(jsonStr: string): string | null {
-            // Remove any trailing incomplete strings
             let repaired = jsonStr
 
-            // Count open brackets
-            let openBraces = 0
-            let openBrackets = 0
+            // Phase 1: Traccia stato stringa con gestione escape corretta
             let inString = false
-            let lastValidPos = 0
+            let lastStringStart = -1
 
             for (let i = 0; i < repaired.length; i++) {
                 const char = repaired[i]
-                const prevChar = i > 0 ? repaired[i - 1] : ''
-
-                if (char === '"' && prevChar !== '\\') {
-                    inString = !inString
-                }
-
-                if (!inString) {
-                    if (char === '{') openBraces++
-                    else if (char === '}') openBraces--
-                    else if (char === '[') openBrackets++
-                    else if (char === ']') openBrackets--
-
-                    // Track last valid position (complete value)
-                    if (char === ',' || char === '{' || char === '[' || char === '}' || char === ']') {
-                        lastValidPos = i
+                if (inString) {
+                    if (char === '\\') {
+                        i++ // skip carattere successivo (gestisce \\, \", \n, \t, etc.)
+                        continue
+                    }
+                    if (char === '"') {
+                        inString = false
+                    }
+                } else {
+                    if (char === '"') {
+                        inString = true
+                        lastStringStart = i
                     }
                 }
             }
 
-            // If we're inside a string, truncate to before the string started
-            if (inString) {
-                // Find the last quote and remove from there
-                const lastQuote = repaired.lastIndexOf('"')
-                if (lastQuote > 0) {
-                    repaired = repaired.substring(0, lastQuote)
-                    // Remove the key if it's incomplete (e.g., "key":)
-                    repaired = repaired.replace(/,?\s*"[^"]*"?\s*:?\s*$/, '')
-                }
+            // Phase 2: Se troncato dentro una stringa, taglia prima della chiave incompleta
+            if (inString && lastStringStart > 0) {
+                repaired = repaired.substring(0, lastStringStart)
+                repaired = repaired.replace(/,?\s*$/, '')
             }
 
-            // If still unbalanced, try to close properly
-            // Recount after potential truncation
-            openBraces = 0
-            openBrackets = 0
+            // Phase 3: Rimuovi valori primitivi incompleti (tru, fal, nul, numeri parziali)
+            repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*(tru|fal|nul|[\d.eE+-]*)?\s*$/, '')
+            repaired = repaired.replace(/:\s*(tru|fal|nul)?\s*$/, ': null')
+
+            // Phase 4: Rimuovi virgola finale
+            repaired = repaired.replace(/,\s*$/, '')
+
+            // Phase 5: Conta brackets/braces con scanning escape-aware
+            let openBraces = 0
+            let openBrackets = 0
             inString = false
 
             for (let i = 0; i < repaired.length; i++) {
                 const char = repaired[i]
-                const prevChar = i > 0 ? repaired[i - 1] : ''
-
-                if (char === '"' && prevChar !== '\\') {
-                    inString = !inString
-                }
-
-                if (!inString) {
-                    if (char === '{') openBraces++
+                if (inString) {
+                    if (char === '\\') { i++; continue }
+                    if (char === '"') { inString = false }
+                } else {
+                    if (char === '"') { inString = true }
+                    else if (char === '{') openBraces++
                     else if (char === '}') openBraces--
                     else if (char === '[') openBrackets++
                     else if (char === ']') openBrackets--
                 }
             }
 
-            // Remove trailing comma if present
-            repaired = repaired.replace(/,\s*$/, '')
+            // Phase 6: Chiudi strutture non chiuse
+            while (openBrackets > 0) { repaired += ']'; openBrackets-- }
+            while (openBraces > 0) { repaired += '}'; openBraces-- }
 
-            // Close any unclosed brackets/braces
-            while (openBrackets > 0) {
-                repaired += ']'
-                openBrackets--
+            // Phase 7: Valida che il risultato sia JSON valido
+            try {
+                JSON.parse(repaired)
+                return repaired
+            } catch {
+                return null
             }
-            while (openBraces > 0) {
-                repaired += '}'
-                openBraces--
-            }
-
-            return repaired
         }
 
         // Pulizia JSON con retry per errori di parsing
@@ -815,7 +833,8 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
         let currentSum = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
 
         // Auto-correct signs: try to fix errors by flipping transactions
-        const MAX_CORRECTIONS = 50
+        // Conservative: tolerance 10% del target con floor 0.50€, max 10 correzioni
+        const MAX_CORRECTIONS = 10
         let corrections = 0
         const flippedIndices = new Set<number>()
 
@@ -828,7 +847,7 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
             let bestDiff = Infinity
 
             for (let i = 0; i < movements.length; i++) {
-                if (flippedIndices.has(i)) continue // Don't flip same transaction twice
+                if (flippedIndices.has(i)) continue
                 const absAmount = Math.abs(movements[i].amount || 0)
                 const diff = Math.abs(absAmount - targetFlipAmount)
                 if (diff < bestDiff) {
@@ -837,30 +856,28 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
                 }
             }
 
-            // Very aggressive tolerance: 200% of target, or diff < 50€, or always flip if error > 0.5€
-            const shouldFlip = bestMatch >= 0 && (
-                bestDiff < targetFlipAmount * 2.0 ||
-                bestDiff < 50 ||
-                (Math.abs(error) > 0.5 && bestDiff < targetFlipAmount * 3)
-            )
+            // Conservative tolerance: entro 10% del target, con floor di 0.50€
+            const tolerance = Math.max(targetFlipAmount * 0.10, 0.50)
+            const shouldFlip = bestMatch >= 0 && bestDiff < tolerance
 
             if (shouldFlip) {
                 movements[bestMatch].amount = -movements[bestMatch].amount
                 movements[bestMatch].sign_source = 'auto_corrected'
                 flippedIndices.add(bestMatch)
                 currentSum = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+                corrections++
             } else {
-                // Try two-flip combinations if single flip doesn't work
+                // Try two-flip combinations with tight tolerance
                 let foundPair = false
+                const pairTolerance = Math.max(targetFlipAmount * 0.05, 0.50)
                 for (let i = 0; i < movements.length && !foundPair; i++) {
                     if (flippedIndices.has(i)) continue
                     for (let j = i + 1; j < movements.length && !foundPair; j++) {
                         if (flippedIndices.has(j)) continue
                         const amt1 = Math.abs(movements[i].amount || 0)
                         const amt2 = Math.abs(movements[j].amount || 0)
-                        // Check if flipping both would fix it (sum of amounts = targetFlipAmount)
                         const pairSum = amt1 + amt2
-                        if (Math.abs(pairSum - targetFlipAmount) < 1) {
+                        if (Math.abs(pairSum - targetFlipAmount) < pairTolerance) {
                             movements[i].amount = -movements[i].amount
                             movements[j].amount = -movements[j].amount
                             movements[i].sign_source = 'auto_corrected_pair'
@@ -874,10 +891,7 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
                     }
                 }
                 if (!foundPair) break
-                continue
             }
-
-            corrections++
         }
 
         const calculatedTotal = movements.reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
@@ -935,15 +949,17 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
                 if (m.movement_type === 'Commissioni' &&
                     m.description?.toLowerCase().includes('spese emis') &&
                     m.description?.toLowerCase().includes('comunicazioni') &&
-                    Math.abs(m.amount || 0) > 0.80) {
+                    Math.abs(m.amount || 0) >= 0.80) {
                     m.amount = m.amount > 0 ? 0.70 : -0.70
                 }
             })
         }
 
-        let calculatedCommissions = Math.abs(movements
-            .filter((m: any) => m.movement_type === 'Commissioni')
-            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0))
+        // Split: somma solo i negativi (costi reali), ignora positivi (competenze/rimborsi)
+        const negativeCommissions = movements
+            .filter((m: any) => m.movement_type === 'Commissioni' && (m.amount || 0) < 0)
+            .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+        let calculatedCommissions = Math.abs(negativeCommissions)
 
         // Dal 2017+ (escluso Q1/marzo): l'Excel usa il totale LORDO delle commissioni (non sottrae competenze)
         if (periodYear >= 2017 && periodMonth !== 3) {
@@ -981,6 +997,23 @@ CRITICAL: Output ONLY the JSON object shown above. NO explanations, NO markdown 
         // Second pass: validate and fix interessi if needed
         const periodi = parsed.scalar_data?.interessi_creditori_periodi || []
         const periodEnd = parsed.info?.period_end || ''
+
+        // Normalize bond prices in holdings and security movements
+        // Bonds (BTP, BOT, CCT, CTZ) are quoted as percentage of face value → divide by 100
+        if (parsed.finalPortfolio) {
+            parsed.finalPortfolio.forEach((h: any) => {
+                if (isBondQuotedInCentesimi(h.name) && h.price > 1) {
+                    h.price = h.price / 100
+                }
+            })
+        }
+        if (parsed.securityMovements) {
+            parsed.securityMovements.forEach((m: any) => {
+                if (isBondQuotedInCentesimi(m.name) && m.price > 1) {
+                    m.price = m.price / 100
+                }
+            })
+        }
 
         // Return parsed data directly without saving to database
         logProgress('✅ VERIFICA COMPLETATA', `Tempo totale: ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
