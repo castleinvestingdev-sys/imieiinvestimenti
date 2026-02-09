@@ -434,7 +434,7 @@ NUMERI ITALIANI: "6.000"=6000, "84.000"=84000, "1.000"=1000 (punto=migliaia!).
 
 Restituisci SOLO il JSON, nessun altro testo.`;
 
-        const modelName = 'gpt-5-nano'
+        const modelName = 'gpt-5-mini'
         const maxRetries = 3
 
         let resText = ''
