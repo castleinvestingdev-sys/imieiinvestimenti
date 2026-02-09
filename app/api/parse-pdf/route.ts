@@ -230,6 +230,7 @@ function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase
             model,
             temperature: 1,
             max_completion_tokens: 128000,
+            reasoning_effort: 'low',
             messages: [
                 {
                     role: 'system',

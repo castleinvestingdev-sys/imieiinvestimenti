@@ -179,7 +179,7 @@ function DashboardContent() {
     // es. "3100/1000811", "19812/3100/1000811", "19812/3100/01000811" → "31001000811"
     const normalizeAccKey = (acc: string) => {
       if (!acc) return 'ND';
-      const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
+      const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
       if (segments.length === 0) return 'ND';
       return segments.slice(-2).join('').toUpperCase() || 'ND';
     };
@@ -1130,7 +1130,7 @@ function DashboardContent() {
   // prendi gli ultimi 2 segmenti. Gestisce prefissi filiale (es. "19812/3100/1000811" → "31001000811")
   const normalizeAcc = (acc: string) => {
     if (!acc) return 'ND';
-    const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
+    const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
     if (segments.length === 0) return 'ND';
     const core = segments.slice(-2);
     return core.join('').toUpperCase() || 'ND';
