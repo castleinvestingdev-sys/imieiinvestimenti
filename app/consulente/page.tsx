@@ -87,10 +87,10 @@ export default function ConsulentePage() {
   // Register onSuccess: refresh client list when an upload completes
   useEffect(() => {
     if (!user) return
-    registerOnSuccess(async () => {
+    const unregister = registerOnSuccess(async () => {
       await fetchClients(user.id)
     })
-    return () => registerOnSuccess(null)
+    return unregister
   }, [user, fetchClients, registerOnSuccess])
 
   const handleDragOver = (e: React.DragEvent) => {

@@ -732,7 +732,7 @@ function DashboardContent() {
   // Register onSuccess callback: refresh analyses + scroll to new card
   useEffect(() => {
     if (!user) return
-    registerOnSuccess(async (analysisId?: string, holder?: string) => {
+    const unregister = registerOnSuccess(async (analysisId?: string, holder?: string) => {
       await fetchAnalyses(user.id)
       if (analysisId) {
         setTimeout(() => {
@@ -758,7 +758,7 @@ function DashboardContent() {
         }
       }
     })
-    return () => registerOnSuccess(null)
+    return unregister
   }, [user, fetchAnalyses, registerOnSuccess, clienteFilter, router])
 
   // Navigate with scroll state preservation

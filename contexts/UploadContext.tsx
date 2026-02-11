@@ -18,6 +18,8 @@ export interface UploadingFile {
   holder?: string
 }
 
+type OnSuccessCallback = (analysisId?: string, holder?: string) => void | Promise<void>
+
 interface UploadContextValue {
   uploadQueue: UploadingFile[]
   isProcessing: boolean
@@ -27,11 +29,9 @@ interface UploadContextValue {
   totalCount: number
   overallProgress: number
   addFilesToQueue: (files: FileList | File[], userId: string, holder?: string) => void
-  registerOnSuccess: (cb: OnSuccessCallback | null) => void
+  registerOnSuccess: (cb: OnSuccessCallback) => () => void
   setUploadQueue: React.Dispatch<React.SetStateAction<UploadingFile[]>>
 }
-
-type OnSuccessCallback = (analysisId?: string, holder?: string) => void | Promise<void>
 
 const UploadContext = createContext<UploadContextValue | null>(null)
 
@@ -51,7 +51,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const fileQueueRef = useRef<{ id: string; file: File; userId: string }[]>([])
   const currentFileIndexRef = useRef<number>(0)
-  const onSuccessRef = useRef<OnSuccessCallback | null>(null)
+  const onSuccessCallbacks = useRef<Set<OnSuccessCallback>>(new Set())
   const activeHolderRef = useRef<string | null>(null)
   const batchAccumulatorRef = useRef<File[]>([])
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -70,10 +70,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     ? Math.round(uploadQueue.reduce((sum, f) => sum + f.progress, 0) / totalCount)
     : 0
 
-  // ── Callback registration ─────────────────────────────────────────────────
+  // ── Callback registration (multiple consumers) ─────────────────────────────
 
-  const registerOnSuccess = useCallback((cb: OnSuccessCallback | null) => {
-    onSuccessRef.current = cb
+  const registerOnSuccess = useCallback((cb: OnSuccessCallback) => {
+    onSuccessCallbacks.current.add(cb)
+    // Return unregister function
+    return () => { onSuccessCallbacks.current.delete(cb) }
   }, [])
 
   // ── Process queue ─────────────────────────────────────────────────────────
@@ -165,9 +167,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               f.id === fileId ? { ...f, holder: normalizeHolder(holder) } : f
             ))
           }
-          // Call the dashboard callback if registered
-          if (onSuccessRef.current) {
-            try { await onSuccessRef.current(analysisId, holder) } catch {}
+          // Call all registered callbacks
+          for (const cb of onSuccessCallbacks.current) {
+            try { await cb(analysisId, holder) } catch {}
           }
         }
 
