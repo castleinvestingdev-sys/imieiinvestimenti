@@ -153,7 +153,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         }
 
         clearInterval(progressInterval)
-        const result = await response.json()
+        const responseText = await response.text()
+        let result: any
+        try {
+          result = JSON.parse(responseText)
+        } catch {
+          // Server returned non-JSON (HTML error page, timeout, etc.)
+          throw new Error(responseText?.substring(0, 120) || `Errore server (HTTP ${response.status})`)
+        }
 
         const onFileSuccess = async (analysisId?: string, holder?: string) => {
           if (holder) {
@@ -200,7 +207,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             const retryResponse = await fetch('/api/parse-pdf', { method: 'POST', body: formData, signal: retryController.signal })
             clearTimeout(retryTimeoutId)
             clearInterval(retryProgressInterval)
-            const retryResult = await retryResponse.json()
+            const retryText = await retryResponse.text()
+            let retryResult: any
+            try { retryResult = JSON.parse(retryText) }
+            catch { throw new Error(retryText?.substring(0, 120) || `Errore server (HTTP ${retryResponse.status})`) }
             if (retryResult.success) {
               setUploadQueue(prev => prev.map(f =>
                 f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
@@ -276,15 +286,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       return () => clearTimeout(timer)
     }
   }, [isProcessing, processQueue, uploadQueue])
-
-  // ── beforeunload guard ────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!hasActiveUploads) return
-    const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [hasActiveUploads])
 
   // ── addFilesToQueue ───────────────────────────────────────────────────────
 

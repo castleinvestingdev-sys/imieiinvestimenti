@@ -235,11 +235,12 @@ function mergeTargetedFindings(
 
 function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase64: string): Promise<string> {
     return new Promise((resolve, reject) => {
+        const isReasoning = model.startsWith('o') || model.includes('gpt-5')
         const requestBody = JSON.stringify({
             model,
-            temperature: 1,
-            max_completion_tokens: 128000,
-            reasoning_effort: 'medium',
+            ...(isReasoning
+                ? { max_completion_tokens: 128000, reasoning_effort: 'medium', temperature: 1 }
+                : { max_tokens: 32768, temperature: 0.1 }),
             messages: [
                 {
                     role: 'system',
@@ -919,62 +920,63 @@ Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
 
 Restituisci SOLO il JSON, nessun altro testo.`;
 
-        const modelName = 'gpt-5-mini'
-        const maxRetries = 2
-
+        // Strategia: gpt-4.1-mini (veloce, economico) → fallback gpt-4.1 (più accurato)
+        const models = ['gpt-4.1-mini', 'gpt-4.1'] as const
         let resText = ''
         let success = false
         let lastError = ''
+        let usedModel: string = models[0]
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                logProgress('CHIAMATA OPENAI', `Tentativo ${attempt}/${maxRetries} con ${modelName}`)
-                resText = await callOpenAI(OPENAI_API_KEY, modelName, systemPrompt, base64Data)
-                logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da OpenAI`)
+        for (const modelName of models) {
+            usedModel = modelName
+            const maxRetries = modelName === models[0] ? 2 : 1
 
-                if (resText && resText.length > 10) {
-                    success = true
-                    break
-                }
-            } catch (err: any) {
-                const errMsg = err.message || ''
-                lastError = errMsg
-                console.error(`[OPENAI ERROR] Attempt ${attempt}/${maxRetries}: ${errMsg}`)
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    logProgress('CHIAMATA OPENAI', `${modelName} — tentativo ${attempt}/${maxRetries}`)
+                    resText = await callOpenAI(OPENAI_API_KEY, modelName, systemPrompt, base64Data)
+                    logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da ${modelName}`)
 
-                if (errMsg.includes('not found') || errMsg.includes('404')) {
-                    break
-                }
-
-                const isRateLimit = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('Resource')
-                const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up') || errMsg.includes('timeout')
-                const isServerError = errMsg.includes('500') || errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('Internal Server Error')
-
-                if (isRateLimit) {
-                    const waitTime = attempt * 15000 // 15s, 30s, 45s
-                    logProgress('⏳ RATE LIMIT', `Attendo ${waitTime/1000}s prima del prossimo tentativo`)
-                    await new Promise(resolve => setTimeout(resolve, waitTime))
-                } else if (isServerError) {
-                    const waitTime = attempt * 10000 // 10s, 20s, 30s
-                    logProgress('🔥 SERVER ERROR', `${errMsg.substring(0, 80)}, riprovo tra ${waitTime/1000}s`)
-                    await new Promise(resolve => setTimeout(resolve, waitTime))
-                } else if (isNetworkError) {
-                    const waitTime = attempt * 10000 // 10s, 20s, 30s
-                    logProgress('🔌 ERRORE RETE', `Riprovo tra ${waitTime/1000}s`)
-                    await new Promise(resolve => setTimeout(resolve, waitTime))
-                } else {
-                    if (attempt < maxRetries) {
-                        await new Promise(resolve => setTimeout(resolve, 5000))
-                    } else {
+                    if (resText && resText.length > 10) {
+                        success = true
                         break
+                    }
+                } catch (err: any) {
+                    const errMsg = err.message || ''
+                    lastError = errMsg
+                    console.error(`[OPENAI ERROR] ${modelName} attempt ${attempt}/${maxRetries}: ${errMsg}`)
+
+                    if (errMsg.includes('not found') || errMsg.includes('404')) {
+                        break // modello non disponibile, prova il prossimo
+                    }
+
+                    const isRateLimit = errMsg.includes('429') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('Resource')
+                    const isNetworkError = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up') || errMsg.includes('timeout')
+                    const isServerError = errMsg.includes('500') || errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('Internal Server Error')
+
+                    if (isRateLimit) {
+                        const waitTime = attempt * 10000
+                        logProgress('RATE LIMIT', `Attendo ${waitTime/1000}s`)
+                        await new Promise(resolve => setTimeout(resolve, waitTime))
+                    } else if (isServerError || isNetworkError) {
+                        const waitTime = attempt * 5000
+                        logProgress('ERRORE RETE/SERVER', `Riprovo tra ${waitTime/1000}s`)
+                        await new Promise(resolve => setTimeout(resolve, waitTime))
+                    } else if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 3000))
                     }
                 }
             }
+            if (success) break
+            logProgress('FALLBACK', `${modelName} fallito, provo modello successivo`)
         }
 
         if (!success) {
             console.error('Tutti i modelli hanno fallito. Ultimo errore:', lastError)
-            return NextResponse.json({ success: false, error: 'OpenAI GPT fallito: ' + lastError }, { status: 500 })
+            return NextResponse.json({ success: false, error: 'Analisi AI fallita: ' + lastError }, { status: 500 })
         }
+
+        logProgress('MODELLO USATO', usedModel)
 
         // Parse JSON from response (single attempt with repair fallback)
         logProgress('PARSING JSON', 'Estrazione dati dalla risposta AI')
@@ -1262,7 +1264,7 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                     promises.push((async () => {
                         try {
                             logProgress('PHASE A RETRY', `Gap ${phaseAResult.gap.toFixed(0)}€ (${phaseAResult.gapPercent.toFixed(1)}%)`)
-                            const retryText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseAPrompt, base64Data)
+                            const retryText = await callOpenAI(OPENAI_API_KEY!, usedModel, phaseAPrompt, base64Data)
                             const retryJsonMatch = retryText.match(/\{[\s\S]*\}/)
                             if (retryJsonMatch) {
                                 let retryParsed: any
@@ -1320,7 +1322,7 @@ Rispondi SOLO con questo JSON:
                     promises.push((async () => {
                         try {
                             logProgress('PHASE B', `${phaseBSuspicious.length} ISIN sospetti`)
-                            const targetedText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseBPrompt, base64Data)
+                            const targetedText = await callOpenAI(OPENAI_API_KEY!, usedModel, phaseBPrompt, base64Data)
                             const targetedJsonMatch = targetedText.match(/\{[\s\S]*\}/)
                             if (targetedJsonMatch) {
                                 let targetedResult: any
@@ -1401,7 +1403,7 @@ Rispondi SOLO con questo JSON:
 }`
 
                 try {
-                    const phaseCText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseCPrompt, base64Data)
+                    const phaseCText = await callOpenAI(OPENAI_API_KEY!, usedModel, phaseCPrompt, base64Data)
                     const phaseCJsonMatch = phaseCText.match(/\{[\s\S]*\}/)
                     if (phaseCJsonMatch) {
                         let phaseCParsed: any

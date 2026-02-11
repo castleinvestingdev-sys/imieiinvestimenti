@@ -1316,11 +1316,9 @@ function DashboardContent() {
       }
 
       // Fill the entire range covered by this document with its frequency
+      // Within a single account, later documents (sorted by end date) take precedence
       for (let m = startMonth; m <= endMonth; m++) {
-        // Only upgrade: don't overwrite a more granular frequency from a previous document
-        if (FREQ_PRIORITY[docFreq] <= FREQ_PRIORITY[freqMap[m]] || freqMap[m] === 'quarterly') {
-          freqMap[m] = docFreq;
-        }
+        freqMap[m] = docFreq;
       }
     });
 
@@ -1365,112 +1363,76 @@ function DashboardContent() {
     return merged;
   };
 
-  // Build the slots to render based on frequency map
-  const buildYearSlots = (freqMap: DocFrequency[], accountAnalyses: Analysis[], year: number) => {
-    const slots: { type: DocFrequency; month: number; quarter?: number; half?: number; file?: Analysis }[] = [];
-    let m = 0;
+  // Helper: get the month range a document covers within a given year
+  const getDocMonthRange = (doc: Analysis, year: number): [number, number] => {
+    const endDate = new Date(doc.period_end);
+    const endMonth = endDate.getMonth();
+    let startMonth = 0;
+    if (doc.period_start) {
+      const startDate = new Date(doc.period_start);
+      if (startDate.getFullYear() === year) startMonth = startDate.getMonth();
+    }
+    return [startMonth, endMonth];
+  };
 
+  // Build slots using a SHARED GRID from the merged frequency map.
+  // All rows in a bank group use the same grid for vertical alignment.
+  // Documents are matched to grid slots by coverage (not just end-month).
+  // A wide document (e.g. annual) is placed in the first matching slot;
+  // the rendering's customWidth makes it visually span subsequent empty slots.
+  const buildYearSlots = (freqMap: DocFrequency[], accountAnalyses: Analysis[], year: number) => {
+    // --- Step 1: Generate the shared grid from the merged frequency map ---
+    const slots: { type: DocFrequency; month: number; quarter?: number; half?: number; startMonth: number; file?: Analysis }[] = [];
+    let m = 0;
     while (m < 12) {
       const freq = freqMap[m];
-
       if (freq === 'annual') {
-        // Check if any month has a more granular frequency
-        const hasMoreGranular = freqMap.some(f => f !== 'annual');
-        if (hasMoreGranular) {
-          // Fall back to month-by-month for this month
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            return d.getFullYear() === year && d.getMonth() === m;
-          });
-          slots.push({ type: 'monthly', month: m, file });
-          m++;
-        } else {
-          // Pure annual — single wide slot for the entire year
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            return new Date(a.period_end).getFullYear() === year;
-          });
-          slots.push({ type: 'annual', month: 11, file });
-          m = 12; // skip to end
-        }
+        slots.push({ type: 'annual', month: 11, startMonth: 0 });
+        m = 12;
       } else if (freq === 'semiannual') {
-        // Semiannual: H1 = Jan-Jun (months 0-5), H2 = Jul-Dec (months 6-11)
         const half = m < 6 ? 1 : 2;
-        const halfStart = half === 1 ? 0 : 6;
         const halfEnd = half === 1 ? 5 : 11;
-
-        // Check if any month in this half is more granular
-        const hasMonthly = freqMap.slice(halfStart, halfEnd + 1).includes('monthly');
-        const hasQuarterly = freqMap.slice(halfStart, halfEnd + 1).includes('quarterly');
-
-        if (hasMonthly || hasQuarterly) {
-          // Fall back to more granular rendering for this half
-          // Don't skip — let the loop process each month individually with its actual freq
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            return d.getFullYear() === year && d.getMonth() === m;
-          });
-          slots.push({ type: 'monthly', month: m, file });
-          m++;
-        } else {
-          // Pure semiannual — create single wide slot
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            return d.getFullYear() === year && d.getMonth() >= halfStart && d.getMonth() <= halfEnd;
-          });
-          slots.push({ type: 'semiannual', month: halfEnd, half, file });
-          m = halfEnd + 1;
-        }
+        slots.push({ type: 'semiannual', month: halfEnd, half, startMonth: m });
+        m = halfEnd + 1;
       } else if (freq === 'quarterly') {
-        // Find which quarter this month belongs to
-        const quarter = Math.floor(m / 3) + 1; // 1-4
-        const quarterStartMonth = (quarter - 1) * 3; // 0, 3, 6, 9
-        const quarterEndMonth = quarter * 3 - 1; // 2, 5, 8, 11 (0-indexed)
-
-        // Check if ANY month in this quarter is 'monthly' - if so, render entire quarter as monthly
-        const hasMonthlyInQuarter = freqMap.slice(quarterStartMonth, quarterEndMonth + 1).includes('monthly');
-
-        if (hasMonthlyInQuarter) {
-          // Process this quarter month by month
-          while (m <= quarterEndMonth) {
-            const file = accountAnalyses.find(a => {
-              if (!a.period_end) return false;
-              const d = new Date(a.period_end);
-              return d.getFullYear() === year && d.getMonth() === m;
-            });
-            slots.push({ type: 'monthly', month: m, file });
+        const quarter = Math.floor(m / 3) + 1;
+        const quarterEnd = quarter * 3 - 1;
+        // Check if any month in this quarter is monthly → expand to individual months
+        const hasMonthly = freqMap.slice(m, quarterEnd + 1).includes('monthly');
+        if (hasMonthly) {
+          while (m <= quarterEnd) {
+            slots.push({ type: 'monthly', month: m, startMonth: m });
             m++;
           }
         } else {
-          // All months in quarter are quarterly - create single quarterly slot
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            const docMonth = d.getMonth();
-            const docYear = d.getFullYear();
-            return docYear === year && docMonth >= quarterStartMonth && docMonth <= quarterEndMonth;
-          });
-
-          slots.push({ type: 'quarterly', month: quarterEndMonth, quarter, file });
-
-          // Skip to next quarter
-          m = quarterEndMonth + 1;
+          slots.push({ type: 'quarterly', month: quarterEnd, quarter, startMonth: (quarter - 1) * 3 });
+          m = quarterEnd + 1;
         }
       } else {
-        // Monthly slot
-        const file = accountAnalyses.find(a => {
-          if (!a.period_end) return false;
-          const d = new Date(a.period_end);
-          return d.getFullYear() === year && d.getMonth() === m;
-        });
-
-        slots.push({ type: 'monthly', month: m, file });
+        slots.push({ type: 'monthly', month: m, startMonth: m });
         m++;
       }
     }
+
+    // --- Step 2: Match documents to grid slots ---
+    const yearDocs = accountAnalyses
+      .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year);
+    const usedDocIds = new Set<string>();
+
+    slots.forEach(slot => {
+      // Find a document whose range covers this slot and hasn't been placed yet
+      const doc = yearDocs.find(a => {
+        if (usedDocIds.has(a.id)) return false;
+        const [docStart, docEnd] = getDocMonthRange(a, year);
+        // Document covers this slot if it starts at or before this slot's start
+        // and ends at or after this slot's end
+        return docStart <= slot.startMonth && docEnd >= slot.month;
+      });
+      if (doc) {
+        slot.file = doc;
+        usedDocIds.add(doc.id);
+      }
+    });
 
     return slots;
   };
