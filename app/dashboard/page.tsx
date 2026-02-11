@@ -686,21 +686,15 @@ function DashboardContent() {
     fileQueueRef.current = []
     console.log('Files to process in parallel:', filesToProcess.length)
 
-    // Mark all files as uploading simultaneously
-    const now = Date.now()
-    setUploadQueue(prev => prev.map(f => {
-      const idx = filesToProcess.findIndex(fp => fp.id === f.id)
-      if (idx !== -1 && f.status !== 'done') {
-        return { ...f, status: 'uploading' as const, progress: 5, startTime: now, index: idx + 1 }
-      }
-      return f
-    }))
-
     let lastHolder: string | null = null
     let successCount = 0
 
     // Process a single file (called in parallel)
     const processOneFile = async ({ id: fileId, file }: { id: string; file: File }) => {
+      // Mark this file as uploading when it actually starts
+      setUploadQueue(prev => prev.map(f =>
+        f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, startTime: Date.now() } : f
+      ))
       try {
         const formData = new FormData()
         formData.append('file', file)
