@@ -12,8 +12,8 @@ function createStorageAdmin() {
     return createServiceClient(url, serviceKey)
 }
 
-// Allow up to 10 minutes for OpenAI PDF processing (dossier: analisi + Phase A + Phase B)
-export const maxDuration = 600
+// Allow up to 5 minutes for OpenAI PDF processing (hobby plan limit: 300s)
+export const maxDuration = 300
 
 // Funzione per riparare JSON troncato (spostata fuori per evitare errori strict mode)
 function repairTruncatedJson(jsonStr: string): string | null {
