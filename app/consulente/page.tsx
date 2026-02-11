@@ -223,7 +223,7 @@ export default function ConsulentePage() {
                       <span>{client.banks.length} {client.banks.length === 1 ? 'banca' : 'banche'}</span>
                     </div>
                     <div className={styles.clientValue}>
-                      Valore totale: <strong>€{client.totalValue.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</strong>
+                      {client.banks.join(', ')}
                     </div>
                   </div>
                   <div className={styles.clientArrow}>→</div>
