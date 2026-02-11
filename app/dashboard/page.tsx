@@ -1549,24 +1549,24 @@ function DashboardContent() {
       )}
       <div className={styles.heroBackground} />
 
-      {/* Client Header when viewing a specific client */}
-      {clienteFilter && (
-        <div className={styles.clientHeader}>
-          <a
-            href="/consulente"
-            className={styles.backToConsulente}
-            onClick={(e) => {
-              e.preventDefault()
-              safeNavigate('/consulente')
-            }}
-          >
-            ← Torna ai Clienti
-          </a>
+      {/* Navigation bar - always show back link to consulente */}
+      <div className={styles.clientHeader}>
+        <a
+          href="/consulente"
+          className={styles.backToConsulente}
+          onClick={(e) => {
+            e.preventDefault()
+            safeNavigate('/consulente')
+          }}
+        >
+          ← Torna ai Portafogli
+        </a>
+        {clienteFilter && (
           <h2 className={styles.clientName}>Cliente: {normalizeHolder(clienteFilter)}</h2>
-        </div>
-      )}
+        )}
+      </div>
 
-      <header className={`${styles.dashHero} ${clienteFilter ? styles.withClientHeader : ''}`}>
+      <header className={`${styles.dashHero} ${styles.withClientHeader}`}>
         <div className={styles.dashHeroInner}>
           <div className={styles.dashWelcome}>
             <h1>{clienteFilter ? `Portafoglio di ${normalizeHolder(clienteFilter)}` : 'I Tuoi Investimenti Semplificati'}</h1>
