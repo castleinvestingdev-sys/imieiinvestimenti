@@ -72,7 +72,7 @@ export default function ConsulentePage() {
           clientsMap.set(holder, existing)
         }
         existing.documentCount++
-        if (!existing.banks.includes(analysis.bank_name)) {
+        if (!existing.banks.some(b => b.toLowerCase() === (analysis.bank_name || '').toLowerCase())) {
           existing.banks.push(analysis.bank_name)
         }
         existing.totalValue += analysis.portfolio_value || 0
