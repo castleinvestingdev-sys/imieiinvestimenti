@@ -877,31 +877,18 @@ function DashboardContent() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [hasActiveUploads])
 
-  // Safe navigation: warns user if uploads are in progress before navigating away
-  // Saves scroll positions (page + timelines) for restoration on return
+  // Navigation helper: saves scroll positions for restoration on return
+  // Uploads continue via fetch() even after navigating away
   const safeNavigate = (href: string) => {
-    const doNavigate = () => {
-      // Save page scroll + first timeline scroll position
-      const scrollState: { pageY: number; timelineX: number } = {
-        pageY: window.scrollY,
-        timelineX: 0
-      }
-      const firstTimeline = timelineRefs.current.values().next().value
-      if (firstTimeline) scrollState.timelineX = firstTimeline.scrollLeft
-      try { sessionStorage.setItem('dashboard_scroll', JSON.stringify(scrollState)) } catch {}
-      router.push(href)
+    // Save page scroll + first timeline scroll position
+    const scrollState: { pageY: number; timelineX: number } = {
+      pageY: window.scrollY,
+      timelineX: 0
     }
-
-    if (hasActiveUploads) {
-      showConfirmModal(
-        'Upload in corso',
-        'Ci sono PDF in fase di caricamento. Se esci ora, il caricamento verrà annullato. Vuoi uscire comunque?'
-      ).then((confirmed) => {
-        if (confirmed) doNavigate()
-      })
-    } else {
-      doNavigate()
-    }
+    const firstTimeline = timelineRefs.current.values().next().value
+    if (firstTimeline) scrollState.timelineX = firstTimeline.scrollLeft
+    try { sessionStorage.setItem('dashboard_scroll', JSON.stringify(scrollState)) } catch {}
+    router.push(href)
   }
 
   // PROGRESS TIMER: forza re-render ogni secondo quando ci sono upload attivi
