@@ -25,7 +25,7 @@ export default function LoginPage() {
       setError('E-mail o password non corretti. Riprova.')
       setLoading(false)
     } else {
-      router.push('/dashboard')
+      router.push('/consulente')
     }
   }
 

@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import * as https from 'https'
 import crypto from 'crypto'
 
-// Allow up to 5 minutes for OpenAI PDF processing
-export const maxDuration = 300
+// Admin client per storage (bypassa RLS, usa service role key)
+function createStorageAdmin() {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !serviceKey) return null
+    return createServiceClient(url, serviceKey)
+}
+
+// Allow up to 10 minutes for OpenAI PDF processing (dossier: analisi + Phase A + Phase B)
+export const maxDuration = 600
 
 // Funzione per riparare JSON troncato (spostata fuori per evitare errori strict mode)
 function repairTruncatedJson(jsonStr: string): string | null {
@@ -283,8 +292,8 @@ function callOpenAI(apiKey: string, model: string, systemPrompt: string, pdfBase
         })
 
         req.on('error', (e: Error) => reject(e))
-        req.setTimeout(240000, () => {
-            req.destroy(new Error('Request timeout after 240s'))
+        req.setTimeout(150000, () => {
+            req.destroy(new Error('Request timeout after 150s'))
         })
         req.write(requestBody)
         req.end()
@@ -309,6 +318,7 @@ export async function POST(request: NextRequest) {
         const userId = formData.get('userId') as string
         const guestEmail = formData.get('guestEmail') as string
         const forceRecalculate = formData.get('force') === 'true'
+        const replaceAnalysisId = formData.get('replaceAnalysisId') as string // ID analisi da sostituire
         const reanalyzeId = formData.get('reanalyzeId') as string // ID analisi da ri-analizzare
 
         let fileName = file?.name || 'documento.pdf'
@@ -321,13 +331,47 @@ export async function POST(request: NextRequest) {
             logProgress('🔄 RI-ANALISI', `Recupero PDF per analisi ${reanalyzeId}`)
 
             let foundInStorage = false
-            const supabaseForStorage = await createClient()
-            const pdfStoragePath = `${userId}/${reanalyzeId}.pdf`
-            const { data: pdfData, error: downloadError } = await supabaseForStorage.storage
-                .from('documenti')
-                .download(pdfStoragePath)
+            // Usa service role client per storage (bypassa RLS)
+            const supabaseForStorage = createStorageAdmin() || await createClient()
 
-            if (!downloadError && pdfData) {
+            // Prova più path possibili: il PDF potrebbe essere stato salvato con l'ID dell'analisi
+            const pathsToTry = [
+                `${userId}/${reanalyzeId}.pdf`,
+            ]
+
+            // Elenca i file dell'utente per trovare il PDF se il path diretto non funziona
+            const { data: fileList } = await supabaseForStorage.storage
+                .from('documenti')
+                .list(userId, { limit: 200 })
+
+            if (fileList?.length) {
+                logProgress('📂 FILE IN STORAGE', `${fileList.length} file trovati per utente: ${fileList.map(f => f.name).join(', ')}`)
+                // Cerca il file che corrisponde a questo reanalyzeId
+                const matchingFile = fileList.find(f => f.name === `${reanalyzeId}.pdf`)
+                if (!matchingFile) {
+                    // Prova tutti i file come fallback
+                    logProgress('⚠️ FILE NON TROVATO', `${reanalyzeId}.pdf non trovato tra: ${fileList.map(f => f.name).join(', ')}`)
+                }
+            } else {
+                logProgress('⚠️ STORAGE VUOTO', `Nessun file trovato per userId ${userId}. List error: ${JSON.stringify(fileList)}`)
+            }
+
+            let pdfData: Blob | null = null
+            let downloadError: any = null
+            for (const tryPath of pathsToTry) {
+                const result = await supabaseForStorage.storage
+                    .from('documenti')
+                    .download(tryPath)
+                if (!result.error && result.data) {
+                    pdfData = result.data
+                    logProgress('📁 PDF TROVATO', `Path: ${tryPath}`)
+                    break
+                }
+                downloadError = result.error
+                logProgress('⚠️ TENTATIVO FALLITO', `Path: ${tryPath} → ${result.error?.message}`)
+            }
+
+            if (pdfData) {
                 const arrayBuf = await pdfData.arrayBuffer()
                 pdfBuffer = Buffer.from(arrayBuf)
                 fileName = `reanalysis_${reanalyzeId}.pdf`
@@ -340,10 +384,10 @@ export async function POST(request: NextRequest) {
                 fileName = file.name || `reanalysis_${reanalyzeId}.pdf`
                 logProgress('📁 PDF DA UPLOAD', `${(pdfBuffer.length / 1024).toFixed(0)}KB (storage non disponibile, usato file caricato)`)
             } else {
-                console.error(`[STORAGE] Download fallito: ${downloadError?.message}`)
+                console.error(`[STORAGE] Download fallito per tutti i path tentati. Ultimo errore: ${downloadError?.message}`)
                 return NextResponse.json({
                     success: false,
-                    error: 'PDF non trovato nello storage. Ricarica il PDF originale per ri-analizzare.'
+                    error: `PDF non trovato nello storage (path: ${userId}/${reanalyzeId}.pdf). Seleziona il file PDF originale.`
                 }, { status: 404 })
             }
         } else if (file && (userId || guestEmail)) {
@@ -863,7 +907,7 @@ Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
 Restituisci SOLO il JSON, nessun altro testo.`;
 
         const modelName = 'gpt-5-mini'
-        const maxRetries = 3
+        const maxRetries = 2
 
         let resText = ''
         let success = false
@@ -893,7 +937,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 const isServerError = errMsg.includes('500') || errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('Internal Server Error')
 
                 if (isRateLimit) {
-                    const waitTime = Math.pow(2, attempt) * 30000 // 60s, 120s, 240s
+                    const waitTime = attempt * 15000 // 15s, 30s, 45s
                     logProgress('⏳ RATE LIMIT', `Attendo ${waitTime/1000}s prima del prossimo tentativo`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isServerError) {
@@ -901,7 +945,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     logProgress('🔥 SERVER ERROR', `${errMsg.substring(0, 80)}, riprovo tra ${waitTime/1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isNetworkError) {
-                    const waitTime = attempt * 15000
+                    const waitTime = attempt * 10000 // 10s, 20s, 30s
                     logProgress('🔌 ERRORE RETE', `Riprovo tra ${waitTime/1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else {
@@ -1102,82 +1146,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         logProgress('✅ ANALISI COMPLETATA', fileName)
         console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
 
-        // === PHASE A: Self-contained Portfolio Total Validation ===
-        if (isDossier) {
-            try {
-                const phaseAResult = validatePortfolioTotals(parsed)
-
-                logProgress('PHASE A',
-                    `Somma titoli: ${phaseAResult.sumOfMarketValues.toFixed(2)}€ | ` +
-                    `Totale PDF: ${phaseAResult.extractedTotal.toFixed(2)}€ | ` +
-                    `Gap: ${phaseAResult.gap.toFixed(2)}€ (${phaseAResult.gapPercent.toFixed(1)}%)`
-                )
-
-                if (phaseAResult.needsRetry) {
-                    const holdingsCount = (parsed.finalPortfolio || []).length
-                    logProgress('PHASE A RETRY',
-                        `Gap significativo (${phaseAResult.gap.toFixed(0)}€, ${phaseAResult.gapPercent.toFixed(1)}%). Retry con prompt rinforzato.`
-                    )
-
-                    const phaseAPrompt = systemPrompt + `\n\n### ATTENZIONE - PORTAFOGLIO INCOMPLETO
-L'estrazione iniziale ha trovato ${holdingsCount} titoli con controvalore totale ${phaseAResult.sumOfMarketValues.toFixed(2)}€, ma il PDF riporta un controvalore totale di ${phaseAResult.extractedTotal.toFixed(2)}€. Mancano circa ${phaseAResult.gap.toFixed(0)}€ di titoli.
-DEVI ri-esaminare attentamente la sezione "CONSISTENZA" o "PORTAFOGLIO" del PDF e estrarre TUTTI i titoli, inclusi quelli su pagine successive.
-Verifica che la somma dei controvalore individuali sia uguale al controvalore totale del PDF.
-NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
-
-                    try {
-                        const retryText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseAPrompt, base64Data)
-                        const retryJsonMatch = retryText.match(/\{[\s\S]*\}/)
-
-                        if (retryJsonMatch) {
-                            let retryParsed: any
-                            try {
-                                retryParsed = JSON.parse(retryJsonMatch[0])
-                            } catch {
-                                const repaired = repairTruncatedJson(retryJsonMatch[0])
-                                if (repaired) retryParsed = JSON.parse(repaired)
-                            }
-
-                            if (retryParsed?.finalPortfolio?.length) {
-                                const retryValidation = validatePortfolioTotals(retryParsed)
-
-                                logProgress('PHASE A RESULT',
-                                    `Retry: ${retryParsed.finalPortfolio.length} titoli, gap ${retryValidation.gap.toFixed(0)}€ | ` +
-                                    `Originale: ${holdingsCount} titoli, gap ${phaseAResult.gap.toFixed(0)}€`
-                                )
-
-                                const retryBetter = (
-                                    retryParsed.finalPortfolio.length > holdingsCount &&
-                                    retryValidation.gap < phaseAResult.gap
-                                ) || (
-                                    retryParsed.finalPortfolio.length >= holdingsCount &&
-                                    retryValidation.gap < phaseAResult.gap * 0.5
-                                )
-
-                                if (retryBetter) {
-                                    logProgress('PHASE A ACCEPTED', 'Retry accettato (migliore copertura)')
-                                    parsed.finalPortfolio = retryParsed.finalPortfolio
-                                    parsed.securityMovements = retryParsed.securityMovements || parsed.securityMovements
-                                    if (retryParsed.summary?.portfolio_total_extracted) {
-                                        parsed.summary.portfolio_total_extracted = retryParsed.summary.portfolio_total_extracted
-                                    }
-                                } else {
-                                    logProgress('PHASE A KEPT ORIGINAL', 'Retry non migliora, mantengo originale')
-                                }
-                            }
-                        }
-                    } catch (phaseAErr: any) {
-                        logProgress('PHASE A ERROR', `Retry fallito: ${phaseAErr.message}. Proseguo con originale.`)
-                    }
-                } else {
-                    logProgress('PHASE A OK', 'Totali portafoglio corrispondono')
-                }
-            } catch (phaseAOuterErr: any) {
-                logProgress('PHASE A SKIP', `Errore: ${phaseAOuterErr.message}`)
-            }
-        }
-
-        // Check for duplicate period BEFORE saving (unless force flag is set)
+        // === Supabase client + duplicate check (veloce, solo DB) ===
         const supabase = await createClient()
         const periodStart = parseDate(parsed.info?.period_start)
         const periodEnd = parseDate(parsed.info?.period_end)
@@ -1185,7 +1154,6 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
 
         if (!forceRecalculate && !isReanalysis && userId && periodStart && periodEnd && accountNumber) {
             logProgress('CHECK DUPLICATI', 'Verifico periodo già caricato')
-            // Query per periodo senza filtro account esatto (il numero può variare tra PDF)
             const { data: existingAnalyses } = await supabase
                 .from('analyses')
                 .select('id, period_start, period_end, benchmark_comparison')
@@ -1194,7 +1162,6 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                 .eq('period_end', periodEnd)
                 .is('deleted_at', null)
 
-            // Match normalizzato: gestisce prefissi filiale variabili (es. "19812/3100/1000811" vs "3100/1000811")s
             const normalizedNew = normalizeAccountNumber(accountNumber)
             const existingAnalysis = existingAnalyses?.find(a =>
                 normalizeAccountNumber(a.benchmark_comparison || '') === normalizedNew
@@ -1208,60 +1175,114 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                     existingAnalysisId: existingAnalysis.id,
                     message: `Hai già caricato questo periodo (${new Date(periodStart).toLocaleDateString('it-IT')} - ${new Date(periodEnd).toLocaleDateString('it-IT')}) per questo conto.`,
                     period: { start: periodStart, end: periodEnd, account: accountNumber }
-                }, { status: 409 }) // 409 Conflict
+                }, { status: 409 })
             }
         } else if (forceRecalculate || isReanalysis) {
             logProgress('🔄 RICALCOLO FORZATO', `Skip check duplicati (${isReanalysis ? 'ri-analisi' : 'richiesto dall\'utente'})`)
+            if (forceRecalculate && replaceAnalysisId && userId) {
+                logProgress('🗑️ ELIMINAZIONE VECCHIO RECORD', `Rimuovo analisi ${replaceAnalysisId}`)
+                await supabase
+                    .from('analyses')
+                    .delete()
+                    .eq('id', replaceAnalysisId)
+                    .eq('user_id', userId)
+            }
         }
 
-        // === PHASE B: Cross-period Portfolio Validation ===
-        if (isDossier && userId && periodStart && periodEnd) {
-            try {
-                logProgress('PHASE B', 'Verifica cross-period con periodo precedente')
+        // === PHASE A + PHASE B in PARALLELO (solo per dossier) ===
+        if (isDossier) {
+            const phaseAResult = validatePortfolioTotals(parsed)
+            logProgress('PHASE A',
+                `Somma titoli: ${phaseAResult.sumOfMarketValues.toFixed(2)}€ | ` +
+                `Totale PDF: ${phaseAResult.extractedTotal.toFixed(2)}€ | ` +
+                `Gap: ${phaseAResult.gap.toFixed(2)}€ (${phaseAResult.gapPercent.toFixed(1)}%)`
+            )
 
-                const normalizedAcc = normalizeAccountNumber(accountNumber || '')
+            // Prepara Phase B: lookup DB per periodo precedente (veloce)
+            let phaseBSuspicious: Array<{ isin: string; name: string; prevQuantity: number }> = []
+            let phaseBPrevDoc: any = null
+            if (userId && periodStart && periodEnd) {
+                try {
+                    const normalizedAcc = normalizeAccountNumber(accountNumber || '')
+                    const { data: prevAnalyses } = await supabase
+                        .from('analyses')
+                        .select('id, period_start, period_end, holdings, costs_breakdown, benchmark_comparison')
+                        .eq('user_id', userId)
+                        .eq('account_type', 'DOSSIER')
+                        .lt('period_end', periodStart)
+                        .is('deleted_at', null)
+                        .order('period_end', { ascending: false })
+                        .limit(5)
 
-                const { data: prevAnalyses } = await supabase
-                    .from('analyses')
-                    .select('id, period_start, period_end, holdings, costs_breakdown, benchmark_comparison')
-                    .eq('user_id', userId)
-                    .eq('account_type', 'DOSSIER')
-                    .lt('period_end', periodStart)
-                    .is('deleted_at', null)
-                    .order('period_end', { ascending: false })
-                    .limit(5)
-
-                const prevDoc = prevAnalyses?.find(a =>
-                    normalizeAccountNumber(a.benchmark_comparison || '') === normalizedAcc
-                )
-
-                if (!prevDoc || !prevDoc.holdings?.length) {
-                    logProgress('PHASE B SKIP', 'Nessun periodo precedente trovato per questo conto')
-                } else {
-                    logProgress('PHASE B FOUND',
-                        `Periodo precedente: ${prevDoc.period_start} - ${prevDoc.period_end} (${prevDoc.holdings.length} titoli)`
+                    phaseBPrevDoc = prevAnalyses?.find(a =>
+                        normalizeAccountNumber(a.benchmark_comparison || '') === normalizedAcc
                     )
-
-                    const suspicious = findSuspiciousMissingIsins(
-                        parsed.finalPortfolio || [],
-                        parsed.securityMovements || [],
-                        prevDoc.holdings
-                    )
-
-                    if (suspicious.length === 0) {
-                        logProgress('PHASE B OK', 'Tutti i titoli del periodo precedente sono presenti')
-                    } else if (suspicious.length > 10) {
-                        logProgress('PHASE B SKIP', `${suspicious.length} titoli sospetti — troppi, probabilmente struttura portafoglio diversa`)
-                    } else {
-                        logProgress('PHASE B ALERT',
-                            `${suspicious.length} titoli sospetti mancanti: ${suspicious.map(s => s.isin).join(', ')}`
+                    if (phaseBPrevDoc?.holdings?.length) {
+                        phaseBSuspicious = findSuspiciousMissingIsins(
+                            parsed.finalPortfolio || [],
+                            parsed.securityMovements || [],
+                            phaseBPrevDoc.holdings
                         )
+                    }
+                } catch (e: any) {
+                    logProgress('PHASE B DB ERROR', e.message)
+                }
+            }
 
-                        const isinList = suspicious.map(s =>
-                            `- ${s.isin} (${s.name}, quantità precedente: ${s.prevQuantity})`
-                        ).join('\n')
+            const needPhaseA = phaseAResult.needsRetry
+            const needPhaseB = phaseBSuspicious.length > 0 && phaseBSuspicious.length <= 10
 
-                        const phaseBPrompt = `Esamina la sezione "CONSISTENZA" / "PORTAFOGLIO" di questo PDF dossier titoli.
+            if (needPhaseA || needPhaseB) {
+                logProgress('⚡ PARALLEL PHASES', `A: ${needPhaseA ? 'SI' : 'NO'} | B: ${needPhaseB ? `SI (${phaseBSuspicious.length} ISIN)` : 'NO'}`)
+
+                const promises: Promise<void>[] = []
+
+                // Phase A: retry con prompt rinforzato
+                if (needPhaseA) {
+                    const holdingsCount = (parsed.finalPortfolio || []).length
+                    const phaseAPrompt = systemPrompt + `\n\n### ATTENZIONE - PORTAFOGLIO INCOMPLETO
+L'estrazione iniziale ha trovato ${holdingsCount} titoli con controvalore totale ${phaseAResult.sumOfMarketValues.toFixed(2)}€, ma il PDF riporta un controvalore totale di ${phaseAResult.extractedTotal.toFixed(2)}€. Mancano circa ${phaseAResult.gap.toFixed(0)}€ di titoli.
+DEVI ri-esaminare attentamente la sezione "CONSISTENZA" o "PORTAFOGLIO" del PDF e estrarre TUTTI i titoli, inclusi quelli su pagine successive.
+Verifica che la somma dei controvalore individuali sia uguale al controvalore totale del PDF.
+NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
+
+                    promises.push((async () => {
+                        try {
+                            logProgress('PHASE A RETRY', `Gap ${phaseAResult.gap.toFixed(0)}€ (${phaseAResult.gapPercent.toFixed(1)}%)`)
+                            const retryText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseAPrompt, base64Data)
+                            const retryJsonMatch = retryText.match(/\{[\s\S]*\}/)
+                            if (retryJsonMatch) {
+                                let retryParsed: any
+                                try { retryParsed = JSON.parse(retryJsonMatch[0]) }
+                                catch { const r = repairTruncatedJson(retryJsonMatch[0]); if (r) retryParsed = JSON.parse(r) }
+
+                                if (retryParsed?.finalPortfolio?.length) {
+                                    const rv = validatePortfolioTotals(retryParsed)
+                                    const retryBetter = (retryParsed.finalPortfolio.length > holdingsCount && rv.gap < phaseAResult.gap) ||
+                                        (retryParsed.finalPortfolio.length >= holdingsCount && rv.gap < phaseAResult.gap * 0.5)
+                                    if (retryBetter) {
+                                        logProgress('PHASE A ACCEPTED', `${retryParsed.finalPortfolio.length} titoli, gap ${rv.gap.toFixed(0)}€`)
+                                        parsed.finalPortfolio = retryParsed.finalPortfolio
+                                        parsed.securityMovements = retryParsed.securityMovements || parsed.securityMovements
+                                        if (retryParsed.summary?.portfolio_total_extracted)
+                                            parsed.summary.portfolio_total_extracted = retryParsed.summary.portfolio_total_extracted
+                                    } else {
+                                        logProgress('PHASE A KEPT ORIGINAL', `Retry: ${retryParsed.finalPortfolio.length} titoli, gap ${rv.gap.toFixed(0)}€ — non migliora`)
+                                    }
+                                }
+                            }
+                        } catch (e: any) { logProgress('PHASE A ERROR', e.message) }
+                    })())
+                } else {
+                    logProgress('PHASE A OK', 'Totali portafoglio corrispondono')
+                }
+
+                // Phase B: ricerca mirata ISIN mancanti
+                if (needPhaseB) {
+                    const isinList = phaseBSuspicious.map(s =>
+                        `- ${s.isin} (${s.name}, quantità precedente: ${s.prevQuantity})`
+                    ).join('\n')
+                    const phaseBPrompt = `Esamina la sezione "CONSISTENZA" / "PORTAFOGLIO" di questo PDF dossier titoli.
 Cerca SPECIFICAMENTE i seguenti titoli e per ognuno rispondi se è PRESENTE o NO nel portafoglio:
 
 ${isinList}
@@ -1283,58 +1304,109 @@ Rispondi SOLO con questo JSON:
   "not_found": ["ISIN1", "ISIN2"]
 }`
 
+                    promises.push((async () => {
                         try {
-                            const targetedText = await callOpenAI(
-                                OPENAI_API_KEY!, modelName, phaseBPrompt, base64Data
-                            )
+                            logProgress('PHASE B', `${phaseBSuspicious.length} ISIN sospetti`)
+                            const targetedText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseBPrompt, base64Data)
                             const targetedJsonMatch = targetedText.match(/\{[\s\S]*\}/)
-
                             if (targetedJsonMatch) {
                                 let targetedResult: any
-                                try {
-                                    targetedResult = JSON.parse(targetedJsonMatch[0])
-                                } catch {
-                                    const repaired = repairTruncatedJson(targetedJsonMatch[0])
-                                    if (repaired) targetedResult = JSON.parse(repaired)
-                                }
+                                try { targetedResult = JSON.parse(targetedJsonMatch[0]) }
+                                catch { const r = repairTruncatedJson(targetedJsonMatch[0]); if (r) targetedResult = JSON.parse(r) }
 
                                 if (targetedResult) {
                                     const found = targetedResult.found || []
                                     const notFound = targetedResult.not_found || []
-
-                                    logProgress('PHASE B RESULTS',
-                                        `Trovati: ${found.length} | Non trovati: ${notFound.length}`
-                                    )
-
                                     if (found.length > 0) {
                                         const { merged, skipped } = mergeTargetedFindings(parsed, found)
-                                        logProgress('PHASE B MERGED',
-                                            `${merged} titoli aggiunti al portafoglio, ${skipped} scartati`
-                                        )
-
-                                        found.forEach((f: any) => {
-                                            if (f.isin && f.marketValue > 0) {
-                                                console.log(`  [PHASE B] + ${f.isin} (${f.name}): ${f.quantity} quote, ${f.marketValue}€`)
-                                            }
-                                        })
+                                        logProgress('PHASE B MERGED', `${merged} aggiunti, ${skipped} scartati`)
                                     }
-
                                     if (notFound.length > 0) {
-                                        console.log(`  [PHASE B] Titoli confermati assenti dal PDF: ${
-                                            Array.isArray(notFound) ? notFound.join(', ') : JSON.stringify(notFound)
-                                        }`)
+                                        logProgress('PHASE B NOT FOUND', Array.isArray(notFound) ? notFound.join(', ') : JSON.stringify(notFound))
                                     }
                                 }
                             }
-                        } catch (phaseBErr: any) {
-                            logProgress('PHASE B AI ERROR',
-                                `Verifica mirata fallita: ${phaseBErr.message}. Proseguo senza merge.`
-                            )
+                        } catch (e: any) { logProgress('PHASE B ERROR', e.message) }
+                    })())
+                } else if (phaseBPrevDoc) {
+                    logProgress('PHASE B OK', phaseBSuspicious.length === 0 ? 'Tutti i titoli presenti' : `${phaseBSuspicious.length} sospetti — troppi, skip`)
+                } else {
+                    logProgress('PHASE B SKIP', 'Nessun periodo precedente')
+                }
+
+                // Lancia entrambe le fasi in parallelo
+                await Promise.all(promises)
+                logProgress('⚡ PHASES COMPLETE', 'Phase A + B completate')
+            } else {
+                if (!needPhaseA) logProgress('PHASE A OK', 'Totali portafoglio corrispondono')
+                if (phaseBPrevDoc && !needPhaseB) logProgress('PHASE B OK', 'Tutti i titoli presenti')
+                else if (!phaseBPrevDoc) logProgress('PHASE B SKIP', 'Nessun periodo precedente')
+            }
+        }
+
+        // === PHASE C: Retry mirato per securityMovements vuoti ===
+        if (isDossier) {
+            const secMovCount = (parsed.securityMovements || []).length
+            const buysSellsInMovements = (parsed.movements || []).filter(
+                (m: any) => m.movement_type === 'Acquisto' || m.movement_type === 'Vendita'
+            )
+            if (secMovCount === 0 && buysSellsInMovements.length > 0) {
+                logProgress('⚠️ PHASE C', `securityMovements vuoto ma movements ha ${buysSellsInMovements.length} Acquisto/Vendita — retry mirato`)
+
+                const movementsHint = buysSellsInMovements.map((m: any) =>
+                    `- ${m.date} | ${m.description} | ${m.amount}€ | ${m.movement_type}`
+                ).join('\n')
+
+                const phaseCPrompt = `Sei un analista finanziario. Questo PDF è un DOSSIER TITOLI.
+Ho già estratto questi movimenti generici di acquisto/vendita:
+
+${movementsHint}
+
+DEVI ora estrarre gli STESSI movimenti nel formato strutturato "securityMovements", leggendo dal PDF i dettagli mancanti.
+
+Per OGNI movimento di acquisto o vendita titoli nel PDF, estrai:
+- isin: Codice ISIN del titolo
+- date: Data operazione (DD/MM/YYYY)
+- name: Nome del titolo
+- operationType: "Acquisto" o "Vendita"
+- quantity: Quantità/Numero quote (positivo)
+- price: Prezzo unitario
+- exchangeRate: Tasso di cambio (1 se EUR)
+- currency: Valuta (EUR, USD, etc.)
+- grossAmount: Controvalore lordo (quantity × price × exchangeRate)
+- fees: Commissioni/Spese (0 se non presente)
+- taxes: Imposte/Bolli (0 se non presente)
+- netAmount: Importo netto totale
+
+FORMATO NUMERI ITALIANI: punto=migliaia, virgola=decimale. "1.234,56" → 1234.56
+
+Rispondi SOLO con questo JSON:
+{
+  "securityMovements": [
+    { "isin": "", "date": "", "name": "", "operationType": "", "quantity": 0, "price": 0, "exchangeRate": 1, "currency": "EUR", "grossAmount": 0, "fees": 0, "taxes": 0, "netAmount": 0 }
+  ]
+}`
+
+                try {
+                    const phaseCText = await callOpenAI(OPENAI_API_KEY!, modelName, phaseCPrompt, base64Data)
+                    const phaseCJsonMatch = phaseCText.match(/\{[\s\S]*\}/)
+                    if (phaseCJsonMatch) {
+                        let phaseCParsed: any
+                        try { phaseCParsed = JSON.parse(phaseCJsonMatch[0]) }
+                        catch { const r = repairTruncatedJson(phaseCJsonMatch[0]); if (r) phaseCParsed = JSON.parse(r) }
+
+                        if (phaseCParsed?.securityMovements?.length > 0) {
+                            parsed.securityMovements = phaseCParsed.securityMovements
+                            logProgress('✅ PHASE C OK', `Estratti ${phaseCParsed.securityMovements.length} securityMovements`)
+                        } else {
+                            logProgress('PHASE C EMPTY', 'Retry non ha prodotto securityMovements')
                         }
                     }
+                } catch (e: any) {
+                    logProgress('PHASE C ERROR', e.message)
                 }
-            } catch (phaseBOuterErr: any) {
-                logProgress('PHASE B SKIP', `Errore: ${phaseBOuterErr.message}`)
+            } else if (secMovCount > 0) {
+                logProgress('PHASE C SKIP', `securityMovements già presenti (${secMovCount})`)
             }
         }
 
@@ -1504,23 +1576,37 @@ Rispondi SOLO con questo JSON:
         }
 
         // Store PDF in Supabase Storage for future re-analysis
-        // Save for new uploads AND re-analyses where the PDF was manually re-uploaded (not already in storage)
+        let storageStatus = 'skipped'
         if (userId && data.id) {
             try {
                 const pdfStoragePath = `${userId}/${data.id}.pdf`
-                const { error: storageError } = await supabase.storage
+                // Usa service role client per storage (bypassa RLS, evita problemi con sb_publishable_ key)
+                const storageClient = createStorageAdmin() || supabase
+                const { error: storageError } = await storageClient.storage
                     .from('documenti')
                     .upload(pdfStoragePath, pdfBuffer, {
                         contentType: 'application/pdf',
                         upsert: true
                     })
                 if (storageError) {
-                    console.warn(`[STORAGE] Upload PDF fallito: ${storageError.message}`)
+                    if (storageError.message?.includes('not found') || storageError.message?.includes('Bucket')) {
+                        logProgress('⚠️ BUCKET NON TROVATO', 'Creo bucket "documenti"...')
+                        await storageClient.storage.createBucket('documenti', { public: false })
+                        const { error: retryErr } = await storageClient.storage
+                            .from('documenti')
+                            .upload(pdfStoragePath, pdfBuffer, { contentType: 'application/pdf', upsert: true })
+                        storageStatus = retryErr ? `error: ${retryErr.message}` : 'ok'
+                    } else {
+                        logProgress('❌ STORAGE UPLOAD FALLITO', storageError.message)
+                        storageStatus = `error: ${storageError.message}`
+                    }
                 } else {
-                    logProgress('📁 PDF SALVATO', `Storage: pdfs/${pdfStoragePath}`)
+                    storageStatus = 'ok'
                 }
+                if (storageStatus === 'ok') logProgress('📁 PDF SALVATO', pdfStoragePath)
             } catch (storageErr: any) {
-                console.warn(`[STORAGE] Errore upload PDF: ${storageErr.message}`)
+                logProgress('❌ STORAGE EXCEPTION', storageErr.message)
+                storageStatus = `exception: ${storageErr.message}`
             }
         }
 
@@ -1534,6 +1620,7 @@ Rispondi SOLO con questo JSON:
             fileName,
             status: 'ready',
             isReanalysis,
+            storageStatus,
             holder: parsed.info?.holder || null,
             // Dati per verifica (usati da batch_verify.js)
             data: {

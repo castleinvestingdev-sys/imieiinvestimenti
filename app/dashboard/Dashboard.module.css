@@ -1742,11 +1742,12 @@
 
 .dualAccNum {
     font-family: 'Outfit', sans-serif;
-    font-size: 0.45rem;
+    font-size: 0.7rem;
     font-weight: 600;
-    color: #64748b;
+    color: #475569;
     white-space: nowrap;
     padding-left: 0.5rem;
+    letter-spacing: 0.02em;
 }
 
 .dualDeleteBtn {
@@ -1873,6 +1874,10 @@
 
 .dualCardS {
     width: calc(110px * 6 + 0.3rem * 5);
+}
+
+.dualCardA {
+    width: calc(110px * 12 + 0.3rem * 11);
 }
 
 .dualCardLoaded {
@@ -2016,5 +2021,9 @@
 
     .dualCardS {
         width: calc(95px * 6 + 0.3rem * 5);
+    }
+
+    .dualCardA {
+        width: calc(95px * 12 + 0.3rem * 11);
     }
 }

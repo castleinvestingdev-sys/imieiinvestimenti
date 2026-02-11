@@ -49,7 +49,7 @@ export default function ConsulentePage() {
       setLoading(false)
     }
     getUser()
-  }, [router, supabase.auth])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchClients = useCallback(async (userId: string) => {
     const { data, error } = await supabase

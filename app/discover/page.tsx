@@ -53,7 +53,7 @@ export default function DiscoverPage() {
             }
         }
         checkUser()
-    }, [router, supabase.auth])
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault()

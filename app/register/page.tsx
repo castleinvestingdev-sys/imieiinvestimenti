@@ -63,7 +63,7 @@ export default function RegisterPage() {
         }
 
         alert('Registrazione completata! Verifica la tua email.')
-        router.push('/dashboard')
+        router.push('/consulente')
     }
 
     const handleSocialLogin = async (provider: 'google' | 'apple') => {

@@ -59,6 +59,9 @@ function DashboardContent() {
   const [editingTransactions, setEditingTransactions] = useState<any[]>([])
   const [portfolioTab, setPortfolioTab] = useState<'initial' | 'final' | 'movements'>('final')
   const [recalculatingCosts, setRecalculatingCosts] = useState(false)
+  const [reanalysisProgress, setReanalysisProgress] = useState(0)
+  const [reanalysisStage, setReanalysisStage] = useState('')
+  const reanalysisTimerRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const clienteFilter = searchParams.get('cliente')
@@ -175,13 +178,24 @@ function DashboardContent() {
       )
     }
 
-    // Normalizza numeri conto per raggruppamento: gestisce prefissi filiale variabili
-    // es. "3100/1000811", "19812/3100/1000811", "19812/3100/01000811" → "31001000811"
+    // Normalizza numeri conto per raggruppamento (stessa logica di normalizeAcc nel render)
     const normalizeAccKey = (acc: string) => {
       if (!acc) return 'ND';
-      const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
-      if (segments.length === 0) return 'ND';
-      return segments.slice(-2).join('').toUpperCase() || 'ND';
+      const slashMatch = acc.match(/(\d{3,}(?:\/\d{3,})+)/);
+      if (slashMatch) {
+        const segments = slashMatch[1].split('/').map(s => s.replace(/^0+/, '') || '0');
+        return segments.slice(-2).join('');
+      }
+      const ibanMatch = acc.match(/IT\d{2}[A-Z0-9]{20,25}/i);
+      if (ibanMatch) {
+        const accountPart = ibanMatch[0].slice(-12);
+        return accountPart.replace(/\D/g, '').replace(/^0+/, '') || '0';
+      }
+      const ccMatch = acc.match(/CC\d{6,}/i);
+      if (ccMatch) return ccMatch[0].replace(/\D/g, '').replace(/^0+/, '') || '0';
+      const allDigits = acc.replace(/\D/g, '');
+      if (allDigits.length >= 6) return allDigits.slice(-10);
+      return allDigits || 'ND';
     };
 
     // Infer missing period_start from previous documents or period_end
@@ -460,6 +474,7 @@ function DashboardContent() {
     )
     if (!confirmed) return
 
+    // Cancella il record dal DB
     const { error } = await supabase
       .from('analyses')
       .delete()
@@ -470,6 +485,11 @@ function DashboardContent() {
       alert('Errore durante l\'eliminazione definitiva')
       return
     }
+
+    // Cancella anche il PDF dallo storage Supabase
+    await supabase.storage
+      .from('documenti')
+      .remove([`${user.id}/${analysisId}.pdf`])
 
     await fetchAnalyses(user.id)
   }
@@ -587,14 +607,42 @@ function DashboardContent() {
   const handleRecalculateSingle = async (manualFile?: File) => {
     if (!user || !inspectorData) return
 
-    if (!manualFile && !confirm(`Ri-analizzare questo documento dal PDF originale?\n\n${inspectorData.bank_name} - ${new Date(inspectorData.period_start).toLocaleDateString('it-IT')} / ${new Date(inspectorData.period_end).toLocaleDateString('it-IT')}`)) return
-
     setRecalculatingCosts(true)
+    setReanalysisProgress(0)
+    setReanalysisStage('Caricamento PDF')
+
+    // Start progress timer
+    const startTime = Date.now()
+    const expectedDuration = 90 // seconds
+    const stages = [
+      [0, 'Caricamento PDF'],
+      [5, 'Conversione documento'],
+      [10, 'Invio a OpenAI'],
+      [15, 'Analisi AI in corso'],
+      [30, 'Estrazione movimenti'],
+      [45, 'Lettura portafoglio titoli'],
+      [55, 'Validazione dati'],
+      [65, 'Calcolo commissioni'],
+      [75, 'Controllo coerenza'],
+      [85, 'Normalizzazione dati'],
+      [95, 'Finalizzazione'],
+    ] as const
+    reanalysisTimerRef.current = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000
+      const ratio = elapsed / expectedDuration
+      const progress = Math.min(98, Math.round(98 * (1 - Math.exp(-2.5 * ratio))))
+      const dots = '.'.repeat((Math.floor(elapsed) % 3) + 1)
+      const currentStage = [...stages].reverse().find(([t]) => elapsed >= t)?.[1] || stages[0][1]
+      setReanalysisProgress(progress)
+      setReanalysisStage(currentStage + dots)
+    }, 500)
 
     try {
       const formData = new FormData()
       formData.append('reanalyzeId', inspectorData.id)
       formData.append('userId', user.id)
+      formData.append('force', 'true')
+      formData.append('replaceAnalysisId', inspectorData.id)
       if (manualFile) {
         formData.append('file', manualFile)
       }
@@ -607,31 +655,61 @@ function DashboardContent() {
 
       if (result.success) {
         await fetchAnalyses(user.id)
+        // Ricarica il documento aggiornato (potrebbe avere un nuovo ID se è stato sostituito)
+        const docId = result.analysisId || inspectorData.id
         const { data: updatedDoc } = await supabase
           .from('analyses')
           .select('*')
-          .eq('id', inspectorData.id)
+          .eq('id', docId)
           .single()
         if (updatedDoc) setInspectorData(updatedDoc)
-        alert('Ri-analisi completata!')
       } else if (response.status === 404) {
-        // PDF not in storage — ask user to upload it manually
-        const input = document.createElement('input')
-        input.type = 'file'
-        input.accept = '.pdf'
-        input.onchange = (e) => {
-          const file = (e.target as HTMLInputElement).files?.[0]
-          if (file) handleRecalculateSingle(file)
+        // PDF not in storage — apri file picker senza alert
+        const file = await new Promise<File | null>((resolve) => {
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.accept = '.pdf'
+          input.onchange = (e) => resolve((e.target as HTMLInputElement).files?.[0] || null)
+          input.oncancel = () => resolve(null)
+          input.click()
+        })
+        if (file) {
+          await handleRecalculateSingle(file)
+          return // evita il finally doppio
         }
-        alert('PDF non trovato nello storage. Seleziona il PDF originale per ri-analizzare.')
-        input.click()
       } else {
-        alert('Errore nella ri-analisi: ' + (result.error || 'errore sconosciuto'))
+        if (reanalysisTimerRef.current) { clearInterval(reanalysisTimerRef.current); reanalysisTimerRef.current = null }
+        setRecalculatingCosts(false)
+        setReanalysisProgress(0)
+        setReanalysisStage('')
+        setConfirmModal({
+          isOpen: true,
+          title: 'Errore ri-analisi',
+          message: result.error || 'Errore sconosciuto',
+          onConfirm: () => setConfirmModal(null),
+          onCancel: () => setConfirmModal(null)
+        })
+        return
       }
     } catch (err: any) {
-      alert('Errore: ' + err.message)
+      setConfirmModal({
+        isOpen: true,
+        title: 'Errore ri-analisi',
+        message: err.message,
+        onConfirm: () => setConfirmModal(null),
+        onCancel: () => setConfirmModal(null)
+      })
     } finally {
-      setRecalculatingCosts(false)
+      if (reanalysisTimerRef.current) {
+        clearInterval(reanalysisTimerRef.current)
+        reanalysisTimerRef.current = null
+      }
+      setReanalysisProgress(100)
+      setTimeout(() => {
+        setRecalculatingCosts(false)
+        setReanalysisProgress(0)
+        setReanalysisStage('')
+      }, 400)
     }
   }
 
@@ -672,9 +750,10 @@ function DashboardContent() {
       setLoading(false)
     }
     checkAuth()
-  }, [supabase.auth, router, fetchAnalyses])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Process upload queue
+  // Process upload queue — up to 2 files in parallel
+  const CONCURRENT_UPLOADS = 1
   const processQueue = useCallback(async () => {
     if (!user || isProcessing || fileQueueRef.current.length === 0) return
 
@@ -692,29 +771,16 @@ function DashboardContent() {
     const totalFiles = fileQueueRef.current.length
     const isBatch = totalFiles > 1
 
-    while (fileQueueRef.current.length > 0) {
-      console.log('Processing next file, remaining:', fileQueueRef.current.length)
-      const { id: fileId, file } = fileQueueRef.current.shift()!
-      currentFileIndexRef.current++
-
-      setUploadQueue(prev => {
-        const currentIndex = currentFileIndexRef.current
-        return prev.map(f => {
-          const isCurrent = f.id === fileId
-          return {
-            ...f,
-            ...(isCurrent ? {
-              status: f.status === 'done' ? f.status : 'uploading' as const,
-              progress: f.status === 'done' ? 100 : Math.max(f.progress, 5),
-              index: currentIndex
-            } : {})
-          }
-        })
-      })
+    // Process a single file (extracted for parallel use)
+    const processOneFile = async (fileId: string, file: File) => {
+      setUploadQueue(prev => prev.map(f => {
+        if (f.id !== fileId) return f
+        return { ...f, status: f.status === 'done' ? f.status : 'uploading' as const, progress: f.status === 'done' ? 100 : Math.max(f.progress, 5) }
+      }))
 
       try {
         const uploadStartTime = Date.now()
-        const expectedDuration = 90 // secondi stimati per un PDF
+        const expectedDuration = 90
         const progressInterval = setInterval(() => {
           setUploadQueue(prev => prev.map(f => {
             if (f.id === fileId && (f.status === 'uploading' || f.status === 'analyzing')) {
@@ -734,11 +800,8 @@ function DashboardContent() {
               ] as const
               const dots = '.'.repeat((Math.floor(elapsed) % 3) + 1)
               const currentStage = [...stages].reverse().find(([t]) => elapsed >= t)?.[1] || stages[0][1]
-
-              // Curva logaritmica: avanza proporzionalmente al tempo, rallenta dolcemente verso 98%
               const ratio = elapsed / expectedDuration
               const progress = Math.min(98, Math.round(98 * (1 - Math.exp(-2.5 * ratio))))
-
               return { ...f, progress, stage: currentStage + dots, startTime: uploadStartTime }
             }
             return f
@@ -756,7 +819,7 @@ function DashboardContent() {
         formData.append('userId', user.id)
 
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000)
+        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000)
 
         console.log('Sending request for:', file.name)
         let response: Response
@@ -769,27 +832,23 @@ function DashboardContent() {
         } finally {
           clearTimeout(timeoutId)
         }
-        console.log('Response status:', response.status)
+        console.log('Response status:', response.status, file.name)
 
         clearInterval(progressInterval)
         const result = await response.json()
+        console.log('📁 Storage status:', result.storageStatus, file.name)
 
-        // Helper: refresh data and scroll to the newly uploaded card in timeline
         const onFileSuccess = async (analysisId?: string, holder?: string) => {
           if (holder) lastHolder = holder
           successCount++
+          lastAnalysisId = analysisId || null
           await fetchAnalyses(user.id)
           if (analysisId) {
-            // Wait for React re-render with new data
             setTimeout(() => {
               const card = document.querySelector(`[data-analysis-id="${analysisId}"]`)
               if (card) {
-                // Scroll the page vertically to the card's bank group
                 const bankBlock = card.closest('[class*="bankGroupBlock"]')
-                if (bankBlock) {
-                  (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }
-                // Scroll the timeline scroller horizontally to the card
+                if (bankBlock) (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
                 const scroller = card.closest('[class*="dualTimelineScroller"]')
                 if (scroller) {
                   const scrollerRect = scroller.getBoundingClientRect()
@@ -809,24 +868,26 @@ function DashboardContent() {
           await onFileSuccess(result.analysisId, result.holder)
 
         } else if (result.isDuplicate && response.status === 409) {
-          clearInterval(progressInterval)
-
-          // Always ask user for confirmation on duplicates
-          const shouldProceed = await new Promise<boolean>((resolve) => {
-            setConfirmModal({
-              isOpen: true,
-              title: '⚠️ Periodo Già Caricato',
-              message: `${result.message}\n\nVuoi ricalcolare comunque questo periodo? I dati precedenti verranno sostituiti.`,
-              onConfirm: () => { setConfirmModal(null); resolve(true) },
-              onCancel: () => { setConfirmModal(null); resolve(false) }
-            })
-          })
-          if (shouldProceed) {
-            setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, stage: 'Ricalcolo forzato...' } : f
-            ))
-            formData.append('force', 'true')
-            const retryResponse = await fetch('/api/parse-pdf', { method: 'POST', body: formData })
+          setUploadQueue(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, stage: 'Ricalcolo...' } : f
+          ))
+          formData.append('force', 'true')
+          if (result.existingAnalysisId) formData.append('replaceAnalysisId', result.existingAnalysisId)
+          const retryController = new AbortController()
+          const retryTimeoutId = setTimeout(() => retryController.abort(), 600000)
+          const retryStartTime = Date.now()
+          const retryProgressInterval = setInterval(() => {
+            setUploadQueue(prev => prev.map(f => {
+              if (f.id !== fileId || f.status !== 'uploading') return f
+              const elapsed = Date.now() - retryStartTime
+              const progress = Math.min(95, Math.round(5 + 90 * (1 - Math.exp(-elapsed / 120000))))
+              return { ...f, progress }
+            }))
+          }, 1000)
+          try {
+            const retryResponse = await fetch('/api/parse-pdf', { method: 'POST', body: formData, signal: retryController.signal })
+            clearTimeout(retryTimeoutId)
+            clearInterval(retryProgressInterval)
             const retryResult = await retryResponse.json()
             if (retryResult.success) {
               setUploadQueue(prev => prev.map(f =>
@@ -838,17 +899,19 @@ function DashboardContent() {
                 f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
               ))
             }
-          } else {
+          } catch (retryErr: any) {
+            clearTimeout(retryTimeoutId)
+            clearInterval(retryProgressInterval)
             setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'done' as const, progress: 100, stage: 'Saltato' } : f
+              f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryErr.name === 'AbortError' ? 'Timeout ricalcolo' : retryErr.message } : f
             ))
           }
         } else if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
           ))
-          fileQueueRef.current.unshift({ id: fileId, file })
-          await new Promise(resolve => setTimeout(resolve, 5000))
+          fileQueueRef.current.push({ id: fileId, file })
+          await new Promise(resolve => setTimeout(resolve, 10000))
         } else {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
@@ -856,18 +919,32 @@ function DashboardContent() {
         }
       } catch (error: any) {
         const errorMsg = error.name === 'AbortError'
-          ? 'Timeout: l\'analisi ha superato 5 minuti. Riprova.'
+          ? 'Timeout: l\'analisi ha superato 10 minuti. Riprova.'
           : (error.message || 'Errore di rete')
         setUploadQueue(prev => prev.map(f =>
           f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: errorMsg } : f
         ))
       }
-
-      // Brief pause between files to avoid rate limiting
-      if (fileQueueRef.current.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-      }
     }
+
+    // Worker pool: N lanes pull from the shared queue in parallel
+    // Add pacing delay between files to avoid OpenAI rate limits
+    const workers = Array.from(
+      { length: Math.min(CONCURRENT_UPLOADS, fileQueueRef.current.length) },
+      async (_, workerIdx) => {
+        while (fileQueueRef.current.length > 0) {
+          const item = fileQueueRef.current.shift()
+          if (!item) break
+          currentFileIndexRef.current++
+          await processOneFile(item.id, item.file)
+          // Pacing: small delay between files to reduce rate limiting
+          if (fileQueueRef.current.length > 0) {
+            await new Promise(resolve => setTimeout(resolve, 2000))
+          }
+        }
+      }
+    )
+    await Promise.all(workers)
 
     setIsProcessing(false)
 
@@ -1126,14 +1203,39 @@ function DashboardContent() {
   // --- 2. Identificazione Connessioni e Normalizzazione Account ---
   // Estrae solo cifre per confronti numerici
   const extractNumericCore = (acc: string) => acc?.replace(/\D/g, '') || '';
-  // Normalizza numeri conto: split per "/" o "-", strip zeri iniziali per segmento,
-  // prendi gli ultimi 2 segmenti. Gestisce prefissi filiale (es. "19812/3100/1000811" → "31001000811")
+  // Normalizza numeri conto robusto: gestisce IBAN, numeri CC, dossier con prefisso testuale
   const normalizeAcc = (acc: string) => {
     if (!acc) return 'ND';
-    const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
-    if (segments.length === 0) return 'ND';
-    const core = segments.slice(-2);
-    return core.join('').toUpperCase() || 'ND';
+
+    // 1. Cerca pattern numerico con "/" (es. "3100/01000811", "19812/3100/01000811")
+    //    Ogni segmento deve avere 3+ cifre per evitare match con date come "2/2024"
+    const slashMatch = acc.match(/(\d{3,}(?:\/\d{3,})+)/);
+    if (slashMatch) {
+      const segments = slashMatch[1].split('/').map(s => s.replace(/^0+/, '') || '0');
+      return segments.slice(-2).join('');
+    }
+
+    // 2. Cerca IBAN italiano (IT + 25 alfanumerici = 27 chars)
+    const ibanMatch = acc.match(/IT\d{2}[A-Z0-9]{20,25}/i);
+    if (ibanMatch) {
+      // Ultimi 12 caratteri dell'IBAN = numero conto
+      const accountPart = ibanMatch[0].slice(-12);
+      return accountPart.replace(/\D/g, '').replace(/^0+/, '') || '0';
+    }
+
+    // 3. Cerca numero CC (es. "CC8500943415")
+    const ccMatch = acc.match(/CC\d{6,}/i);
+    if (ccMatch) {
+      return ccMatch[0].replace(/\D/g, '').replace(/^0+/, '') || '0';
+    }
+
+    // 4. Fallback: tutte le cifre, ultimi 10 come chiave
+    const allDigits = acc.replace(/\D/g, '');
+    if (allDigits.length >= 6) {
+      return allDigits.slice(-10);
+    }
+
+    return allDigits || 'ND';
   };
 
   // Mappa ogni account al suo settlement e alla banca raw
@@ -1292,6 +1394,64 @@ function DashboardContent() {
       });
     }
   });
+
+  // --- 5b. Merge aggressivo multi-pass ---
+  // L'AI estrae numeri conto diversi dallo stesso CC (IBAN, CC, ref. bancario, troncato)
+  // Pass 1: suffisso numerico (6+ cifre)
+  // Pass 2: stesso periodo + stesso valore = stesso conto
+  // Pass 3: un numero è contenuto nell'altro
+  const getAllDigits = (s: string) => (s || '').replace(/\D/g, '');
+  const shouldMergeAccounts = (a: AccountGroup, b: AccountGroup): boolean => {
+    const digA = getAllDigits(a.identifier);
+    const digB = getAllDigits(b.identifier);
+    // Pass 1: suffisso numerico comune (6+ cifre)
+    const suffLen = 6;
+    if (digA.length >= suffLen && digB.length >= suffLen) {
+      if (digA.slice(-suffLen) === digB.slice(-suffLen)) return true;
+    }
+    // Pass 3: un numero è sottostringa dell'altro (minimo 6 cifre)
+    if (digA.length >= 6 && digB.length >= 6) {
+      if (digA.includes(digB) || digB.includes(digA)) return true;
+    }
+    // Pass 2: stesso periodo + stesso valore (segnale fortissimo)
+    for (const aa of a.analyses) {
+      if (!aa.period_start || !aa.period_end || !aa.portfolio_value) continue;
+      for (const bb of b.analyses) {
+        if (!bb.period_start || !bb.period_end || !bb.portfolio_value) continue;
+        if (aa.period_start === bb.period_start && aa.period_end === bb.period_end
+            && Math.abs((aa.portfolio_value || 0) - (bb.portfolio_value || 0)) < 0.01) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  const mergeAccountList = (list: AccountGroup[]) => {
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let i = 0; i < list.length && !merged; i++) {
+        for (let j = list.length - 1; j > i; j--) {
+          if (shouldMergeAccounts(list[i], list[j])) {
+            // Deduplica analisi per ID prima di unire
+            const existingIds = new Set(list[i].analyses.map(a => a.id));
+            list[j].analyses.forEach(a => { if (!existingIds.has(a.id)) list[i].analyses.push(a); });
+            // Tieni l'identifier più corto (più pulito)
+            if (list[j].identifier.length < list[i].identifier.length) {
+              list[i].identifier = list[j].identifier;
+            }
+            list.splice(j, 1);
+            merged = true;
+          }
+        }
+      }
+    }
+  };
+  Object.values(mergedMap).forEach(group => {
+    mergeAccountList(group.dossiers);
+    mergeAccountList(group.liquidityAccounts);
+  });
+
   const bankGroups = Object.values(mergedMap);
 
   // --- 6. Mappa coerenza portafoglio: id → boolean (true = quadra, false = non quadra, undefined = nessun periodo precedente) ---
@@ -1399,18 +1559,29 @@ function DashboardContent() {
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  // Determine document frequency: monthly (< 45 days), quarterly (45-150), semiannual (> 150)
-  type DocFrequency = 'monthly' | 'quarterly' | 'semiannual';
+  // Determine document frequency: monthly (< 45 days), quarterly (45-150), semiannual (150-300), annual (> 300)
+  type DocFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+  const FREQ_PRIORITY: Record<DocFrequency, number> = { monthly: 4, quarterly: 3, semiannual: 2, annual: 1 };
   const getDocFrequency = (a: Analysis): DocFrequency => {
     if (!a.period_start || !a.period_end) return 'quarterly';
     const start = new Date(a.period_start);
     const end = new Date(a.period_end);
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
     if (diffDays < 45) return 'monthly';
-    if (diffDays > 150) return 'semiannual';
-    return 'quarterly';
+    if (diffDays <= 150) return 'quarterly';
+    if (diffDays <= 300) return 'semiannual';
+    return 'annual';
   };
   const isDocMonthly = (a: Analysis) => getDocFrequency(a) === 'monthly';
+
+  // Periodo standard: mensile ~30, trimestrale ~90, semestrale ~180, annuale ~365
+  const isStandardPeriod = (days: number): boolean => {
+    if (days >= 28 && days <= 31) return true   // mensile
+    if (days >= 89 && days <= 92) return true   // trimestrale
+    if (days >= 181 && days <= 184) return true // semestrale
+    if (days >= 365 && days <= 366) return true // annuale
+    return false
+  }
 
   // Build a frequency map for the year: for each month, determine expected frequency
   const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): DocFrequency[] => {
@@ -1437,16 +1608,7 @@ function DashboardContent() {
       // This document's month uses its own frequency
       freqMap[endMonth] = docFreq;
 
-      // For semiannual, mark all months in the half-year
-      if (docFreq === 'semiannual') {
-        const halfStart = endMonth < 6 ? 0 : 6;
-        const halfEnd = endMonth < 6 ? 5 : 11;
-        for (let m = halfStart; m <= halfEnd; m++) {
-          freqMap[m] = 'semiannual';
-        }
-      }
-
-      // Update current frequency for future months
+      // Update current frequency for future months (forward propagation only)
       currentFreq = docFreq;
       lastDocEndMonth = endMonth + 1;
     });
@@ -1468,9 +1630,10 @@ function DashboardContent() {
     allAccounts.forEach(account => {
       const accountMap = buildYearFrequencyMap(account.analyses, year);
       accountMap.forEach((freq, m) => {
-        // Priority: monthly > quarterly > semiannual (most granular wins for alignment)
-        if (freq === 'monthly') merged[m] = 'monthly';
-        else if (freq === 'semiannual' && merged[m] === 'quarterly') merged[m] = 'semiannual';
+        // Priority: monthly > quarterly > semiannual > annual (most granular wins for alignment)
+        if (FREQ_PRIORITY[freq] > FREQ_PRIORITY[merged[m]]) {
+          merged[m] = freq;
+        }
       });
     });
     return merged;
@@ -1484,7 +1647,28 @@ function DashboardContent() {
     while (m < 12) {
       const freq = freqMap[m];
 
-      if (freq === 'semiannual') {
+      if (freq === 'annual') {
+        // Check if any month has a more granular frequency
+        const hasMoreGranular = freqMap.some(f => f !== 'annual');
+        if (hasMoreGranular) {
+          // Fall back to month-by-month for this month
+          const file = accountAnalyses.find(a => {
+            if (!a.period_end) return false;
+            const d = new Date(a.period_end);
+            return d.getFullYear() === year && d.getMonth() === m;
+          });
+          slots.push({ type: 'monthly', month: m, file });
+          m++;
+        } else {
+          // Pure annual — single wide slot for the entire year
+          const file = accountAnalyses.find(a => {
+            if (!a.period_end) return false;
+            return new Date(a.period_end).getFullYear() === year;
+          });
+          slots.push({ type: 'annual', month: 11, file });
+          m = 12; // skip to end
+        }
+      } else if (freq === 'semiannual') {
         // Semiannual: H1 = Jan-Jun (months 0-5), H2 = Jul-Dec (months 6-11)
         const half = m < 6 ? 1 : 2;
         const halfStart = half === 1 ? 0 : 6;
@@ -1597,6 +1781,10 @@ function DashboardContent() {
       const endDate = new Date(year, slotIndex, 0);       // Last day of current month
       const labelDate = new Date(year, slotIndex - 1, 1); // For getting month name
       return { start: fmt(startDate), end: fmt(endDate), label: labelDate.toLocaleString('it-IT', { month: 'short' }).toUpperCase() };
+    } else if (frequency === 'annual') {
+      const startDate = new Date(year - 1, 11, 31);
+      const endDate = new Date(year, 11, 31);
+      return { start: fmt(startDate), end: fmt(endDate), label: `${year}` };
     } else if (frequency === 'semiannual') {
       // Semiannual: H1 (Jan-Jun) or H2 (Jul-Dec)
       const half = slotIndex; // 1 or 2
@@ -1615,9 +1803,13 @@ function DashboardContent() {
 
 
   // Helper function to format currency with Italian locale (dot for thousands, comma for decimals)
-  const formatCurrency = (val: number): string => {
-    return new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)
+  // Formattazione italiana custom: sempre separatore migliaia con punto, decimali con virgola
+  const formatNum = (val: number, decimals = 2): string => {
+    const parts = Math.abs(val).toFixed(decimals).split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (val < 0 ? '-' : '') + parts.join(',');
   }
+  const formatCurrency = (val: number): string => formatNum(val, 2);
 
   const renderVal = (val: any, isCurrency = false) => {
     if (val === 'non trovato' || val === null || val === undefined) {
@@ -1630,7 +1822,7 @@ function DashboardContent() {
     if (typeof val === 'number') {
       displayVal = isCurrency
         ? `€${formatCurrency(val)}`
-        : val.toLocaleString('it-IT');
+        : formatNum(val, Number.isInteger(val) ? 0 : 2);
     }
     return <span className={styles.foundValue}>{displayVal}</span>
   }
@@ -2040,11 +2232,15 @@ function DashboardContent() {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
                                 const isSemiannual = slot.type === 'semiannual'
+                                const isAnnual = slot.type === 'annual'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
                                 const coh = isPresent ? coherenceMap[slot.file!.id] : undefined
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
-                                if (isSemiannual) {
+                                if (isAnnual) {
+                                  displayLabel = `${year}`
+                                  dates = getSlotDates(year, 0, 'annual')
+                                } else if (isSemiannual) {
                                   displayLabel = `H${slot.half}`
                                   dates = getSlotDates(year, slot.half!, 'semiannual')
                                 } else if (isMonthly) {
@@ -2060,21 +2256,37 @@ function DashboardContent() {
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
+                                  else if (docDays > 300 && !isAnnual) { displayLabel = `${year}`; dates = getSlotDates(year, 0, 'annual') }
+                                  else if (docDays > 150 && !isSemiannual && !isAnnual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
                                   else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
-                                const sizeClass = isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
+                                // Larghezza proporzionale alla durata reale (30.44 = media giorni/mese)
+                                // Un trimestrale (91gg) = 3 card mensili (110px) + 2 gap (0.3rem) → coerente col CSS
+                                let customWidth: string | undefined
+                                let customDaysLabel: string | undefined
+                                if (isPresent && slot.file!.period_start && slot.file!.period_end) {
+                                  const actualDays = Math.round((new Date(slot.file!.period_end).getTime() - new Date(slot.file!.period_start).getTime()) / 86400000)
+                                  const nMonths = Math.max(1, actualDays / 30.44)
+                                  const nGaps = Math.max(0, nMonths - 1)
+                                  customWidth = `calc(${(nMonths * 110).toFixed(0)}px + ${(nGaps * 0.3).toFixed(1)}rem)`
+                                  if (!isStandardPeriod(actualDays)) customDaysLabel = `${actualDays}gg`
+                                }
+                                const sizeClass = isAnnual ? styles.dualCardA : (isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : ''))
+                                const cardStyle: React.CSSProperties = {
+                                  ...(customWidth ? { width: customWidth, minWidth: customWidth } : {}),
+                                  ...(coh === false ? { borderColor: '#ef4444', borderWidth: '2px' } : coh === 'missing' ? { borderColor: '#f59e0b', borderWidth: '2px' } : {})
+                                }
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                    className={`${styles.dualCard} ${sizeClass} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
-                                    style={coh === false ? { borderColor: '#ef4444', borderWidth: '2px' } : coh === 'missing' ? { borderColor: '#f59e0b', borderWidth: '2px' } : undefined}
+                                    className={`${styles.dualCard} ${!customWidth ? sizeClass : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    style={cardStyle}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <span className={styles.dualCardType}>{displayLabel}</span>
+                                      <span className={styles.dualCardType}>{displayLabel}{customDaysLabel && <span style={{ fontSize: '0.5rem', opacity: 0.7, marginLeft: '0.2rem' }}>{customDaysLabel}</span>}</span>
                                       {coh === true && <span title="Portafoglio iniziale verificato" style={{ fontSize: '0.55rem' }}>✅</span>}
                                       {coh === false && <span title={coherenceDetails[slot.file!.id] || 'Portafoglio iniziale non quadra'} style={{ fontSize: '0.55rem' }}>❌</span>}
                                       {coh === 'missing' && <span title="Portafoglio iniziale assente" style={{ fontSize: '0.55rem' }}>⚠️</span>}
@@ -2110,10 +2322,14 @@ function DashboardContent() {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
                                 const isSemiannual = slot.type === 'semiannual'
+                                const isAnnual = slot.type === 'annual'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
-                                if (isSemiannual) {
+                                if (isAnnual) {
+                                  displayLabel = `${year}`
+                                  dates = getSlotDates(year, 0, 'annual')
+                                } else if (isSemiannual) {
                                   displayLabel = `H${slot.half}`
                                   dates = getSlotDates(year, slot.half!, 'semiannual')
                                 } else if (isMonthly) {
@@ -2129,19 +2345,30 @@ function DashboardContent() {
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
+                                  else if (docDays > 300 && !isAnnual) { displayLabel = `${year}`; dates = getSlotDates(year, 0, 'annual') }
+                                  else if (docDays > 150 && !isSemiannual && !isAnnual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
                                   else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
-                                const liqSizeClass = isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
+                                let liqCustomWidth: string | undefined
+                                let liqDaysLabel: string | undefined
+                                if (isPresent && slot.file!.period_start && slot.file!.period_end) {
+                                  const ad = Math.round((new Date(slot.file!.period_end).getTime() - new Date(slot.file!.period_start).getTime()) / 86400000)
+                                  const mo = Math.max(1, ad / 30.44)
+                                  const gp = Math.max(0, mo - 1)
+                                  liqCustomWidth = `calc(${(mo * 110).toFixed(0)}px + ${(gp * 0.3).toFixed(1)}rem)`
+                                  if (!isStandardPeriod(ad)) liqDaysLabel = `${ad}gg`
+                                }
+                                const liqSizeClass = isAnnual ? styles.dualCardA : (isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : ''))
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                    className={`${styles.dualCard} ${liqSizeClass} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    className={`${styles.dualCard} ${!liqCustomWidth ? liqSizeClass : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    style={liqCustomWidth ? { width: liqCustomWidth, minWidth: liqCustomWidth } : undefined}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
-                                    <span className={styles.dualCardType}>{displayLabel}</span>
+                                    <span className={styles.dualCardType}>{displayLabel}{liqDaysLabel && <span style={{ fontSize: '0.5rem', opacity: 0.7, marginLeft: '0.2rem' }}>{liqDaysLabel}</span>}</span>
                                     <div className={styles.dualCardDates}>
                                       <span>{startDateDisplay || dates.start}</span>
                                       <span className={styles.dualCardArrow}>&darr;</span>
@@ -2259,12 +2486,39 @@ function DashboardContent() {
                     gap: '6px'
                   }}
                 >
-                  {recalculatingCosts ? '⟳ Ri-analisi...' : '🔄 Ri-Analizza'}
+                  {recalculatingCosts ? `⟳ ${reanalysisProgress}%` : '🔄 Ri-Analizza'}
                 </button>
                 <button className={styles.closeBtn} onClick={() => setInspectorData(null)}>×</button>
               </div>
             </div>
-            <div className={styles.modalBody}>
+            <div className={styles.modalBody} style={{ position: 'relative' }}>
+              {recalculatingCosts && (
+                <div style={{
+                  position: 'absolute', inset: 0, zIndex: 10,
+                  background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(2px)',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem'
+                }}>
+                  <div style={{ position: 'relative', width: '56px', height: '56px' }}>
+                    <svg width="56" height="56" viewBox="0 0 56 56" style={{ transform: 'rotate(-90deg)' }}>
+                      <circle cx="28" cy="28" r="24" fill="none" stroke="#e2e8f0" strokeWidth="4" />
+                      <circle cx="28" cy="28" r="24" fill="none" stroke="#3b82f6" strokeWidth="4"
+                        strokeDasharray={`${2 * Math.PI * 24}`}
+                        strokeDashoffset={`${2 * Math.PI * 24 * (1 - reanalysisProgress / 100)}`}
+                        strokeLinecap="round"
+                        style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+                      />
+                    </svg>
+                    <span style={{
+                      position: 'absolute', inset: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '0.75rem', fontWeight: 700, color: '#1e293b'
+                    }}>{reanalysisProgress}%</span>
+                  </div>
+                  <span style={{ fontSize: '0.85rem', color: '#475569', fontWeight: 600 }}>
+                    {reanalysisStage || 'Ri-analisi in corso...'}
+                  </span>
+                </div>
+              )}
 
               {inspectorData.account_type === 'LIQUIDITY' && editingValues && (
                 <div className={styles.liquiditySection}>
@@ -2426,7 +2680,7 @@ function DashboardContent() {
                                     item.type === 'text' ? (val || '') :
                                     item.type === 'currency' && typeof val === 'number'
                                       ? `${val > 0 ? '+' : ''}${formatCurrency(val)} €`
-                                      : item.type === 'number' && typeof val === 'number' ? Math.round(val).toLocaleString('it-IT')
+                                      : item.type === 'number' && typeof val === 'number' ? formatNum(Math.round(val), 0)
                                       : typeof val === 'number' ? formatCurrency(val) : val
                                   }
                                 />
@@ -2813,9 +3067,9 @@ function DashboardContent() {
                               <tr key={r.isin} style={{ borderBottom: '1px solid #fecaca', background: '#fff5f5' }}>
                                 <td style={{ padding: '0.3rem 0.5rem', fontFamily: 'monospace', fontSize: '0.6rem' }}>{r.isin}</td>
                                 <td style={{ padding: '0.3rem 0.5rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.prevQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.calcQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#b91c1c' }}>{r.qtyDiff > 0 ? '+' : ''}{r.qtyDiff.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{formatNum(r.prevQty, 3)}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{formatNum(r.calcQty, 3)}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#b91c1c' }}>{r.qtyDiff > 0 ? '+' : ''}{formatNum(r.qtyDiff, 3)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -3109,9 +3363,9 @@ function DashboardContent() {
                               <td>{h.isin || ''}</td>
                               <td>{h.name || ''}</td>
                               <td>{h.currency || ''}</td>
-                              <td>{h.exchangeRate != null ? h.exchangeRate.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : missingVal}</td>
-                              <td>{h.initialQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
-                              <td>{h.price != null ? h.price.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : missingVal}</td>
+                              <td>{h.exchangeRate != null ? formatNum(h.exchangeRate, 4) : missingVal}</td>
+                              <td>{formatNum(h.initialQty, 3)}</td>
+                              <td>{h.price != null ? formatNum(h.price, 4) : missingVal}</td>
                               <td>{h.marketValue != null ? `€${formatCurrency(h.marketValue)}` : missingVal}</td>
                             </tr>
                           ))}
@@ -3132,8 +3386,8 @@ function DashboardContent() {
                             <td>{h.isin || ''}</td>
                             <td>{h.name || ''}</td>
                             <td>{h.currency || 'EUR'}</td>
-                            <td>{(h.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                            <td>{h.quantity ? h.quantity.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : ''}</td>
+                            <td>{formatNum(h.exchangeRate || 1, 4)}</td>
+                            <td>{h.quantity ? formatNum(h.quantity, 3) : ''}</td>
                             <td>{h.price && h.price !== 0 ? formatCurrency(h.price) : '0,00'}</td>
                             <td>€{formatCurrency(h.marketValue || 0)}</td>
                           </tr>
@@ -3187,11 +3441,11 @@ function DashboardContent() {
                                   </td>
                                   <td style={{ color: isVendita ? '#ef4444' : '#22c55e' }}>
                                     {typeof m.quantity === 'number' && m.quantity !== 0
-                                      ? `${isVendita ? '-' : '+'}${m.quantity.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
+                                      ? `${isVendita ? '-' : '+'}${formatNum(m.quantity, 3)}`
                                       : missingVal}
                                   </td>
                                   <td>{typeof m.price === 'number' && m.price !== 0 ? formatCurrency(m.price) : missingVal}</td>
-                                  <td>{(m.exchangeRate || 1).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                                  <td>{formatNum(m.exchangeRate || 1, 4)}</td>
                                   <td>{m.currency || 'EUR'}</td>
                                   <td>{(() => {
                                       const totalCosts = (m.fees || 0) + (m.taxes || 0);

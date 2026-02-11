@@ -57,19 +57,39 @@ interface AccountGroup {
   analyses: Analysis[]
 }
 
+type SlotFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual'
+
 interface TimelineSlot {
   key: string
   label: string
   year: number
   displayStart: string
   displayEnd: string
-  isMonthly: boolean
+  frequency: SlotFrequency
   dossierIds: string[]
   liquidityIds: string[]
 }
 
 function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getDocFreqAnalisi(a: Analysis): SlotFrequency {
+  const s = new Date(a.period_start), e = new Date(a.period_end)
+  const days = (e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)
+  if (isNaN(days)) return 'quarterly'
+  if (days < 45) return 'monthly'
+  if (days <= 150) return 'quarterly'
+  if (days <= 300) return 'semiannual'
+  return 'annual'
+}
+
+function isStandardPeriodAnalisi(days: number): boolean {
+  if (days >= 28 && days <= 31) return true   // mensile
+  if (days >= 89 && days <= 92) return true   // trimestrale
+  if (days >= 181 && days <= 184) return true // semestrale
+  if (days >= 365 && days <= 366) return true // annuale
+  return false
 }
 
 function buildTimeline(dossiers: Analysis[], liquidityDocs: Analysis[]): TimelineSlot[] {
@@ -83,19 +103,8 @@ function buildTimeline(dossiers: Analysis[], liquidityDocs: Analysis[]): Timelin
   if (allDates.length === 0) return []
 
   const minDate = new Date(Math.min(...allDates.map(d => d.getTime())))
-  // Extend timeline to at least the current date
   const now = new Date()
   const maxDate = new Date(Math.max(...allDates.map(d => d.getTime()), now.getTime()))
-
-  // Identify quarters that contain monthly docs
-  const monthlyQs = new Set<string>()
-  all.forEach(a => {
-    const s = new Date(a.period_start), e = new Date(a.period_end)
-    const days = (e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)
-    if (days < 45 && !isNaN(days)) {
-      monthlyQs.add(`${e.getFullYear()}-Q${Math.ceil((e.getMonth() + 1) / 3)}`)
-    }
-  })
 
   function docEndInMonth(a: Analysis, y: number, m: number) {
     const e = new Date(a.period_end)
@@ -105,44 +114,127 @@ function buildTimeline(dossiers: Analysis[], liquidityDocs: Analysis[]): Timelin
     const e = new Date(a.period_end)
     return e.getFullYear() === y && Math.ceil((e.getMonth() + 1) / 3) === q
   }
-  function isQuarterlyDoc(a: Analysis) {
-    const s = new Date(a.period_start), e = new Date(a.period_end)
-    const days = (e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)
-    return days >= 45
+  function docEndInHalf(a: Analysis, y: number, h: number) {
+    const e = new Date(a.period_end)
+    const halfStart = h === 1 ? 0 : 6
+    return e.getFullYear() === y && e.getMonth() >= halfStart && e.getMonth() < halfStart + 6
+  }
+  function docEndInYear(a: Analysis, y: number) {
+    return new Date(a.period_end).getFullYear() === y
   }
 
+  const FREQ_P: Record<SlotFrequency, number> = { monthly: 4, quarterly: 3, semiannual: 2, annual: 1 }
   const mNames = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC']
   const result: TimelineSlot[] = []
-  // Show full years: from Q1 of earliest year to Q4 of latest year
   const sy = minDate.getFullYear(), ey = maxDate.getFullYear()
 
+  // Track current frequency across years (forward propagation)
+  let currentFreq: SlotFrequency = 'quarterly'
+
   for (let y = sy; y <= ey; y++) {
-    for (let q = 1; q <= 4; q++) {
-      const qm = (q - 1) * 3
-      if (monthlyQs.has(`${y}-Q${q}`)) {
-        for (let m = qm; m < qm + 3; m++) {
+    // Build frequency map for this year: 12 months, forward propagation
+    const freqMap: SlotFrequency[] = Array(12).fill(currentFreq)
+    const yearDocs = all.filter(a => docEndInYear(a, y))
+      .sort((a, b) => new Date(a.period_end).getTime() - new Date(b.period_end).getTime())
+
+    let lastDocEndMonth = 0
+    yearDocs.forEach(doc => {
+      const endMonth = new Date(doc.period_end).getMonth()
+      const docFreq = getDocFreqAnalisi(doc)
+      // Fill gap with current frequency
+      for (let m = lastDocEndMonth; m < endMonth; m++) freqMap[m] = currentFreq
+      // Doc's own month
+      freqMap[endMonth] = docFreq
+      // Forward propagation
+      currentFreq = docFreq
+      lastDocEndMonth = endMonth + 1
+    })
+    // Fill remaining months
+    for (let m = lastDocEndMonth; m < 12; m++) freqMap[m] = currentFreq
+
+    // Build slots from frequency map
+    let m = 0
+    while (m < 12) {
+      const freq = freqMap[m]
+
+      if (freq === 'annual') {
+        result.push({
+          key: `${y}-Y`, label: `${y}`, year: y,
+          displayStart: isoDate(new Date(y - 1, 11, 31)),
+          displayEnd: isoDate(new Date(y, 11, 31)),
+          frequency: 'annual',
+          dossierIds: dossiers.filter(a => docEndInYear(a, y)).map(a => a.id),
+          liquidityIds: liquidityDocs.filter(a => docEndInYear(a, y)).map(a => a.id),
+        })
+        m = 12
+      } else if (freq === 'semiannual') {
+        const h = m < 6 ? 1 : 2
+        const hStart = h === 1 ? 0 : 6
+        // Check if any month in this half is more granular
+        const halfSlice = freqMap.slice(hStart, hStart + 6)
+        if (halfSlice.some(f => FREQ_P[f] > FREQ_P['semiannual'])) {
+          // Mixed: render this month individually
+          const q = Math.floor(m / 3) + 1
           result.push({
-            key: `${y}-M${m}`,
-            label: mNames[m],
-            year: y,
+            key: `${y}-M${m}`, label: mNames[m], year: y,
             displayStart: isoDate(new Date(y, m, 0)),
             displayEnd: isoDate(new Date(y, m + 1, 0)),
-            isMonthly: true,
-            dossierIds: dossiers.filter(a => docEndInMonth(a, y, m) || (isQuarterlyDoc(a) && docEndInQuarter(a, y, q))).map(a => a.id),
-            liquidityIds: liquidityDocs.filter(a => docEndInMonth(a, y, m) || (isQuarterlyDoc(a) && docEndInQuarter(a, y, q))).map(a => a.id),
+            frequency: 'monthly',
+            dossierIds: dossiers.filter(a => docEndInMonth(a, y, m) || docEndInQuarter(a, y, q)).map(a => a.id),
+            liquidityIds: liquidityDocs.filter(a => docEndInMonth(a, y, m) || docEndInQuarter(a, y, q)).map(a => a.id),
           })
+          m++
+        } else {
+          result.push({
+            key: `${y}-H${h}`, label: `H${h}`, year: y,
+            displayStart: isoDate(new Date(y, hStart, 0)),
+            displayEnd: isoDate(new Date(y, hStart + 6, 0)),
+            frequency: 'semiannual',
+            dossierIds: dossiers.filter(a => docEndInHalf(a, y, h)).map(a => a.id),
+            liquidityIds: liquidityDocs.filter(a => docEndInHalf(a, y, h)).map(a => a.id),
+          })
+          m = hStart + 6
+        }
+      } else if (freq === 'quarterly') {
+        const q = Math.floor(m / 3) + 1
+        const qStart = (q - 1) * 3
+        const qEnd = q * 3
+        // Check if any month in this quarter is more granular (monthly)
+        const qSlice = freqMap.slice(qStart, qEnd)
+        if (qSlice.includes('monthly')) {
+          // Mixed: render this month individually
+          result.push({
+            key: `${y}-M${m}`, label: mNames[m], year: y,
+            displayStart: isoDate(new Date(y, m, 0)),
+            displayEnd: isoDate(new Date(y, m + 1, 0)),
+            frequency: 'monthly',
+            dossierIds: dossiers.filter(a => docEndInMonth(a, y, m) || (getDocFreqAnalisi(a) !== 'monthly' && docEndInQuarter(a, y, q))).map(a => a.id),
+            liquidityIds: liquidityDocs.filter(a => docEndInMonth(a, y, m) || (getDocFreqAnalisi(a) !== 'monthly' && docEndInQuarter(a, y, q))).map(a => a.id),
+          })
+          m++
+        } else {
+          result.push({
+            key: `${y}-Q${q}`, label: `Q${q}`, year: y,
+            displayStart: isoDate(new Date(y, qStart, 0)),
+            displayEnd: isoDate(new Date(y, qEnd, 0)),
+            frequency: 'quarterly',
+            dossierIds: dossiers.filter(a => docEndInQuarter(a, y, q)).map(a => a.id),
+            liquidityIds: liquidityDocs.filter(a => docEndInQuarter(a, y, q)).map(a => a.id),
+          })
+          m = qEnd
         }
       } else {
+        // monthly
+        const q = Math.floor(m / 3) + 1
         result.push({
-          key: `${y}-Q${q}`,
-          label: `Q${q}`,
-          year: y,
-          displayStart: isoDate(new Date(y, qm, 0)),
-          displayEnd: isoDate(new Date(y, qm + 3, 0)),
-          isMonthly: false,
-          dossierIds: dossiers.filter(a => docEndInQuarter(a, y, q)).map(a => a.id),
-          liquidityIds: liquidityDocs.filter(a => docEndInQuarter(a, y, q)).map(a => a.id),
+          key: `${y}-M${m}`, label: mNames[m], year: y,
+          displayStart: isoDate(new Date(y, m, 0)),
+          displayEnd: isoDate(new Date(y, m + 1, 0)),
+          frequency: 'monthly',
+          dossierIds: dossiers.filter(a => docEndInMonth(a, y, m) || (getDocFreqAnalisi(a) !== 'monthly' && docEndInQuarter(a, y, q))).map(a => a.id),
+          liquidityIds: liquidityDocs.filter(a => docEndInMonth(a, y, m) || (getDocFreqAnalisi(a) !== 'monthly' && docEndInQuarter(a, y, q))).map(a => a.id),
         })
+        m++
       }
     }
   }
@@ -151,7 +243,9 @@ function buildTimeline(dossiers: Analysis[], liquidityDocs: Analysis[]): Timelin
 }
 
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+  const parts = Math.abs(value).toFixed(2).split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return (value < 0 ? '-' : '') + parts.join(',');
 }
 
 function formatPct(value: number): string {
@@ -167,8 +261,8 @@ function formatDate(dateStr: string): string {
 function getPeriodType(start: string, end: string): string {
   const days = (new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
   if (days < 45) return 'Mensile'
-  if (days < 120) return 'Trimestrale'
-  if (days < 200) return 'Semestrale'
+  if (days <= 150) return 'Trimestrale'
+  if (days <= 300) return 'Semestrale'
   return 'Annuale'
 }
 
@@ -826,6 +920,10 @@ function AnalysisContent() {
   const valClass = (v: number) => v >= 0 ? styles.valPositive : styles.valNegative
   const valSign = (v: number) => v >= 0 ? '+' : ''
 
+  // Frequency helpers for timeline rendering
+  const freqLabel = (f: SlotFrequency) => ({ monthly: 'Mensile', quarterly: 'Trimestrale', semiannual: 'Semestrale', annual: 'Annuale' }[f] || f)
+  const freqSizeClass = (f: SlotFrequency) => ({ monthly: '', quarterly: styles.tCardQuarterly, semiannual: styles.tCardSemiannual, annual: styles.tCardAnnual }[f] || '')
+
   return (
     <div className={styles.analysisWrapper}>
       {/* HEADER */}
@@ -883,9 +981,22 @@ function AnalysisContent() {
                             const active = s.key === selectedSlot
                             const matchingIds = s.dossierIds.filter(did => groupIds.has(did))
                             const loaded = matchingIds.length > 0
+                            const matchedDoc = loaded ? group.analyses.find(a => matchingIds.includes(a.id)) : null
+                            let propWidth: string | undefined
+                            let daysLabel: string | undefined
+                            if (matchedDoc?.period_start && matchedDoc?.period_end) {
+                              const ad = Math.round((new Date(matchedDoc.period_end).getTime() - new Date(matchedDoc.period_start).getTime()) / 86400000)
+                              const mo = Math.max(1, ad / 30.44)
+                              const gp = Math.max(0, mo - 1)
+                              propWidth = `calc(${(mo * 110).toFixed(0)}px + ${(gp * 0.4).toFixed(1)}rem)`
+                              if (!isStandardPeriodAnalisi(ad)) daysLabel = `${ad}gg`
+                            }
                             return (
-                              <button key={s.key} className={`${styles.tCard} ${!s.isMonthly ? styles.tCardQuarterly : ''} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
-                                <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
+                              <button key={s.key}
+                                className={`${styles.tCard} ${!propWidth ? freqSizeClass(s.frequency) : ''} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`}
+                                style={propWidth ? { width: propWidth, minWidth: propWidth } : undefined}
+                                onClick={() => setSelectedSlot(s.key)}>
+                                <span className={styles.tCardType}>{freqLabel(s.frequency)}{daysLabel && <span style={{ fontSize: '0.5rem', opacity: 0.7, marginLeft: '0.2rem' }}>{daysLabel}</span>}</span>
                                 <div className={styles.tCardDates}>
                                   <span>{formatDate(s.displayStart)}</span>
                                   <span className={styles.tCardArrow}>&darr;</span>
@@ -913,9 +1024,22 @@ function AnalysisContent() {
                             const active = s.key === selectedSlot
                             const matchingIds = s.liquidityIds.filter(lid => groupIds.has(lid))
                             const loaded = matchingIds.length > 0
+                            const matchedDoc = loaded ? group.analyses.find(a => matchingIds.includes(a.id)) : null
+                            let liqPropWidth: string | undefined
+                            let liqDaysLabel: string | undefined
+                            if (matchedDoc?.period_start && matchedDoc?.period_end) {
+                              const ad = Math.round((new Date(matchedDoc.period_end).getTime() - new Date(matchedDoc.period_start).getTime()) / 86400000)
+                              const mo = Math.max(1, ad / 30.44)
+                              const gp = Math.max(0, mo - 1)
+                              liqPropWidth = `calc(${(mo * 110).toFixed(0)}px + ${(gp * 0.4).toFixed(1)}rem)`
+                              if (!isStandardPeriodAnalisi(ad)) liqDaysLabel = `${ad}gg`
+                            }
                             return (
-                              <button key={s.key} className={`${styles.tCard} ${!s.isMonthly ? styles.tCardQuarterly : ''} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`} onClick={() => setSelectedSlot(s.key)}>
-                                <span className={styles.tCardType}>{s.isMonthly ? 'Mensile' : 'Trimestrale'}</span>
+                              <button key={s.key}
+                                className={`${styles.tCard} ${!liqPropWidth ? freqSizeClass(s.frequency) : ''} ${active ? styles.tCardActive : ''} ${loaded ? styles.tCardLoaded : styles.tCardEmpty}`}
+                                style={liqPropWidth ? { width: liqPropWidth, minWidth: liqPropWidth } : undefined}
+                                onClick={() => setSelectedSlot(s.key)}>
+                                <span className={styles.tCardType}>{freqLabel(s.frequency)}{liqDaysLabel && <span style={{ fontSize: '0.5rem', opacity: 0.7, marginLeft: '0.2rem' }}>{liqDaysLabel}</span>}</span>
                                 <div className={styles.tCardDates}>
                                   <span>{formatDate(s.displayStart)}</span>
                                   <span className={styles.tCardArrow}>&darr;</span>

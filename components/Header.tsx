@@ -43,7 +43,7 @@ export default function Header() {
       window.removeEventListener('scroll', handleScroll)
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [supabase.auth])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
