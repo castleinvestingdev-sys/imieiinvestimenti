@@ -1749,7 +1749,7 @@ function DashboardContent() {
         </div>
       </header>
 
-      <section className={styles.mainContent}>
+      <section className={styles.mainContent} style={hasActiveUploads && !clienteFilter ? { display: 'none' } : undefined}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
             {showTrash ? `Cestino (${trashedAnalyses.length})` : `I tuoi Conti (${bankGroups.length}) e Estratti Conto (${analyses.length})`}
