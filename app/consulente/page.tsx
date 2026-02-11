@@ -6,14 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
 import styles from './Consulente.module.css'
-
-// Normalize holder name: "FRIGERI MARIA CRISTINA" → "Frigeri Maria Cristina"
-function normalizeHolderName(raw: string): string {
-  if (!raw) return 'Cliente Sconosciuto'
-  return raw.trim().replace(/\s+/g, ' ').split(' ').map(
-    w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
-  ).join(' ')
-}
+import { normalizeHolder as normalizeHolderName } from '@/lib/utils'
 
 interface ClientData {
   holder: string

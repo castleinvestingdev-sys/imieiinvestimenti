@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import styles from './Dashboard.module.css'
+import { useUpload } from '@/contexts/UploadContext'
+import { normalizeHolder } from '@/lib/utils'
 
 interface Analysis {
   id: string
@@ -67,20 +69,8 @@ function DashboardContent() {
   const clienteFilter = searchParams.get('cliente')
   const supabase = createClient()
 
-  // Multi-file upload state
-  interface UploadingFile {
-    id: string;
-    name: string;
-    status: 'queued' | 'uploading' | 'analyzing' | 'done' | 'error';
-    progress: number;
-    error?: string;
-    index?: number;
-    total?: number;
-    stage?: string; // Detailed stage description
-    startTime?: number; // Track upload start time
-  }
-  const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
-  const [isProcessing, setIsProcessing] = useState(false)
+  // Upload state from context
+  const { uploadQueue, isProcessing, addFilesToQueue: ctxAddFilesToQueue, registerOnSuccess, setUploadQueue, hasActiveUploads } = useUpload()
 
   // Confirm modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -90,9 +80,6 @@ function DashboardContent() {
     onConfirm: () => void;
     onCancel: () => void;
   } | null>(null)
-  const fileQueueRef = useRef<{ id: string; file: File }[]>([])
-  const totalFilesRef = useRef<number>(0)
-  const currentFileIndexRef = useRef<number>(0)
   const dropzoneRef = useRef<HTMLDivElement>(null)
   const batchAccumulatorRef = useRef<File[]>([])
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -145,16 +132,6 @@ function DashboardContent() {
       }, 16) // ~1 frame at 60fps
     })
   }, [])
-
-
-
-  // Normalize holder name: "FRIGERI MARIA CRISTINA" → "Frigeri Maria Cristina"
-  const normalizeHolder = (raw: string) => {
-    if (!raw) return 'Cliente Sconosciuto'
-    return raw.trim().replace(/\s+/g, ' ').split(' ').map(
-      (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
-    ).join(' ')
-  }
 
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -752,328 +729,55 @@ function DashboardContent() {
     checkAuth()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Process upload queue — up to 2 files in parallel
-  const CONCURRENT_UPLOADS = 1
-  const processQueue = useCallback(async () => {
-    if (!user || isProcessing || fileQueueRef.current.length === 0) return
-
-    console.log('--- START PROCESS QUEUE ---')
-    console.log('Files in queue:', fileQueueRef.current.length)
-    setIsProcessing(true)
-
-    if (!isProcessing && uploadQueue.length === 0) {
-      currentFileIndexRef.current = 0
-    }
-
-    let lastHolder: string | null = null
-    let successCount = 0
-    let lastAnalysisId: string | null = null
-    const totalFiles = fileQueueRef.current.length
-    const isBatch = totalFiles > 1
-
-    // Process a single file (extracted for parallel use)
-    const processOneFile = async (fileId: string, file: File) => {
-      setUploadQueue(prev => prev.map(f => {
-        if (f.id !== fileId) return f
-        return { ...f, status: f.status === 'done' ? f.status : 'uploading' as const, progress: f.status === 'done' ? 100 : Math.max(f.progress, 5) }
-      }))
-
-      try {
-        const uploadStartTime = Date.now()
-        const expectedDuration = 90
-        const progressInterval = setInterval(() => {
-          setUploadQueue(prev => prev.map(f => {
-            if (f.id === fileId && (f.status === 'uploading' || f.status === 'analyzing')) {
-              const elapsed = (Date.now() - uploadStartTime) / 1000
-              const stages = [
-                [0, 'Caricamento PDF'],
-                [5, 'Conversione documento'],
-                [10, 'Invio a OpenAI'],
-                [15, 'Analisi AI in corso'],
-                [30, 'Estrazione movimenti'],
-                [45, 'Lettura portafoglio titoli'],
-                [55, 'Validazione dati'],
-                [65, 'Calcolo commissioni'],
-                [75, 'Controllo coerenza'],
-                [85, 'Normalizzazione dati'],
-                [95, 'Finalizzazione'],
-              ] as const
-              const dots = '.'.repeat((Math.floor(elapsed) % 3) + 1)
-              const currentStage = [...stages].reverse().find(([t]) => elapsed >= t)?.[1] || stages[0][1]
-              const ratio = elapsed / expectedDuration
-              const progress = Math.min(98, Math.round(98 * (1 - Math.exp(-2.5 * ratio))))
-              return { ...f, progress, stage: currentStage + dots, startTime: uploadStartTime }
-            }
-            return f
-          }))
-        }, 1000)
-
+  // Register onSuccess callback: refresh analyses + scroll to new card
+  useEffect(() => {
+    if (!user) return
+    registerOnSuccess(async (analysisId?: string, holder?: string) => {
+      await fetchAnalyses(user.id)
+      if (analysisId) {
         setTimeout(() => {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'analyzing' as const, stage: 'Analisi AI avviata...' } : f
-          ))
-        }, 3000)
-
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('userId', user.id)
-
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000)
-
-        console.log('Sending request for:', file.name)
-        let response: Response
-        try {
-          response = await fetch('/api/parse-pdf', {
-            method: 'POST',
-            body: formData,
-            signal: controller.signal,
-          })
-        } finally {
-          clearTimeout(timeoutId)
-        }
-        console.log('Response status:', response.status, file.name)
-
-        clearInterval(progressInterval)
-        const result = await response.json()
-        console.log('📁 Storage status:', result.storageStatus, file.name)
-
-        const onFileSuccess = async (analysisId?: string, holder?: string) => {
-          if (holder) lastHolder = holder
-          successCount++
-          lastAnalysisId = analysisId || null
-          await fetchAnalyses(user.id)
-          if (analysisId) {
-            setTimeout(() => {
-              const card = document.querySelector(`[data-analysis-id="${analysisId}"]`)
-              if (card) {
-                const bankBlock = card.closest('[class*="bankGroupBlock"]')
-                if (bankBlock) (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
-                const scroller = card.closest('[class*="dualTimelineScroller"]')
-                if (scroller) {
-                  const scrollerRect = scroller.getBoundingClientRect()
-                  const cardRect = card.getBoundingClientRect()
-                  const scrollLeft = (scroller as HTMLElement).scrollLeft + cardRect.left - scrollerRect.left - scrollerRect.width / 2 + cardRect.width / 2
-                  scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' })
-                }
-              }
-            }, 600)
-          }
-        }
-
-        if (result.success) {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
-          ))
-          await onFileSuccess(result.analysisId, result.holder)
-
-        } else if (result.isDuplicate && response.status === 409) {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, stage: 'Ricalcolo...' } : f
-          ))
-          formData.append('force', 'true')
-          if (result.existingAnalysisId) formData.append('replaceAnalysisId', result.existingAnalysisId)
-          const retryController = new AbortController()
-          const retryTimeoutId = setTimeout(() => retryController.abort(), 600000)
-          const retryStartTime = Date.now()
-          const retryProgressInterval = setInterval(() => {
-            setUploadQueue(prev => prev.map(f => {
-              if (f.id !== fileId || f.status !== 'uploading') return f
-              const elapsed = Date.now() - retryStartTime
-              const progress = Math.min(95, Math.round(5 + 90 * (1 - Math.exp(-elapsed / 120000))))
-              return { ...f, progress }
-            }))
-          }, 1000)
-          try {
-            const retryResponse = await fetch('/api/parse-pdf', { method: 'POST', body: formData, signal: retryController.signal })
-            clearTimeout(retryTimeoutId)
-            clearInterval(retryProgressInterval)
-            const retryResult = await retryResponse.json()
-            if (retryResult.success) {
-              setUploadQueue(prev => prev.map(f =>
-                f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
-              ))
-              await onFileSuccess(retryResult.analysisId, retryResult.holder)
-            } else {
-              setUploadQueue(prev => prev.map(f =>
-                f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
-              ))
+          const card = document.querySelector(`[data-analysis-id="${analysisId}"]`)
+          if (card) {
+            const bankBlock = card.closest('[class*="bankGroupBlock"]')
+            if (bankBlock) (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
+            const scroller = card.closest('[class*="dualTimelineScroller"]')
+            if (scroller) {
+              const scrollerRect = scroller.getBoundingClientRect()
+              const cardRect = card.getBoundingClientRect()
+              const scrollLeft = (scroller as HTMLElement).scrollLeft + cardRect.left - scrollerRect.left - scrollerRect.width / 2 + cardRect.width / 2
+              scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' })
             }
-          } catch (retryErr: any) {
-            clearTimeout(retryTimeoutId)
-            clearInterval(retryProgressInterval)
-            setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryErr.name === 'AbortError' ? 'Timeout ricalcolo' : retryErr.message } : f
-            ))
           }
-        } else if (result.error?.includes('rate') || result.error?.includes('limit') || result.error?.includes('429')) {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
-          ))
-          fileQueueRef.current.push({ id: fileId, file })
-          await new Promise(resolve => setTimeout(resolve, 10000))
-        } else {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
-          ))
-        }
-      } catch (error: any) {
-        const errorMsg = error.name === 'AbortError'
-          ? 'Timeout: l\'analisi ha superato 10 minuti. Riprova.'
-          : (error.message || 'Errore di rete')
-        setUploadQueue(prev => prev.map(f =>
-          f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: errorMsg } : f
-        ))
+        }, 600)
       }
-    }
-
-    // Worker pool: N lanes pull from the shared queue in parallel
-    // Add pacing delay between files to avoid OpenAI rate limits
-    const workers = Array.from(
-      { length: Math.min(CONCURRENT_UPLOADS, fileQueueRef.current.length) },
-      async (_, workerIdx) => {
-        while (fileQueueRef.current.length > 0) {
-          const item = fileQueueRef.current.shift()
-          if (!item) break
-          currentFileIndexRef.current++
-          await processOneFile(item.id, item.file)
-          // Pacing: small delay between files to reduce rate limiting
-          if (fileQueueRef.current.length > 0) {
-            await new Promise(resolve => setTimeout(resolve, 2000))
-          }
+      // Navigate to holder if different
+      if (holder) {
+        const normalizedLastHolder = normalizeHolder(holder)
+        if ((clienteFilter && normalizedLastHolder !== normalizeHolder(clienteFilter)) || !clienteFilter) {
+          router.push(`/dashboard?cliente=${encodeURIComponent(normalizedLastHolder)}`)
         }
       }
-    )
-    await Promise.all(workers)
+    })
+    return () => registerOnSuccess(null)
+  }, [user, fetchAnalyses, registerOnSuccess, clienteFilter, router])
 
-    setIsProcessing(false)
-
-    // --- Batch complete: navigate to holder if different ---
-    if (successCount > 0 && lastHolder) {
-      const normalizedLastHolder = normalizeHolder(lastHolder)
-      if ((clienteFilter && normalizedLastHolder !== normalizeHolder(clienteFilter)) || !clienteFilter) {
-        router.push(`/dashboard?cliente=${encodeURIComponent(normalizedLastHolder)}`)
-      }
-    }
-
-    // Clear completed files after 5 seconds
-    setTimeout(() => {
-      setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
-    }, 5000)
-  }, [user, fetchAnalyses])
-
-  // EFFECT: Process queue when items are available and not already processing
-  useEffect(() => {
-    if (!isProcessing && fileQueueRef.current.length > 0) {
-      // Small delay (500ms) to allow multiple drop/select events to batch up
-      const timer = setTimeout(() => {
-        if (!isProcessing && fileQueueRef.current.length > 0) {
-          console.log('[QUEUE-BATCH] Starting processQueue for', fileQueueRef.current.length, 'files')
-          processQueue()
-        }
-      }, 500)
-      return () => clearTimeout(timer)
-    }
-  }, [isProcessing, processQueue, uploadQueue])
-
-  // Prevent navigation while uploads are in progress
-  const hasActiveUploads = uploadQueue.some(f => f.status === 'uploading' || f.status === 'analyzing' || f.status === 'queued') || isProcessing
-  useEffect(() => {
-    if (!hasActiveUploads) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [hasActiveUploads])
-
-  // Safe navigation: warns user if uploads are in progress before navigating away
-  // Saves scroll positions (page + timelines) for restoration on return
+  // Navigate with scroll state preservation
   const safeNavigate = (href: string) => {
-    const doNavigate = () => {
-      // Save page scroll + first timeline scroll position
-      const scrollState: { pageY: number; timelineX: number } = {
-        pageY: window.scrollY,
-        timelineX: 0
-      }
-      const firstTimeline = timelineRefs.current.values().next().value
-      if (firstTimeline) scrollState.timelineX = firstTimeline.scrollLeft
-      try { sessionStorage.setItem('dashboard_scroll', JSON.stringify(scrollState)) } catch {}
-      router.push(href)
+    const scrollState: { pageY: number; timelineX: number } = {
+      pageY: window.scrollY,
+      timelineX: 0
     }
-
-    if (hasActiveUploads) {
-      showConfirmModal(
-        'Upload in corso',
-        'Ci sono PDF in fase di caricamento. Se esci ora, il caricamento verrà annullato. Vuoi uscire comunque?'
-      ).then((confirmed) => {
-        if (confirmed) doNavigate()
-      })
-    } else {
-      doNavigate()
-    }
+    const firstTimeline = timelineRefs.current.values().next().value
+    if (firstTimeline) scrollState.timelineX = firstTimeline.scrollLeft
+    try { sessionStorage.setItem('dashboard_scroll', JSON.stringify(scrollState)) } catch {}
+    router.push(href)
   }
 
-  // DEBUG EFFECT: Log uploadQueue status changes only (not progress updates)
-  const prevStatusRef = useRef<string>('')
-  useEffect(() => {
-    if (uploadQueue.length > 0) {
-      const statusKey = uploadQueue.map(f => `${f.name}:${f.status}`).join('|')
-      if (statusKey !== prevStatusRef.current) {
-        prevStatusRef.current = statusKey
-        console.log('[DEBUG-STATE] UploadQueue:', uploadQueue.map(f => `${f.name} (${f.status})`))
-      }
-    }
-  }, [uploadQueue])
-
-  // Add files to queue
+  // Local wrapper: injects user.id into context addFilesToQueue
   const addFilesToQueue = useCallback((files: FileList | File[]) => {
-    const newFiles: UploadingFile[] = []
-    const filesToProcess: { id: string; file: File }[] = []
-
-    console.log(`[QUEUE] addFilesToQueue: analizzando ${Array.from(files).length} oggetti`)
-
-    Array.from(files).forEach((file, index) => {
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-      console.log(`[QUEUE] Controllo: ${file.name} (Size: ${file.size}, Type: ${file.type}, isPdf: ${isPdf})`)
-
-      if (isPdf) {
-        // Use a more unique ID to avoid collisions (timestamp + index + random string)
-        const fileId = `${file.name}-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 9)}`
-        newFiles.push({
-          id: fileId,
-          name: file.name,
-          status: 'queued',
-          progress: 0
-        })
-        filesToProcess.push({ id: fileId, file })
-      } else {
-        console.warn(`[QUEUE] File SCARTATO: ${file.name} (Non PDF o corrotto)`)
-      }
-    })
-
-    if (newFiles.length === 0) {
-      console.error('[QUEUE] Nessun file PDF valido trovato nel batch')
-      alert('Per favore carica solo file PDF')
-      return
-    }
-
-    console.log(`[QUEUE] addFilesToQueue: aggiunta di ${newFiles.length} file`)
-
-    setUploadQueue(prev => {
-      const combined = [...prev, ...newFiles]
-      const totalInSession = combined.length
-
-      // Update EVERY file in the list with the NEW total and correct index
-      return combined.map((f, i) => ({
-        ...f,
-        index: i + 1,
-        total: totalInSession
-      }))
-    })
-    fileQueueRef.current.push(...filesToProcess)
-    console.log('[QUEUE] Added to internal ref. Pending:', fileQueueRef.current.length)
-  }, [])
+    if (!user) return
+    ctxAddFilesToQueue(files, user.id, clienteFilter || undefined)
+  }, [user, ctxAddFilesToQueue, clienteFilter])
 
   const [dragCounter, setDragCounter] = useState(0)
   const [fullPageDragCounter, setFullPageDragCounter] = useState(0)

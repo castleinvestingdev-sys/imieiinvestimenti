@@ -4,6 +4,7 @@ import "./globals.css"
 import "./legacy.css"
 import Header from "@/components/Header"
 import Footer from "@/components/Footer"
+import Providers from "./providers"
 
 const inter = Inter({
   subsets: ["latin"],
@@ -45,9 +46,11 @@ export default function RootLayout({
   return (
     <html lang="it" data-scroll-behavior="smooth">
       <body className={`${inter.variable} font-sans antialiased`}>
-        <Header />
-        <main className="min-h-screen">{children}</main>
-        <Footer />
+        <Providers>
+          <Header />
+          <main className="min-h-screen">{children}</main>
+          <Footer />
+        </Providers>
         <script src="https://accounts.google.com/gsi/client" async defer></script>
       </body>
     </html>
