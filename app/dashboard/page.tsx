@@ -1288,58 +1288,80 @@ function DashboardContent() {
   }
 
   // Build a frequency map for the year: for each month, determine expected frequency
-  const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): DocFrequency[] => {
-    // Array of 12 months, default to 'quarterly'
-    const freqMap: DocFrequency[] = Array(12).fill('quarterly');
-
+  // Returns null if the account has no documents for this year (important for merge logic)
+  const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): DocFrequency[] | null => {
     // Get all documents for this year, sorted by end date
     const yearDocs = accountAnalyses
       .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year)
       .sort((a, b) => new Date(a.period_end).getTime() - new Date(b.period_end).getTime());
 
-    let currentFreq: DocFrequency = 'quarterly';
-    let lastDocEndMonth = 0;
+    // No documents → return null so merge ignores this account
+    if (yearDocs.length === 0) return null;
+
+    const freqMap: DocFrequency[] = Array(12).fill('quarterly');
 
     yearDocs.forEach(doc => {
-      const endMonth = new Date(doc.period_end).getMonth(); // 0-11
       const docFreq = getDocFrequency(doc);
+      const endDate = new Date(doc.period_end);
+      const endMonth = endDate.getMonth(); // 0-11
 
-      // Fill from last document end to this document end with current frequency
-      for (let m = lastDocEndMonth; m < endMonth; m++) {
-        freqMap[m] = currentFreq;
+      // Determine start month of this document within this year
+      let startMonth = 0;
+      if (doc.period_start) {
+        const startDate = new Date(doc.period_start);
+        if (startDate.getFullYear() === year) {
+          startMonth = startDate.getMonth();
+        }
+        // If start is in previous year, startMonth stays 0
       }
 
-      // This document's month uses its own frequency
-      freqMap[endMonth] = docFreq;
-
-      // Update current frequency for future months (forward propagation only)
-      currentFreq = docFreq;
-      lastDocEndMonth = endMonth + 1;
+      // Fill the entire range covered by this document with its frequency
+      for (let m = startMonth; m <= endMonth; m++) {
+        // Only upgrade: don't overwrite a more granular frequency from a previous document
+        if (FREQ_PRIORITY[docFreq] <= FREQ_PRIORITY[freqMap[m]] || freqMap[m] === 'quarterly') {
+          freqMap[m] = docFreq;
+        }
+      }
     });
 
-    // Fill remaining months with current frequency
-    for (let m = lastDocEndMonth; m < 12; m++) {
-      freqMap[m] = currentFreq;
+    // Forward-fill remaining months after the last document with its frequency
+    const lastDoc = yearDocs[yearDocs.length - 1];
+    const lastFreq = getDocFrequency(lastDoc);
+    const lastEndMonth = new Date(lastDoc.period_end).getMonth();
+    for (let m = lastEndMonth + 1; m < 12; m++) {
+      freqMap[m] = lastFreq;
     }
 
     return freqMap;
   };
 
   // Build a merged frequency map across ALL accounts in a bank group for a given year.
+  // Only considers accounts that have actual documents for this year.
   // If ANY account has 'monthly' for a given month, the merged result is 'monthly'.
   // This ensures all rows within the same year group share the same slot structure → vertical alignment.
   const buildMergedFrequencyMap = (group: BankGroup, year: number): DocFrequency[] => {
-    const merged: DocFrequency[] = Array(12).fill('quarterly');
     const allAccounts = [...group.dossiers, ...group.liquidityAccounts];
-    allAccounts.forEach(account => {
-      const accountMap = buildYearFrequencyMap(account.analyses, year);
-      accountMap.forEach((freq, m) => {
-        // Priority: monthly > quarterly > semiannual > annual (most granular wins for alignment)
+
+    // Collect frequency maps only from accounts with documents in this year
+    const accountMaps = allAccounts
+      .map(account => buildYearFrequencyMap(account.analyses, year))
+      .filter((m): m is DocFrequency[] => m !== null);
+
+    // If no account has documents → default to quarterly
+    if (accountMaps.length === 0) return Array(12).fill('quarterly');
+
+    // Start from the first account's map
+    const merged: DocFrequency[] = [...accountMaps[0]];
+
+    // Merge remaining: most granular wins for alignment
+    for (let i = 1; i < accountMaps.length; i++) {
+      accountMaps[i].forEach((freq, m) => {
         if (FREQ_PRIORITY[freq] > FREQ_PRIORITY[merged[m]]) {
           merged[m] = freq;
         }
       });
-    });
+    }
+
     return merged;
   };
 
