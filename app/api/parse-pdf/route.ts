@@ -2221,6 +2221,24 @@ Rispondi SOLO con questo JSON:
             }
         })
 
+        // Fix Italian decimal misinterpretation: if sum of holdings ≈ 1000x the extracted total,
+        // Gemini likely read "44.200" (44.20 EUR) as 44200 (treating . as thousands separator)
+        const extractedTotalForScale = parsed.summary?.portfolio_total_extracted || 0
+        if (extractedTotalForScale > 0 && normalizedHoldings.length > 0) {
+            const sumHoldings = normalizedHoldings.reduce((s: number, h: any) => s + (h.marketValue || 0), 0)
+            for (const factor of [1000, 1000000]) {
+                const ratio = sumHoldings / extractedTotalForScale
+                if (ratio > factor * 0.8 && ratio < factor * 1.2) {
+                    logProgress('FIX SCALE', `Somma holdings (${sumHoldings.toFixed(0)}) ≈ ${factor}x totale PDF (${extractedTotalForScale.toFixed(0)}). Correggo price/marketValue ÷${factor}`)
+                    normalizedHoldings.forEach((h: any) => {
+                        h.price = (h.price || 0) / factor
+                        h.marketValue = (h.marketValue || 0) / factor
+                    })
+                    break
+                }
+            }
+        }
+
         // Build holdings map for cross-validating movement quantities
         const holdingsQtyMap: Record<string, number> = {}
         normalizedHoldings.forEach((h: any) => {
