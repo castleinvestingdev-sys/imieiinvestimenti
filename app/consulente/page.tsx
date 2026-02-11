@@ -66,7 +66,7 @@ export default function ConsulentePage() {
     // Group by holder
     const clientsMap = new Map<string, ClientData>()
 
-    data?.forEach(analysis => {
+    data?.forEach((analysis: any) => {
       const holder = normalizeHolderName(analysis.costs_breakdown?.holder)
       const existing = clientsMap.get(holder)
 

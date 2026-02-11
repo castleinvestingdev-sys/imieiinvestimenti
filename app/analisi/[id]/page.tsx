@@ -448,14 +448,14 @@ function AnalysisContent() {
       }
 
       // Filter: all docs connected via account network
-      const related = allAnalyses.filter(a => {
+      const related = allAnalyses.filter((a: Analysis) => {
         const acc = normalizeAcc(a.benchmark_comparison || '')
         const settlement = normalizeAcc(a.costs_breakdown?.settlementAccount || '')
         return (acc && connectedAccounts.has(acc)) || (settlement && connectedAccounts.has(settlement))
       })
 
-      const dossiers = related.filter(a => a.account_type === 'DOSSIER')
-      const liquidity = related.filter(a => a.account_type === 'LIQUIDITY')
+      const dossiers = related.filter((a: Analysis) => a.account_type === 'DOSSIER')
+      const liquidity = related.filter((a: Analysis) => a.account_type === 'LIQUIDITY')
 
       // Group by account number (like dashboard does)
       function groupByAccount(analyses: Analysis[]): AccountGroup[] {

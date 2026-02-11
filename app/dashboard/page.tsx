@@ -173,7 +173,7 @@ function DashboardContent() {
     let filteredData = data || []
     if (clienteFilter) {
       const normalizedFilter = normalizeHolder(clienteFilter)
-      filteredData = filteredData.filter(a =>
+      filteredData = filteredData.filter((a: any) =>
         normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
       )
     }
@@ -348,7 +348,7 @@ function DashboardContent() {
     let filteredTrashed = trashedData || []
     if (clienteFilter) {
       const normalizedFilter = normalizeHolder(clienteFilter)
-      filteredTrashed = filteredTrashed.filter(a =>
+      filteredTrashed = filteredTrashed.filter((a: any) =>
         normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
       )
     }
