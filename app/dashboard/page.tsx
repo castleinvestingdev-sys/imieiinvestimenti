@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { holdersMatch, normalizeHolder as normalizeHolderLib } from '@/lib/utils'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
 import styles from './Dashboard.module.css'
@@ -31,6 +32,38 @@ interface Analysis {
 }
 
 type AccountGroup = { identifier: string; analyses: Analysis[] };
+
+// --- Corporate Action detection ---
+// Identifies ISINs involved in RAGGRUPPAMENTO, SPLIT, CONCAMBIO, etc.
+const CA_KEYWORDS = ['RAGGR', 'DIRITTO', 'DIRITTI', 'FRAZION', 'CONCAMBIO', 'CONVERSIONE', 'SPLIT AZ']
+const isCorporateActionName = (name: string) => {
+  const u = (name || '').toUpperCase()
+  return CA_KEYWORDS.some(kw => u.includes(kw)) || /^DIR\s+[A-Z]/i.test(name || '')
+}
+// Given a list of mismatched ISINs and a name map, returns the set of ISINs explained by corporate actions
+const findCorporateActionIsins = (mismatchIsins: string[], allNames: Record<string, string>): Set<string> => {
+  const caIsins = new Set<string>()
+  // Step 1: flag ISINs whose name matches corporate action keywords
+  const flagged = new Set<string>()
+  mismatchIsins.forEach(isin => {
+    if (isCorporateActionName(allNames[isin] || '')) flagged.add(isin)
+  })
+  if (flagged.size === 0) return caIsins
+  // Step 2: extract significant words from flagged ISINs (skip common suffixes)
+  const SKIP = new Set(['ORD', 'AZ', 'SPA', 'DIR', 'NV', 'SA', 'SE', 'PLC', 'INC', 'LTD', 'AG', 'AZIONE', 'AZIONI'])
+  const sigWords = new Set<string>()
+  flagged.forEach(isin => {
+    (allNames[isin] || '').toUpperCase().split(/\s+/).forEach(w => {
+      if (w.length >= 3 && !SKIP.has(w) && !CA_KEYWORDS.some(kw => w.includes(kw))) sigWords.add(w)
+    })
+  })
+  // Step 3: any mismatch ISIN sharing a significant word with flagged ISINs is also CA-related
+  mismatchIsins.forEach(isin => {
+    const words = (allNames[isin] || '').toUpperCase().split(/\s+/)
+    if (flagged.has(isin) || words.some(w => sigWords.has(w))) caIsins.add(isin)
+  })
+  return caIsins
+}
 
 type BankGroup = {
   bankName: string;
@@ -145,13 +178,8 @@ function DashboardContent() {
 
 
 
-  // Normalize holder name: "FRIGERI MARIA CRISTINA" → "Frigeri Maria Cristina"
-  const normalizeHolder = (raw: string) => {
-    if (!raw) return 'Cliente Sconosciuto'
-    return raw.trim().replace(/\s+/g, ' ').split(' ').map(
-      (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
-    ).join(' ')
-  }
+  // Use shared normalizeHolder from lib/utils (handles semicolons → commas, title case)
+  const normalizeHolder = normalizeHolderLib
 
   const fetchAnalyses = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -166,12 +194,12 @@ function DashboardContent() {
       return
     }
 
-    // Filter by holder if clienteFilter is set (case-insensitive match)
+    // Filter by holder if clienteFilter is set (fuzzy match for truncated names)
     let filteredData = data || []
     if (clienteFilter) {
       const normalizedFilter = normalizeHolder(clienteFilter)
       filteredData = filteredData.filter((a: any) =>
-        normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
+        holdersMatch(normalizeHolder(a.costs_breakdown?.holder || ''), normalizedFilter)
       )
     }
 
@@ -290,24 +318,39 @@ function DashboardContent() {
             if (h.isin) currHoldings.set(h.isin, h.quantity || 0)
           })
 
-          // Check for discrepancies
+          // Collect all mismatched ISINs first, then filter out corporate actions
+          const mismatchIsins: string[] = []
+          const nameMap: Record<string, string> = {}
           prevHoldings.forEach((expected, isin) => {
+            nameMap[isin] = expected.name
             const actualQty = currHoldings.get(isin)
-            if (expected.quantity > 0 && actualQty === undefined) {
-              warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)} quote, assente nel periodo corrente`)
-            } else if (actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.001) {
-              warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)}, trovato ${actualQty.toFixed(4)}`)
+            if ((expected.quantity > 0 && actualQty === undefined) ||
+                (actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.001)) {
+              mismatchIsins.push(isin)
             }
           })
-
-          // Check for new holdings without matching purchase
           currHoldings.forEach((qty, isin) => {
             if (!prevHoldings.has(isin) && qty > 0) {
               const holding = curr.holdings?.find((h: any) => h.isin === isin)
+              nameMap[isin] = holding?.name || isin
               const hasPurchase = securityMovements.some((m: any) => m.isin === isin && m.operationType === 'Acquisto')
-              if (!hasPurchase) {
-                warnings.push(`${holding?.name || isin}: nuovo titolo senza acquisto registrato`)
-              }
+              if (!hasPurchase) mismatchIsins.push(isin)
+            }
+          })
+
+          // Filter out corporate action ISINs
+          const caIsins = findCorporateActionIsins(mismatchIsins, nameMap)
+          const realMismatches = mismatchIsins.filter(isin => !caIsins.has(isin))
+
+          realMismatches.forEach(isin => {
+            const expected = prevHoldings.get(isin)
+            const actualQty = currHoldings.get(isin)
+            if (expected && expected.quantity > 0 && actualQty === undefined) {
+              warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)} quote, assente nel periodo corrente`)
+            } else if (expected && actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.001) {
+              warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)}, trovato ${actualQty.toFixed(4)}`)
+            } else if (!expected) {
+              warnings.push(`${nameMap[isin]}: nuovo titolo senza acquisto registrato`)
             }
           })
 
@@ -330,12 +373,12 @@ function DashboardContent() {
       .not('deleted_at', 'is', null)
       .order('deleted_at', { ascending: false })
 
-    // Also filter trashed data by holder (case-insensitive match)
+    // Also filter trashed data by holder (fuzzy match for truncated names)
     let filteredTrashed = trashedData || []
     if (clienteFilter) {
       const normalizedFilter = normalizeHolder(clienteFilter)
       filteredTrashed = filteredTrashed.filter((a: any) =>
-        normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
+        holdersMatch(normalizeHolder(a.costs_breakdown?.holder || ''), normalizedFilter)
       )
     }
     setTrashedAnalyses(filteredTrashed)
@@ -1202,18 +1245,53 @@ function DashboardContent() {
   };
   const getGroupHolder = (group: BankGroup): string => {
     const all = [...group.dossiers.flatMap(d => d.analyses), ...group.liquidityAccounts.flatMap(l => l.analyses)];
-    const counts: Record<string, number> = {};
+    // Collect all holder names, merge truncated variants into the longest form
+    const holders: string[] = []
     all.forEach(a => {
-      const h = (a.costs_breakdown?.holder || '').trim().toUpperCase();
-      if (h) counts[h] = (counts[h] || 0) + 1;
-    });
+      const h = (a.costs_breakdown?.holder || '').trim().toUpperCase()
+      if (!h) return
+      const matchIdx = holders.findIndex(existing => holdersMatch(existing, h))
+      if (matchIdx >= 0) {
+        // Keep the longer (more complete) name
+        if (h.length > holders[matchIdx].length) holders[matchIdx] = h
+      } else {
+        holders.push(h)
+      }
+    })
+    // Count occurrences using fuzzy match
+    const counts: Record<string, number> = {}
+    holders.forEach(h => { counts[h] = 0 })
+    all.forEach(a => {
+      const h = (a.costs_breakdown?.holder || '').trim().toUpperCase()
+      if (!h) return
+      const match = holders.find(k => holdersMatch(k, h))
+      if (match) counts[match] = (counts[match] || 0) + 1
+    })
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
   };
   const mergedMap: Record<string, BankGroup> = {};
   Object.values(bankGroupsMap).forEach(group => {
     const holder = getGroupHolder(group);
     const canonical = canonicalizeBankName(group.bankName);
-    const mergeKey = holder ? `${holder}|||${canonical.toUpperCase()}` : group.bankName;
+    // Find existing merge key with fuzzy holder match + same bank
+    let matchKey: string | null = null
+    if (holder) {
+      for (const key of Object.keys(mergedMap)) {
+        const [existingHolder, existingBank] = key.split('|||')
+        if (existingBank === canonical.toUpperCase() && holdersMatch(existingHolder, holder)) {
+          matchKey = key
+          // Keep the longer holder name as key
+          if (holder.length > existingHolder.length) {
+            const newKey = `${holder}|||${existingBank}`
+            mergedMap[newKey] = mergedMap[key]
+            delete mergedMap[key]
+            matchKey = newKey
+          }
+          break
+        }
+      }
+    }
+    const mergeKey = matchKey || (holder ? `${holder}|||${canonical.toUpperCase()}` : group.bankName);
     if (!mergedMap[mergeKey]) {
       mergedMap[mergeKey] = { ...group };
     } else {
@@ -1300,21 +1378,30 @@ function DashboardContent() {
     Object.entries(movD).forEach(([isin, d]) => {
       if (!(isin in calcInit)) { const q = 0 - d.b + d.s; if (q !== 0) calcInit[isin] = q }
     })
+    // Build name map for corporate action detection
+    const nameMapB: Record<string, string> = {}
+    ;(prevDoc.holdings || []).forEach((h: any) => { if (h.isin) nameMapB[h.isin] = h.name || h.description || h.isin })
+    ;(doc.holdings || []).forEach((h: any) => { if (h.isin) nameMapB[h.isin] = h.name || h.description || h.isin })
+    ;(doc.costs_breakdown?.securityMovements || []).forEach((m: any) => { if (m.isin && m.name) nameMapB[m.isin] = m.name })
+
     const allIsins = new Set([...Object.keys(prevH), ...Object.keys(calcInit)])
     let matchCount = 0
     let totalCount = 0
-    const mismatchIsins: string[] = []
+    const mismatchIsinsB: string[] = []
     allIsins.forEach(isin => {
       totalCount++
       if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) {
-        mismatchIsins.push(isin)
+        mismatchIsinsB.push(isin)
       } else {
         matchCount++
       }
     })
-    const ok = mismatchIsins.length === 0
+    // Filter out corporate action ISINs
+    const caIsinsB = findCorporateActionIsins(mismatchIsinsB, nameMapB)
+    const realMismatchesB = mismatchIsinsB.filter(isin => !caIsinsB.has(isin))
+    const ok = realMismatchesB.length === 0
     if (!ok) {
-      coherenceDetails[doc.id] = `Portafoglio iniziale non quadra: ${matchCount}/${totalCount} titoli ok. Mismatch: ${mismatchIsins.join(', ')}`
+      coherenceDetails[doc.id] = `Portafoglio iniziale non quadra: ${matchCount + caIsinsB.size}/${totalCount} titoli ok. Mismatch: ${realMismatchesB.join(', ')}`
     }
     coherenceMap[doc.id] = ok
   })
@@ -2732,20 +2819,33 @@ function DashboardContent() {
                     match: Math.abs(qtyDiff) < 0.0001
                   }
                 })
-                const allMatch = rows.every(r => r.match)
-                const mismatches = rows.filter(r => !r.match)
+                // Separate corporate action ISINs from real mismatches
+                const allMismatches = rows.filter(r => !r.match)
+                const nameMapC: Record<string, string> = {}
+                rows.forEach(r => { nameMapC[r.isin] = r.name })
+                const caIsinsC = findCorporateActionIsins(allMismatches.map(r => r.isin), nameMapC)
+                const realMismatches = allMismatches.filter(r => !caIsinsC.has(r.isin))
+                const caMismatches = allMismatches.filter(r => caIsinsC.has(r.isin))
+                const allOk = realMismatches.length === 0
+
+                const borderColor = allOk ? '#22c55e' : '#ef4444'
+                const bgColor = allOk ? '#f0fdf4' : '#fef2f2'
 
                 return (
                   <div style={{
                     margin: '0.75rem 0',
                     padding: '0.75rem 1rem',
                     borderRadius: '12px',
-                    border: `2px solid ${allMatch ? '#22c55e' : '#ef4444'}`,
-                    background: allMatch ? '#f0fdf4' : '#fef2f2',
+                    border: `2px solid ${borderColor}`,
+                    background: bgColor,
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: allMatch ? '#047857' : '#b91c1c' }}>
-                        {allMatch ? '✅ Portafoglio Iniziale verificato' : `❌ ${mismatches.length} strument${mismatches.length === 1 ? 'o' : 'i'} non quadra${mismatches.length === 1 ? '' : 'no'}`}
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: allOk ? '#047857' : '#b91c1c' }}>
+                        {allOk
+                          ? (caMismatches.length > 0
+                            ? `✅ Portafoglio Iniziale verificato (${caMismatches.length} corporate action)`
+                            : '✅ Portafoglio Iniziale verificato')
+                          : `❌ ${realMismatches.length} strument${realMismatches.length === 1 ? 'o' : 'i'} non quadra${realMismatches.length === 1 ? '' : 'no'}`}
                       </div>
                       <span style={{ fontSize: '0.6rem', color: '#94a3b8' }}>
                         vs {new Date(prevDoc.period_start).toLocaleDateString('it-IT')} - {new Date(prevDoc.period_end).toLocaleDateString('it-IT')}
@@ -2756,11 +2856,43 @@ function DashboardContent() {
                     <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569', flexWrap: 'wrap' }}>
                       <span>Strumenti confrontati: <strong>{rows.length}</strong></span>
                       <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.filter(r => r.match).length}</strong></span>
-                      {mismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{mismatches.length}</strong></span>}
+                      {caMismatches.length > 0 && <span>Corporate Action: <strong style={{ color: '#d97706' }}>{caMismatches.length}</strong></span>}
+                      {realMismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{realMismatches.length}</strong></span>}
                     </div>
 
-                    {/* Tabella differenze per ISIN */}
-                    {!allMatch && (
+                    {/* Corporate Action table (yellow) */}
+                    {caMismatches.length > 0 && (
+                      <div style={{ overflowX: 'auto', marginBottom: realMismatches.length > 0 ? '0.5rem' : 0 }}>
+                        <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#92400e', marginBottom: '0.25rem' }}>
+                          Corporate Action (raggruppamento / split / concambio)
+                        </div>
+                        <table style={{ width: '100%', fontSize: '0.65rem', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #fde68a', color: '#92400e', textAlign: 'left' }}>
+                              <th style={{ padding: '0.3rem 0.5rem' }}>ISIN</th>
+                              <th style={{ padding: '0.3rem 0.5rem' }}>Strumento</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Quote Finale Prec.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Quote Iniziale Calc.</th>
+                              <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Differenza</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {caMismatches.map(r => (
+                              <tr key={r.isin} style={{ borderBottom: '1px solid #fde68a', background: '#fffbeb' }}>
+                                <td style={{ padding: '0.3rem 0.5rem', fontFamily: 'monospace', fontSize: '0.6rem' }}>{r.isin}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.prevQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{r.calcQty.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                                <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#d97706' }}>{r.qtyDiff > 0 ? '+' : ''}{r.qtyDiff.toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Real mismatches table (red) */}
+                    {realMismatches.length > 0 && (
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', fontSize: '0.65rem', borderCollapse: 'collapse' }}>
                           <thead>
@@ -2773,7 +2905,7 @@ function DashboardContent() {
                             </tr>
                           </thead>
                           <tbody>
-                            {mismatches.map(r => (
+                            {realMismatches.map(r => (
                               <tr key={r.isin} style={{ borderBottom: '1px solid #fecaca', background: '#fff5f5' }}>
                                 <td style={{ padding: '0.3rem 0.5rem', fontFamily: 'monospace', fontSize: '0.6rem' }}>{r.isin}</td>
                                 <td style={{ padding: '0.3rem 0.5rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
@@ -2787,7 +2919,7 @@ function DashboardContent() {
                       </div>
                     )}
 
-                    {allMatch && (
+                    {allOk && caMismatches.length === 0 && (
                       <div style={{ fontSize: '0.65rem', color: '#047857' }}>
                         Tutti i {rows.length} strumenti hanno le stesse quantit&agrave; nel ptf. finale precedente e nel ptf. iniziale calcolato.
                       </div>

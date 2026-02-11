@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
 import styles from './Consulente.module.css'
-import { normalizeHolder as normalizeHolderName } from '@/lib/utils'
+import { normalizeHolder as normalizeHolderName, holdersMatch } from '@/lib/utils'
 import { useUpload } from '@/contexts/UploadContext'
 
 interface ClientData {
@@ -57,9 +57,20 @@ export default function ConsulentePage() {
 
     data?.forEach((analysis: any) => {
       const holder = normalizeHolderName(analysis.costs_breakdown?.holder)
-      const existing = clientsMap.get(holder)
+      // Find existing key that matches (exact or fuzzy prefix for truncated names)
+      let matchKey: string | null = null
+      for (const key of clientsMap.keys()) {
+        if (holdersMatch(key, holder)) { matchKey = key; break }
+      }
 
-      if (existing) {
+      if (matchKey) {
+        const existing = clientsMap.get(matchKey)!
+        // Keep the longer (more complete) name
+        if (holder.length > matchKey.length) {
+          clientsMap.delete(matchKey)
+          existing.holder = holder
+          clientsMap.set(holder, existing)
+        }
         existing.documentCount++
         if (!existing.banks.includes(analysis.bank_name)) {
           existing.banks.push(analysis.bank_name)
