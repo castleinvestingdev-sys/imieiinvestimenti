@@ -170,7 +170,7 @@ function DashboardContent() {
     let filteredData = data || []
     if (clienteFilter) {
       const normalizedFilter = normalizeHolder(clienteFilter)
-      filteredData = filteredData.filter(a =>
+      filteredData = filteredData.filter((a: any) =>
         normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
       )
     }
@@ -334,7 +334,7 @@ function DashboardContent() {
     let filteredTrashed = trashedData || []
     if (clienteFilter) {
       const normalizedFilter = normalizeHolder(clienteFilter)
-      filteredTrashed = filteredTrashed.filter(a =>
+      filteredTrashed = filteredTrashed.filter((a: any) =>
         normalizeHolder(a.costs_breakdown?.holder || '') === normalizedFilter
       )
     }
@@ -1239,7 +1239,7 @@ function DashboardContent() {
   // --- 6. Mappa coerenza portafoglio: id → boolean (true = quadra, false = non quadra, undefined = nessun periodo precedente) ---
   const coherenceMap: Record<string, boolean | 'missing'> = {}
   const coherenceDetails: Record<string, string> = {} // Detailed tooltip info for non-ok cases
-  analyses.filter(a => a.account_type === 'DOSSIER').forEach(doc => {
+  analyses.filter((a: any) => a.account_type === 'DOSSIER').forEach(doc => {
     const normAcc = normalizeAcc(doc.benchmark_comparison || '')
     if (!doc.period_start || !doc.period_end) return
     // Se il conto non è identificabile, non possiamo verificare la coerenza
@@ -1249,7 +1249,7 @@ function DashboardContent() {
     const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
     // Trova il documento immediatamente precedente (stesso conto)
     const prevDoc = analyses
-      .filter(a => a.id !== doc.id && a.account_type === 'DOSSIER'
+      .filter((a: any) => a.id !== doc.id && a.account_type === 'DOSSIER'
         && normalizeAcc(a.benchmark_comparison || '') === normAcc
         && a.period_end && a.period_start
         && new Date(a.period_end) <= docStart)
@@ -1361,7 +1361,7 @@ function DashboardContent() {
 
     // Get all documents for this year, sorted by end date
     const yearDocs = accountAnalyses
-      .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year)
+      .filter((a: any) => a.period_end && new Date(a.period_end).getFullYear() === year)
       .sort((a, b) => new Date(a.period_end).getTime() - new Date(b.period_end).getTime());
 
     let currentFreq: DocFrequency = 'quarterly';
@@ -2469,7 +2469,7 @@ function DashboardContent() {
 
                 // Trova il documento del periodo precedente
                 const prevDoc = analyses
-                  .filter(a =>
+                  .filter((a: any) =>
                     a.id !== inspectorData.id &&
                     a.account_type === 'DOSSIER' &&
                     normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
@@ -2650,7 +2650,7 @@ function DashboardContent() {
                 const prevDoc = (() => {
                   if (!inspectorData.period_start || !inspectorData.period_end) return null
                   const candidate = analyses
-                    .filter(a =>
+                    .filter((a: any) =>
                       a.id !== inspectorData.id &&
                       a.account_type === 'DOSSIER' &&
                       normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
@@ -2975,7 +2975,7 @@ function DashboardContent() {
                     const prevDoc = (() => {
                       if (!currentAccNorm || !inspectorData.period_start || !inspectorData.period_end) return null
                       const candidate = analyses
-                        .filter(a =>
+                        .filter((a: any) =>
                           a.id !== inspectorData.id &&
                           a.account_type === inspectorData.account_type &&
                           normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
