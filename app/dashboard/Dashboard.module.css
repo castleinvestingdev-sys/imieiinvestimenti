@@ -1902,6 +1902,30 @@
     border-color: #cbd5e1;
 }
 
+.dualCardContinuation {
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border-color: rgba(16, 185, 129, 0.2);
+    border-left: none;
+    border-radius: 0 10px 10px 0;
+    margin-left: -0.3rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.dualCardContinuation:hover {
+    opacity: 1;
+    border-color: #059669;
+}
+
+/* When spanStart is followed by continuation, remove right rounding */
+.dualCardSpanStart {
+    border-radius: 10px 0 0 10px;
+}
+
 .dualCardType {
     font-size: 0.55rem;
     font-weight: 800;

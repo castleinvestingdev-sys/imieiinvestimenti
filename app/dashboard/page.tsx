@@ -1382,7 +1382,8 @@ function DashboardContent() {
   // the rendering's customWidth makes it visually span subsequent empty slots.
   const buildYearSlots = (freqMap: DocFrequency[], accountAnalyses: Analysis[], year: number) => {
     // --- Step 1: Generate the shared grid from the merged frequency map ---
-    const slots: { type: DocFrequency; month: number; quarter?: number; half?: number; startMonth: number; file?: Analysis }[] = [];
+    type SlotInfo = { type: DocFrequency; month: number; quarter?: number; half?: number; startMonth: number; file?: Analysis; spanRole?: 'start' | 'continuation' };
+    const slots: SlotInfo[] = [];
     let m = 0;
     while (m < 12) {
       const freq = freqMap[m];
@@ -1397,7 +1398,6 @@ function DashboardContent() {
       } else if (freq === 'quarterly') {
         const quarter = Math.floor(m / 3) + 1;
         const quarterEnd = quarter * 3 - 1;
-        // Check if any month in this quarter is monthly → expand to individual months
         const hasMonthly = freqMap.slice(m, quarterEnd + 1).includes('monthly');
         if (hasMonthly) {
           while (m <= quarterEnd) {
@@ -1414,23 +1414,34 @@ function DashboardContent() {
       }
     }
 
-    // --- Step 2: Match documents to grid slots ---
+    // --- Step 2: Match documents to grid slots (spanning) ---
+    // A document is placed in ALL slots it covers:
+    //   first slot → spanRole='start' (shows full card content)
+    //   subsequent slots → spanRole='continuation' (colored extension, no content)
+    // This guarantees vertical alignment because every slot keeps its natural width.
     const yearDocs = accountAnalyses
       .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year);
     const usedDocIds = new Set<string>();
 
-    slots.forEach(slot => {
+    slots.forEach((slot, idx) => {
       // Find a document whose range covers this slot and hasn't been placed yet
       const doc = yearDocs.find(a => {
         if (usedDocIds.has(a.id)) return false;
         const [docStart, docEnd] = getDocMonthRange(a, year);
-        // Document covers this slot if it starts at or before this slot's start
-        // and ends at or after this slot's end
         return docStart <= slot.startMonth && docEnd >= slot.month;
       });
       if (doc) {
         slot.file = doc;
+        slot.spanRole = 'start';
         usedDocIds.add(doc.id);
+        // Mark subsequent covered slots as continuations
+        const [, docEnd] = getDocMonthRange(doc, year);
+        for (let j = idx + 1; j < slots.length; j++) {
+          if (slots[j].startMonth <= docEnd) {
+            slots[j].file = doc;
+            slots[j].spanRole = 'continuation';
+          } else break;
+        }
       }
     });
 
@@ -1553,10 +1564,12 @@ function DashboardContent() {
       <header className={`${styles.dashHero} ${styles.withClientHeader}`}>
         <div className={styles.dashHeroInner}>
           <div className={styles.dashWelcome}>
-            <h1>{clienteFilter ? `Portafoglio di ${normalizeHolder(clienteFilter)}` : 'I Tuoi Investimenti Semplificati'}</h1>
+            <h1>{clienteFilter ? `Portafoglio di ${normalizeHolder(clienteFilter)}` : hasActiveUploads ? 'Caricamenti in corso' : 'I Tuoi Investimenti Semplificati'}</h1>
             <p>
-              Carica i PDF &quot;Estratto Conto&quot; originali per analizzare il tuo portafoglio.
-              Se non li trovi, cercali nell&apos;<a href="#">Homebanking</a> nella sezione documenti.
+              {hasActiveUploads && !clienteFilter
+                ? <>I documenti vengono analizzati automaticamente. Al termine, troverai i risultati nelle pagine dei rispettivi <a href="/consulente" onClick={(e) => { e.preventDefault(); safeNavigate('/consulente') }}>intestatari</a>.</>
+                : <>Carica i PDF &quot;Estratto Conto&quot; originali per analizzare il tuo portafoglio. Se non li trovi, cercali nell&apos;<a href="#">Homebanking</a> nella sezione documenti.</>
+              }
             </p>
           </div>
 
@@ -1708,6 +1721,29 @@ function DashboardContent() {
                   )}
                 </div>
               ))}
+              {/* Info banner: where to find results */}
+              {!clienteFilter && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #f0f9ff, #e0f2fe)',
+                  border: '1px solid #bae6fd',
+                  borderRadius: '12px',
+                  padding: '14px 18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  marginTop: '4px',
+                }}>
+                  <span style={{ fontSize: '1.3rem', flexShrink: 0 }}>&#x2139;&#xFE0F;</span>
+                  <span style={{ fontSize: '0.82rem', color: '#0c4a6e', lineHeight: 1.4 }}>
+                    Puoi continuare a navigare liberamente. Al termine dell&apos;analisi, i documenti saranno disponibili nelle pagine dei rispettivi{' '}
+                    <a
+                      href="/consulente"
+                      onClick={(e) => { e.preventDefault(); safeNavigate('/consulente') }}
+                      style={{ color: '#0369a1', fontWeight: 700, textDecoration: 'underline' }}
+                    >intestatari</a>.
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1921,7 +1957,19 @@ function DashboardContent() {
                                 const isMonthly = slot.type === 'monthly'
                                 const isSemiannual = slot.type === 'semiannual'
                                 const isAnnual = slot.type === 'annual'
-                                const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
+                                const sizeClass = isAnnual ? styles.dualCardA : (isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : ''))
+
+                                // Continuation slot: colored extension, click → navigate
+                                if (slot.spanRole === 'continuation') {
+                                  return (
+                                    <div key={idx}
+                                      className={`${styles.dualCard} ${sizeClass} ${styles.dualCardContinuation}`}
+                                      onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)} />
+                                  )
+                                }
+
+                                const isStart = slot.spanRole === 'start'
+                                const hasContin = isStart && idx + 1 < slots.length && slots[idx + 1]?.spanRole === 'continuation'
                                 const coh = isPresent ? coherenceMap[slot.file!.id] : undefined
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
@@ -1939,42 +1987,30 @@ function DashboardContent() {
                                   displayLabel = `Q${slot.quarter}`
                                   dates = getSlotDates(year, slot.quarter!, 'quarterly')
                                 }
+                                // Override label if document covers a different period than the slot
                                 if (isPresent && slot.file!.period_start && slot.file!.period_end) {
                                   const docEnd = new Date(slot.file!.period_end)
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
-                                  if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays > 300 && !isAnnual) { displayLabel = `${year}`; dates = getSlotDates(year, 0, 'annual') }
-                                  else if (docDays > 150 && !isSemiannual && !isAnnual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
-                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  if (docDays > 300) { displayLabel = `${year}` }
+                                  else if (docDays > 150) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}` }
+                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}` }
+                                  else if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()] }
                                 }
-                                const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
-                                  ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                                  : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
-                                // Larghezza proporzionale alla durata reale (30.44 = media giorni/mese)
-                                // Un trimestrale (91gg) = 3 card mensili (110px) + 2 gap (0.3rem) → coerente col CSS
-                                let customWidth: string | undefined
-                                let customDaysLabel: string | undefined
-                                if (isPresent && slot.file!.period_start && slot.file!.period_end) {
-                                  const actualDays = Math.round((new Date(slot.file!.period_end).getTime() - new Date(slot.file!.period_start).getTime()) / 86400000)
-                                  const nMonths = Math.max(1, actualDays / 30.44)
-                                  const nGaps = Math.max(0, nMonths - 1)
-                                  customWidth = `calc(${(nMonths * 110).toFixed(0)}px + ${(nGaps * 0.3).toFixed(1)}rem)`
-                                  if (!isStandardPeriod(actualDays)) customDaysLabel = `${actualDays}gg`
-                                }
-                                const sizeClass = isAnnual ? styles.dualCardA : (isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : ''))
+                                const startDateDisplay = isPresent && slot.file!.period_start
+                                  ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                  : dates.start
                                 const cardStyle: React.CSSProperties = {
-                                  ...(customWidth ? { width: customWidth, minWidth: customWidth } : {}),
                                   ...(coh === false ? { borderColor: '#ef4444', borderWidth: '2px' } : coh === 'missing' ? { borderColor: '#f59e0b', borderWidth: '2px' } : {})
                                 }
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                    className={`${styles.dualCard} ${!customWidth ? sizeClass : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
+                                    className={`${styles.dualCard} ${sizeClass} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty} ${hasContin ? styles.dualCardSpanStart : ''}`}
                                     style={cardStyle}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <span className={styles.dualCardType}>{displayLabel}{customDaysLabel && <span style={{ fontSize: '0.5rem', opacity: 0.7, marginLeft: '0.2rem' }}>{customDaysLabel}</span>}</span>
+                                      <span className={styles.dualCardType}>{displayLabel}</span>
                                       {coh === true && <span title="Portafoglio iniziale verificato" style={{ fontSize: '0.55rem' }}>✅</span>}
                                       {coh === false && <span title={coherenceDetails[slot.file!.id] || 'Portafoglio iniziale non quadra'} style={{ fontSize: '0.55rem' }}>❌</span>}
                                       {coh === 'missing' && <span title="Portafoglio iniziale assente" style={{ fontSize: '0.55rem' }}>⚠️</span>}
@@ -2011,7 +2047,19 @@ function DashboardContent() {
                                 const isMonthly = slot.type === 'monthly'
                                 const isSemiannual = slot.type === 'semiannual'
                                 const isAnnual = slot.type === 'annual'
-                                const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
+                                const sizeClass = isAnnual ? styles.dualCardA : (isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : ''))
+
+                                // Continuation slot
+                                if (slot.spanRole === 'continuation') {
+                                  return (
+                                    <div key={idx}
+                                      className={`${styles.dualCard} ${sizeClass} ${styles.dualCardContinuation}`}
+                                      onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)} />
+                                  )
+                                }
+
+                                const isStart = slot.spanRole === 'start'
+                                const hasContin = isStart && idx + 1 < slots.length && slots[idx + 1]?.spanRole === 'continuation'
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
                                 if (isAnnual) {
@@ -2032,31 +2080,20 @@ function DashboardContent() {
                                   const docEnd = new Date(slot.file!.period_end)
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
-                                  if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays > 300 && !isAnnual) { displayLabel = `${year}`; dates = getSlotDates(year, 0, 'annual') }
-                                  else if (docDays > 150 && !isSemiannual && !isAnnual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
-                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  if (docDays > 300) { displayLabel = `${year}` }
+                                  else if (docDays > 150) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}` }
+                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}` }
+                                  else if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()] }
                                 }
-                                const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
-                                  ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                                  : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
-                                let liqCustomWidth: string | undefined
-                                let liqDaysLabel: string | undefined
-                                if (isPresent && slot.file!.period_start && slot.file!.period_end) {
-                                  const ad = Math.round((new Date(slot.file!.period_end).getTime() - new Date(slot.file!.period_start).getTime()) / 86400000)
-                                  const mo = Math.max(1, ad / 30.44)
-                                  const gp = Math.max(0, mo - 1)
-                                  liqCustomWidth = `calc(${(mo * 110).toFixed(0)}px + ${(gp * 0.3).toFixed(1)}rem)`
-                                  if (!isStandardPeriod(ad)) liqDaysLabel = `${ad}gg`
-                                }
-                                const liqSizeClass = isAnnual ? styles.dualCardA : (isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : ''))
+                                const startDateDisplay = isPresent && slot.file!.period_start
+                                  ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                  : dates.start
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
-                                    className={`${styles.dualCard} ${!liqCustomWidth ? liqSizeClass : ''} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty}`}
-                                    style={liqCustomWidth ? { width: liqCustomWidth, minWidth: liqCustomWidth } : undefined}
+                                    className={`${styles.dualCard} ${sizeClass} ${isPresent ? styles.dualCardLoaded : styles.dualCardEmpty} ${hasContin ? styles.dualCardSpanStart : ''}`}
                                     onClick={() => isPresent && safeNavigate(`/analisi/${slot.file!.id}`)}>
-                                    <span className={styles.dualCardType}>{displayLabel}{liqDaysLabel && <span style={{ fontSize: '0.5rem', opacity: 0.7, marginLeft: '0.2rem' }}>{liqDaysLabel}</span>}</span>
+                                    <span className={styles.dualCardType}>{displayLabel}</span>
                                     <div className={styles.dualCardDates}>
                                       <span>{startDateDisplay || dates.start}</span>
                                       <span className={styles.dualCardArrow}>&darr;</span>
