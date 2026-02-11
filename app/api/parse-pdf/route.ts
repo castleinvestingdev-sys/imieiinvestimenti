@@ -436,6 +436,11 @@ Intesa Sanpaolo, UniCredit, Banco BPM, BPER Banca, Monte dei Paschi di Siena, Cr
 
 **Per DOSSIER**: Usa "PERIODO RENDICONTATO" o date dal frontespizio.
 
+### REGOLA INTESTATARIO (holder)
+Estrai l'intestatario dal documento (campo "holder" in info). Se ci sono più cointestatari separati da virgola, punto e virgola, o "a capo", usa SEMPRE la virgola seguita da spazio come separatore unico.
+Esempio: nel PDF trovi "CONDORELLI ALESSANDRA,ZANACCA GIANLUCA,\nZANACCA FRANCESCO" → holder: "CONDORELLI ALESSANDRA, ZANACCA GIANLUCA, ZANACCA FRANCESCO"
+NON usare il punto e virgola come separatore. Usa SOLO la virgola.
+
 ### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
 Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
 - Layout: DUE COLONNE SEPARATE per DARE e AVERE
@@ -686,7 +691,15 @@ Prima di restituire il JSON:
 ### FASE 8: ESTRAZIONE PORTAFOGLIO TITOLI (SOLO PER type="DOSSIER")
 Se il documento è un DOSSIER TITOLI, estrai la CONSISTENZA del portafoglio.
 
-**QUESTA FASE È CRITICA - DEVI ESTRARRE TUTTI I TITOLI SENZA ECCEZIONI.**
+**REGOLA FONDAMENTALE - PORTAFOGLIO VUOTO:**
+Se nel PDF NON esiste una tabella "CONSISTENZA" / "PORTAFOGLIO TITOLI" / "SITUAZIONE TITOLI" / "COMPOSIZIONE PORTAFOGLIO", significa che il portafoglio finale è VUOTO (zero titoli in deposito).
+In questo caso:
+- finalPortfolio DEVE essere un array vuoto: []
+- summary.portfolio_total_extracted DEVE essere 0
+- NON inventare titoli. Se la tabella non c'è, non c'è nulla da estrarre.
+Allo stesso modo, se la tabella esiste ma non contiene nessuna riga/titolo, finalPortfolio = [] e portfolio_total_extracted = 0.
+
+**QUESTA FASE È CRITICA - SE LA TABELLA ESISTE, DEVI ESTRARRE TUTTI I TITOLI SENZA ECCEZIONI.**
 
 **8.1 CONTROVALORE TOTALE**
 Cerca nel PDF il valore "CONTROVALORE TOTALE APPARENTE" o "CONTROVALORE TOTALE" o simile.

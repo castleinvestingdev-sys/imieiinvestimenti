@@ -8,15 +8,15 @@ export default function UploadNotification() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // Hidden on dashboard (it has its own detailed UI)
-  if (pathname === '/dashboard' || !hasActiveUploads) return null
+  if (!hasActiveUploads) return null
 
   const currentFile = uploadQueue.find(f => f.status === 'uploading' || f.status === 'analyzing')
   const holderDisplay = currentFile?.holder || activeHolder || null
+  const isOnDashboard = pathname === '/dashboard'
 
   return (
     <div
-      onClick={() => router.push('/dashboard')}
+      onClick={() => { if (!isOnDashboard) router.push('/dashboard') }}
       style={{
         position: 'fixed',
         bottom: '1.5rem',
@@ -27,14 +27,16 @@ export default function UploadNotification() {
         padding: '16px 20px',
         boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
         border: '1px solid #e2e8f0',
-        cursor: 'pointer',
+        cursor: isOnDashboard ? 'default' : 'pointer',
         minWidth: '280px',
         maxWidth: '360px',
         transition: 'transform 0.2s ease, box-shadow 0.2s ease',
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-2px)'
-        e.currentTarget.style.boxShadow = '0 12px 40px rgba(0,0,0,0.2)'
+        if (!isOnDashboard) {
+          e.currentTarget.style.transform = 'translateY(-2px)'
+          e.currentTarget.style.boxShadow = '0 12px 40px rgba(0,0,0,0.2)'
+        }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'translateY(0)'
@@ -108,9 +110,11 @@ export default function UploadNotification() {
       </div>
 
       {/* Hint */}
-      <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginTop: '6px', textAlign: 'center' }}>
-        Clicca per tornare alla dashboard
-      </div>
+      {!isOnDashboard && (
+        <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginTop: '6px', textAlign: 'center' }}>
+          Clicca per tornare alla dashboard
+        </div>
+      )}
 
       <style>{`
         @keyframes pulse {

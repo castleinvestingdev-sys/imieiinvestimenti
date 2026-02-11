@@ -7,6 +7,7 @@ import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
 import styles from './Consulente.module.css'
 import { normalizeHolder as normalizeHolderName } from '@/lib/utils'
+import { useUpload } from '@/contexts/UploadContext'
 
 interface ClientData {
   holder: string
@@ -21,13 +22,8 @@ export default function ConsulentePage() {
   const [loading, setLoading] = useState(true)
   const [clients, setClients] = useState<ClientData[]>([])
   const [isDragging, setIsDragging] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [uploadStage, setUploadStage] = useState('')
-  const [uploadFileName, setUploadFileName] = useState('')
-  const [uploadCurrent, setUploadCurrent] = useState(0)
-  const [uploadTotal, setUploadTotal] = useState(0)
   const router = useRouter()
+  const { addFilesToQueue, hasActiveUploads, registerOnSuccess } = useUpload()
   const supabase = createClient()
 
   useEffect(() => {
@@ -88,6 +84,15 @@ export default function ConsulentePage() {
     ))
   }, [supabase])
 
+  // Register onSuccess: refresh client list when an upload completes
+  useEffect(() => {
+    if (!user) return
+    registerOnSuccess(async () => {
+      await fetchClients(user.id)
+    })
+    return () => registerOnSuccess(null)
+  }, [user, fetchClients, registerOnSuccess])
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(true)
@@ -98,104 +103,23 @@ export default function ConsulentePage() {
     setIsDragging(false)
   }
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf')
-    if (files.length > 0) {
-      await uploadFiles(files)
-    }
-  }
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(f => f.type === 'application/pdf')
-    if (files.length > 0) {
-      await uploadFiles(files)
-    }
-  }
-
-  const uploadFiles = async (files: File[]) => {
     if (!user) return
-
-    setUploading(true)
-    setUploadTotal(files.length)
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      setUploadCurrent(i + 1)
-      setUploadFileName(file.name)
-      setUploadProgress(0)
-      setUploadStage('Caricamento PDF...')
-
-      const startTime = Date.now()
-
-      // Progress animation with stage updates
-      const progressInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000)
-
-        // Update stage based on elapsed time
-        if (elapsed < 2) {
-          setUploadStage('Caricamento PDF...')
-          setUploadProgress(Math.min(10, elapsed * 5))
-        } else if (elapsed < 5) {
-          setUploadStage('Conversione documento...')
-          setUploadProgress(Math.min(25, 10 + (elapsed - 2) * 5))
-        } else if (elapsed < 10) {
-          setUploadStage('Invio a Gemini AI...')
-          setUploadProgress(Math.min(40, 25 + (elapsed - 5) * 3))
-        } else if (elapsed < 30) {
-          setUploadStage('Analisi AI in corso...')
-          setUploadProgress(Math.min(80, 40 + (elapsed - 10) * 2))
-        } else if (elapsed < 60) {
-          setUploadStage('Elaborazione dati...')
-          setUploadProgress(Math.min(90, 80 + (elapsed - 30) * 0.33))
-        } else {
-          setUploadStage('Quasi finito...')
-          setUploadProgress(Math.min(95, 90 + (elapsed - 60) * 0.1))
-        }
-      }, 200)
-
-      try {
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('userId', user.id)
-        formData.append('email', user.email || '')
-
-        const response = await fetch('/api/parse-pdf', {
-          method: 'POST',
-          body: formData
-        })
-
-        clearInterval(progressInterval)
-
-        const result = await response.json()
-
-        if (result.success) {
-          setUploadStage('Completato!')
-          setUploadProgress(100)
-        } else {
-          setUploadStage(`Errore: ${result.error}`)
-          console.error('Error uploading:', result.error)
-        }
-
-        // Brief pause to show completion
-        await new Promise(resolve => setTimeout(resolve, 500))
-      } catch (error) {
-        clearInterval(progressInterval)
-        setUploadStage('Errore di connessione')
-        console.error('Upload error:', error)
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      }
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length > 0) {
+      addFilesToQueue(files, user.id)
     }
+  }
 
-    setUploading(false)
-    setUploadProgress(0)
-    setUploadStage('')
-    setUploadFileName('')
-
-    // Refresh clients list
-    await fetchClients(user.id)
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!user) return
+    const files = Array.from(e.target.files || [])
+    if (files.length > 0) {
+      addFilesToQueue(files, user.id)
+    }
+    if (e.target) e.target.value = ''
   }
 
   if (loading) {
@@ -242,11 +166,11 @@ export default function ConsulentePage() {
 
         {/* Upload Area */}
         <div
-          className={`${styles.uploadArea} ${isDragging ? styles.dragging : ''} ${uploading ? styles.uploading : ''}`}
+          className={`${styles.uploadArea} ${isDragging ? styles.dragging : ''} ${hasActiveUploads ? styles.uploading : ''}`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => !uploading && document.getElementById('file-input')?.click()}
+          onClick={() => document.getElementById('file-input')?.click()}
         >
           <input
             type="file"
@@ -256,34 +180,9 @@ export default function ConsulentePage() {
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
-          {uploading ? (
-            <div className={styles.progressContainer}>
-              <div className={styles.progressHeader}>
-                <span className={styles.progressIcon}>📄</span>
-                <div className={styles.progressInfo}>
-                  <div className={styles.progressFileName}>{uploadFileName}</div>
-                  <div className={styles.progressMeta}>
-                    File {uploadCurrent} di {uploadTotal} • {uploadStage}
-                  </div>
-                </div>
-                <div className={styles.progressPercent}>{Math.round(uploadProgress)}%</div>
-              </div>
-              <div className={styles.progressBarContainer}>
-                <div
-                  className={styles.progressBar}
-                  style={{ width: `${uploadProgress}%` }}
-                >
-                  {uploadProgress < 100 && <div className={styles.progressShine}></div>}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className={styles.uploadIcon}>+</div>
-              <p><strong>Trascina qui i PDF degli Estratti Conto</strong> o clicca per selezionare</p>
-              <span>Carica il PDF originale scaricato dalla banca. Gli intestatari verranno creati automaticamente.</span>
-            </>
-          )}
+          <div className={styles.uploadIcon}>+</div>
+          <p><strong>Trascina qui i PDF degli Estratti Conto</strong> o clicca per selezionare</p>
+          <span>Carica il PDF originale scaricato dalla banca. Gli intestatari verranno creati automaticamente.</span>
         </div>
 
         {/* Clients Grid */}
