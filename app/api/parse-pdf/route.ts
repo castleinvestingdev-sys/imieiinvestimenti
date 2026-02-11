@@ -153,6 +153,12 @@ function validatePortfolioTotals(parsed: any): {
     const gap = Math.abs(extractedTotal - sumOfMarketValues)
     const gapPercent = (gap / extractedTotal) * 100
 
+    // Don't retry if the sum is ~1000x the total (Italian decimal misinterpretation — fixed in normalization)
+    const ratio = sumOfMarketValues / extractedTotal
+    if (ratio > 800 && ratio < 1200) {
+        return { needsRetry: false, gap, gapPercent, sumOfMarketValues, extractedTotal }
+    }
+
     // Trigger retry only if gap is significant (> 0.5% of total AND > 50€)
     const needsRetry = gap > 50 && gapPercent > 0.5
 
@@ -1617,7 +1623,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     `Verifica attentamente i segni di ogni movimento e assicurati di estrarre TUTTI i movimenti.` : '')
 
                 const retryText = await callGemini(GEMINI_API_KEY!, modelName, retryPrompt, base64Data, {
-                    thinkingLevel: 'high',
+                    thinkingLevel: 'medium',
                     jsonSchema: PARSE_PDF_JSON_SCHEMA
                 })
 
@@ -1725,7 +1731,7 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
 
                 try {
                     const verifyText = await callGemini(GEMINI_API_KEY!, modelName, verifyPrompt, base64Data, {
-                        thinkingLevel: 'high',
+                        thinkingLevel: 'medium',
                         jsonSchema: PARSE_PDF_JSON_SCHEMA
                     })
 
@@ -1976,7 +1982,7 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
 
                     try {
                         const retryText = await callGemini(GEMINI_API_KEY!, modelName, phaseAPrompt, base64Data, {
-                            thinkingLevel: 'high',
+                            thinkingLevel: 'medium',
                             jsonSchema: PARSE_PDF_JSON_SCHEMA
                         })
                         const retryJsonMatch = retryText.match(/\{[\s\S]*\}/)
@@ -2138,7 +2144,7 @@ Rispondi SOLO con questo JSON:
                         try {
                             const targetedText = await callGemini(
                                 GEMINI_API_KEY!, modelName, phaseBPrompt, base64Data,
-                                { thinkingLevel: 'high' }
+                                { thinkingLevel: 'medium' }
                             )
                             const targetedJsonMatch = targetedText.match(/\{[\s\S]*\}/)
 
