@@ -1008,7 +1008,19 @@ Intesa Sanpaolo, UniCredit, Banco BPM, BPER Banca, Monte dei Paschi di Siena, Cr
 - Esempio: se il saldo iniziale ha data 31/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-31" e period_end = "2025-08-31" (è un estratto mensile).
 - Esempio: se il saldo iniziale ha data 01/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-01" e period_end = "2025-08-31" (è un estratto bimestrale).
 
-**Per DOSSIER**: Usa "PERIODO RENDICONTATO" o date dal frontespizio.
+**Per DOSSIER**: Determina il periodo ESATTO del rendiconto:
+- Cerca "PERIODO RENDICONTATO", "PERIODO DI RIFERIMENTO", "DAL ... AL ..."
+- "SITUAZIONE AL [data]" o "CONSISTENZA AL [data]" indica la data di FINE periodo (period_end)
+- Il period_start è la fine del periodo PRECEDENTE (= inizio di questo periodo)
+- Per DOSSIER MENSILI: period_start = fine mese precedente, period_end = fine mese corrente
+  Esempio: "Situazione al 30/11/2024" → period_start = "2024-10-31", period_end = "2024-11-30"
+  Esempio: "Situazione al 31/05/2024" → period_start = "2024-04-30", period_end = "2024-05-31"
+- Per DOSSIER TRIMESTRALI: period_start = fine trimestre precedente, period_end = fine trimestre corrente
+  Esempio: "Situazione al 30/09/2024" → period_start = "2024-06-30", period_end = "2024-09-30"
+  Esempio: "Situazione al 31/03/2025" → period_start = "2024-12-31", period_end = "2025-03-31"
+- ATTENZIONE: NON usare date di "confronto precedente", "situazione precedente" o "riferimento precedente" come period_start. Queste sono date del VECCHIO rendiconto, non di questo.
+- Se il documento mostra "DAL 30/06/2024 AL 30/11/2024" ma contiene dati di UN SOLO MESE (novembre), allora period_start = "2024-10-31", period_end = "2024-11-30". La data 30/06 è un riferimento storico, non l'inizio del periodo.
+- I periodi DOSSIER validi sono: ~30 giorni (mensile), ~90 giorni (trimestrale), ~180 giorni (semestrale), ~365 giorni (annuale). Se il tuo periodo non corrisponde a uno di questi, probabilmente hai preso la data di inizio sbagliata.
 
 ### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
 Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
@@ -1956,6 +1968,51 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
 
         logProgress('✅ ANALISI COMPLETATA', fileName)
         console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
+
+        // === PERIOD DATE VALIDATION ===
+        // Validate that period_start/period_end form a standard banking period
+        if (parsed.info?.period_start && parsed.info?.period_end) {
+            const pStart = new Date(parsed.info.period_start)
+            const pEnd = new Date(parsed.info.period_end)
+            const diffDays = Math.round((pEnd.getTime() - pStart.getTime()) / (1000 * 60 * 60 * 24))
+
+            // Standard periods with tolerance: monthly(28-35), bimonthly(56-66), quarterly(85-100), semiannual(175-190), annual(360-370)
+            const isStandard = (
+                (diffDays >= 28 && diffDays <= 35) ||   // monthly
+                (diffDays >= 56 && diffDays <= 66) ||   // bimonthly
+                (diffDays >= 85 && diffDays <= 100) ||  // quarterly
+                (diffDays >= 175 && diffDays <= 190) || // semiannual
+                (diffDays >= 360 && diffDays <= 370)    // annual
+            )
+
+            if (!isStandard && diffDays > 0) {
+                logProgress('⚠️ PERIODO NON STANDARD',
+                    `${diffDays} giorni (${parsed.info.period_start} → ${parsed.info.period_end}). Normalizzo period_start.`
+                )
+
+                // Use period_end as anchor (more reliable), compute closest standard period_start
+                // Find closest standard duration
+                const standards = [30, 61, 91, 182, 365]
+                const closest = standards.reduce((best, d) =>
+                    Math.abs(d - diffDays) < Math.abs(best - diffDays) ? d : best
+                )
+
+                // Compute new period_start by subtracting the closest standard months from period_end
+                const monthsMap: Record<number, number> = { 30: 1, 61: 2, 91: 3, 182: 6, 365: 12 }
+                const monthsToSubtract = monthsMap[closest] || 1
+                const newStart = new Date(pEnd)
+                newStart.setMonth(newStart.getMonth() - monthsToSubtract)
+                // Adjust to end-of-month (banking periods end on last day of month)
+                // E.g., if period_end = 30/11/2024 and monthly, newStart should be 31/10/2024
+                const lastDayOfNewStartMonth = new Date(newStart.getFullYear(), newStart.getMonth() + 1, 0)
+                const correctedStart = lastDayOfNewStartMonth.toISOString().split('T')[0]
+
+                logProgress('📅 PERIODO CORRETTO',
+                    `${parsed.info.period_start} → ${correctedStart} (${closest} giorni standard, ${monthsToSubtract} mesi)`
+                )
+                parsed.info.period_start = correctedStart
+            }
+        }
 
         // === PHASE A: Self-contained Portfolio Total Validation ===
         if (isDossier) {

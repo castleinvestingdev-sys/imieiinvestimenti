@@ -1473,14 +1473,17 @@ function DashboardContent() {
   // If ANY account has 'monthly' for a given month, the merged result is 'monthly'.
   // This ensures all rows within the same year group share the same slot structure → vertical alignment.
   const buildMergedFrequencyMap = (group: BankGroup, year: number): DocFrequency[] => {
-    const merged: DocFrequency[] = Array(12).fill('quarterly');
+    // Start with lowest priority (semiannual). More granular frequencies always win.
+    const priority: Record<DocFrequency, number> = { 'monthly': 3, 'quarterly': 2, 'semiannual': 1 };
+    const merged: DocFrequency[] = Array(12).fill('semiannual');
     const allAccounts = [...group.dossiers, ...group.liquidityAccounts];
     allAccounts.forEach(account => {
       const accountMap = buildYearFrequencyMap(account.analyses, year);
       accountMap.forEach((freq, m) => {
-        // Priority: monthly > quarterly > semiannual (most granular wins for alignment)
-        if (freq === 'monthly') merged[m] = 'monthly';
-        else if (freq === 'semiannual' && merged[m] === 'quarterly') merged[m] = 'semiannual';
+        // Most granular wins: monthly > quarterly > semiannual
+        if (priority[freq] > priority[merged[m]]) {
+          merged[m] = freq;
+        }
       });
     });
     return merged;
@@ -2100,6 +2103,7 @@ function DashboardContent() {
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
                                   else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
                                   else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  else if (docDays >= 45 && docDays <= 150 && isSemiannual) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -2169,6 +2173,7 @@ function DashboardContent() {
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
                                   else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
                                   else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  else if (docDays >= 45 && docDays <= 150 && isSemiannual) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
