@@ -2041,9 +2041,10 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
         const periodEnd = parseDate(parsed.info?.period_end)
         const accountNumber = parsed.info?.accountNumber
 
-        if (!forceRecalculate && !isReanalysis && userId && periodStart && periodEnd && accountNumber) {
+        // Auto-replace duplicate period (soft-delete old, save new) — avoids double Gemini call
+        let replacedAnalysisId: string | null = null
+        if (!isReanalysis && userId && periodStart && periodEnd && accountNumber) {
             logProgress('CHECK DUPLICATI', 'Verifico periodo già caricato')
-            // Query per periodo senza filtro account esatto (il numero può variare tra PDF)
             const { data: existingAnalyses } = await supabase
                 .from('analyses')
                 .select('id, period_start, period_end, benchmark_comparison')
@@ -2052,24 +2053,19 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                 .eq('period_end', periodEnd)
                 .is('deleted_at', null)
 
-            // Match normalizzato: gestisce prefissi filiale variabili (es. "19812/3100/1000811" vs "3100/1000811")s
             const normalizedNew = normalizeAccountNumber(accountNumber)
             const existingAnalysis = existingAnalyses?.find(a =>
                 normalizeAccountNumber(a.benchmark_comparison || '') === normalizedNew
             )
 
             if (existingAnalysis) {
-                logProgress('⚠️ DUPLICATO RILEVATO', `Periodo ${periodStart} - ${periodEnd} già presente`)
-                return NextResponse.json({
-                    success: false,
-                    isDuplicate: true,
-                    existingAnalysisId: existingAnalysis.id,
-                    message: `Hai già caricato questo periodo (${new Date(periodStart).toLocaleDateString('it-IT')} - ${new Date(periodEnd).toLocaleDateString('it-IT')}) per questo conto.`,
-                    period: { start: periodStart, end: periodEnd, account: accountNumber }
-                }, { status: 409 }) // 409 Conflict
+                logProgress('⚠️ DUPLICATO → SOSTITUZIONE', `Soft-delete ${existingAnalysis.id}, salvo nuova analisi`)
+                replacedAnalysisId = existingAnalysis.id
+                await supabase
+                    .from('analyses')
+                    .update({ deleted_at: new Date().toISOString() })
+                    .eq('id', existingAnalysis.id)
             }
-        } else if (forceRecalculate || isReanalysis) {
-            logProgress('🔄 RICALCOLO FORZATO', `Skip check duplicati (${isReanalysis ? 'ri-analisi' : 'richiesto dall\'utente'})`)
         }
 
         // === PHASE B: Cross-period Portfolio Validation ===
