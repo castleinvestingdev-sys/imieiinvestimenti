@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { holdersMatch, normalizeHolder as normalizeHolderLib } from '@/lib/utils'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { User } from '@supabase/supabase-js'
+import { useUpload } from '@/contexts/UploadContext'
 import styles from './Dashboard.module.css'
 
 interface Analysis {
@@ -41,26 +42,11 @@ const isCorporateActionName = (name: string) => {
   return CA_KEYWORDS.some(kw => u.includes(kw)) || /^DIR\s+[A-Z]/i.test(name || '')
 }
 // Given a list of mismatched ISINs and a name map, returns the set of ISINs explained by corporate actions
+// Only flags ISINs whose name directly contains a CA keyword (no "shared words" expansion)
 const findCorporateActionIsins = (mismatchIsins: string[], allNames: Record<string, string>): Set<string> => {
   const caIsins = new Set<string>()
-  // Step 1: flag ISINs whose name matches corporate action keywords
-  const flagged = new Set<string>()
   mismatchIsins.forEach(isin => {
-    if (isCorporateActionName(allNames[isin] || '')) flagged.add(isin)
-  })
-  if (flagged.size === 0) return caIsins
-  // Step 2: extract significant words from flagged ISINs (skip common suffixes)
-  const SKIP = new Set(['ORD', 'AZ', 'SPA', 'DIR', 'NV', 'SA', 'SE', 'PLC', 'INC', 'LTD', 'AG', 'AZIONE', 'AZIONI'])
-  const sigWords = new Set<string>()
-  flagged.forEach(isin => {
-    (allNames[isin] || '').toUpperCase().split(/\s+/).forEach(w => {
-      if (w.length >= 3 && !SKIP.has(w) && !CA_KEYWORDS.some(kw => w.includes(kw))) sigWords.add(w)
-    })
-  })
-  // Step 3: any mismatch ISIN sharing a significant word with flagged ISINs is also CA-related
-  mismatchIsins.forEach(isin => {
-    const words = (allNames[isin] || '').toUpperCase().split(/\s+/)
-    if (flagged.has(isin) || words.some(w => sigWords.has(w))) caIsins.add(isin)
+    if (isCorporateActionName(allNames[isin] || '')) caIsins.add(isin)
   })
   return caIsins
 }
@@ -96,21 +82,7 @@ function DashboardContent() {
   const searchParams = useSearchParams()
   const clienteFilter = searchParams.get('cliente')
   const supabase = createClient()
-
-  // Multi-file upload state
-  interface UploadingFile {
-    id: string;
-    name: string;
-    status: 'queued' | 'uploading' | 'analyzing' | 'done' | 'error';
-    progress: number;
-    error?: string;
-    index?: number;
-    total?: number;
-    stage?: string; // Detailed stage description
-    startTime?: number; // Track upload start time
-  }
-  const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
-  const [isProcessing, setIsProcessing] = useState(false)
+  const { registerOnSuccess, addFilesToQueue: contextAddFilesToQueue } = useUpload()
 
   // Confirm modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -120,9 +92,6 @@ function DashboardContent() {
     onConfirm: () => void;
     onCancel: () => void;
   } | null>(null)
-  const fileQueueRef = useRef<{ id: string; file: File }[]>([])
-  const totalFilesRef = useRef<number>(0)
-  const currentFileIndexRef = useRef<number>(0)
   const dropzoneRef = useRef<HTMLDivElement>(null)
   const batchAccumulatorRef = useRef<File[]>([])
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -209,7 +178,9 @@ function DashboardContent() {
       if (!acc) return 'ND';
       const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
       if (segments.length === 0) return 'ND';
-      return segments.slice(-2).join('').toUpperCase() || 'ND';
+      // Use only last segment — the account identifier is unique per bank
+      // (filiale code prefix causes mismatches when some PDFs omit it)
+      return segments.slice(-1).join('').toUpperCase() || 'ND';
     };
 
     // Infer missing period_start from previous documents or period_end
@@ -325,7 +296,7 @@ function DashboardContent() {
             nameMap[isin] = expected.name
             const actualQty = currHoldings.get(isin)
             if ((expected.quantity > 0 && actualQty === undefined) ||
-                (actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.001)) {
+                (actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.0001)) {
               mismatchIsins.push(isin)
             }
           })
@@ -347,7 +318,7 @@ function DashboardContent() {
             const actualQty = currHoldings.get(isin)
             if (expected && expected.quantity > 0 && actualQty === undefined) {
               warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)} quote, assente nel periodo corrente`)
-            } else if (expected && actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.001) {
+            } else if (expected && actualQty !== undefined && Math.abs(expected.quantity - actualQty) > 0.0001) {
               warnings.push(`${expected.name}: previsto ${expected.quantity.toFixed(4)}, trovato ${actualQty.toFixed(4)}`)
             } else if (!expected) {
               warnings.push(`${nameMap[isin]}: nuovo titolo senza acquisto registrato`)
@@ -717,165 +688,33 @@ function DashboardContent() {
     checkAuth()
   }, [supabase.auth, router, fetchAnalyses])
 
-  // Process upload queue
-  const processQueue = useCallback(async () => {
-    if (!user || isProcessing || fileQueueRef.current.length === 0) return
-
-    console.log('--- START PROCESS QUEUE ---')
-    setIsProcessing(true)
-
-    // Take all files from queue
-    const filesToProcess = [...fileQueueRef.current]
-    fileQueueRef.current = []
-    console.log('Files to process in parallel:', filesToProcess.length)
-
-    let lastHolder: string | null = null
-    let successCount = 0
-
-    // Process a single file (called in parallel)
-    const processOneFile = async ({ id: fileId, file }: { id: string; file: File }) => {
-      // Mark this file as uploading when it actually starts
-      setUploadQueue(prev => prev.map(f =>
-        f.id === fileId ? { ...f, status: 'uploading' as const, progress: 5, startTime: Date.now() } : f
-      ))
-      try {
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('userId', user.id)
-
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000)
-
-        console.log('Sending request for:', file.name)
-        let response: Response
-        try {
-          response = await fetch('/api/parse-pdf', {
-            method: 'POST',
-            body: formData,
-            signal: controller.signal,
-          })
-        } finally {
-          clearTimeout(timeoutId)
-        }
-        console.log('Response status for', file.name, ':', response.status)
-
-        const result = await response.json()
-
-        if (result.success) {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
-          ))
-          if (result.holder) lastHolder = result.holder
-          successCount++
-          await fetchAnalyses(user.id)
-          if (result.analysisId) {
-            setTimeout(() => {
-              const card = document.querySelector(`[data-analysis-id="${result.analysisId}"]`)
-              if (card) {
-                const bankBlock = card.closest('[class*="bankGroupBlock"]')
-                if (bankBlock) {
-                  (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }
-                const scroller = card.closest('[class*="dualTimelineScroller"]')
-                if (scroller) {
-                  const scrollerRect = scroller.getBoundingClientRect()
-                  const cardRect = card.getBoundingClientRect()
-                  const scrollLeft = (scroller as HTMLElement).scrollLeft + cardRect.left - scrollerRect.left - scrollerRect.width / 2 + cardRect.width / 2
-                  scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' })
-                }
-              }
-            }, 600)
-          }
-        } else if (result.isDuplicate && response.status === 409) {
-          // In parallel mode: auto-force duplicates instead of blocking with modal
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, stage: 'Ricalcolo duplicato...' } : f
-          ))
-          const retryFormData = new FormData()
-          retryFormData.append('file', file)
-          retryFormData.append('userId', user.id)
-          retryFormData.append('force', 'true')
-          const retryResponse = await fetch('/api/parse-pdf', { method: 'POST', body: retryFormData })
-          const retryResult = await retryResponse.json()
-          if (retryResult.success) {
-            setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'done' as const, progress: 100 } : f
-            ))
-            if (retryResult.holder) lastHolder = retryResult.holder
-            successCount++
-            await fetchAnalyses(user.id)
-          } else {
-            setUploadQueue(prev => prev.map(f =>
-              f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: retryResult.error } : f
-            ))
-          }
-        } else {
-          setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
-          ))
-        }
-      } catch (error: any) {
-        const errorMsg = error.name === 'AbortError'
-          ? 'Timeout: analisi > 5 minuti. Riprova.'
-          : (error.message || 'Errore di rete')
-        setUploadQueue(prev => prev.map(f =>
-          f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: errorMsg } : f
-        ))
-      }
-    }
-
-    // Parallel with concurrency limit of 3 (avoids Gemini rate limits)
-    const PARALLEL_LIMIT = 3
-    const executing = new Set<Promise<void>>()
-    for (const item of filesToProcess) {
-      const p = processOneFile(item).then(() => { executing.delete(p) })
-      executing.add(p)
-      if (executing.size >= PARALLEL_LIMIT) {
-        await Promise.race(executing)
-      }
-    }
-    await Promise.all(executing)
-
-    setIsProcessing(false)
-
-    // --- Batch complete: navigate to holder if different ---
-    if (successCount > 0 && lastHolder) {
-      const normalizedLastHolder = normalizeHolder(lastHolder)
-      if ((clienteFilter && normalizedLastHolder !== normalizeHolder(clienteFilter)) || !clienteFilter) {
-        router.push(`/dashboard?cliente=${encodeURIComponent(normalizedLastHolder)}`)
-      }
-    }
-
-    // Clear completed files after 5 seconds
-    setTimeout(() => {
-      setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
-    }, 5000)
-  }, [user, fetchAnalyses])
-
-  // EFFECT: Process queue when items are available and not already processing
+  // Refresh analyses when uploads from UploadContext complete
   useEffect(() => {
-    if (!isProcessing && fileQueueRef.current.length > 0) {
-      // Small delay (500ms) to allow multiple drop/select events to batch up
-      const timer = setTimeout(() => {
-        if (!isProcessing && fileQueueRef.current.length > 0) {
-          console.log('[QUEUE-BATCH] Starting processQueue for', fileQueueRef.current.length, 'files')
-          processQueue()
-        }
-      }, 500)
-      return () => clearTimeout(timer)
-    }
-  }, [isProcessing, processQueue, uploadQueue])
+    if (!user) return
+    return registerOnSuccess((analysisId?: string) => {
+      fetchAnalyses(user.id)
+      // Scroll to the newly created card after data refreshes
+      if (analysisId) {
+        setTimeout(() => {
+          const card = document.querySelector(`[data-analysis-id="${analysisId}"]`)
+          if (card) {
+            const bankBlock = card.closest('[class*="bankGroupBlock"]')
+            if (bankBlock) {
+              (bankBlock as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }
+            const scroller = card.closest('[class*="dualTimelineScroller"]')
+            if (scroller) {
+              const scrollerRect = scroller.getBoundingClientRect()
+              const cardRect = card.getBoundingClientRect()
+              const scrollLeft = (scroller as HTMLElement).scrollLeft + cardRect.left - scrollerRect.left - scrollerRect.width / 2 + cardRect.width / 2
+              scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' })
+            }
+          }
+        }, 600)
+      }
+    })
+  }, [user, registerOnSuccess, fetchAnalyses])
 
-  // Prevent navigation while uploads are in progress
-  const hasActiveUploads = uploadQueue.some(f => f.status === 'uploading' || f.status === 'analyzing' || f.status === 'queued') || isProcessing
-  useEffect(() => {
-    if (!hasActiveUploads) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [hasActiveUploads])
 
   // Navigation helper: saves scroll positions for restoration on return
   // Uploads continue via fetch() even after navigating away
@@ -891,78 +730,6 @@ function DashboardContent() {
     router.push(href)
   }
 
-  // PROGRESS TIMER: forza re-render ogni secondo quando ci sono upload attivi
-  // Il progress viene calcolato nel render da file.startTime (evita closure stale)
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setUploadQueue(prev => {
-        const hasActive = prev.some(f => f.status === 'uploading' || f.status === 'analyzing')
-        return hasActive ? [...prev] : prev // spread crea nuovo array → re-render; stesso ref → skip
-      })
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
-
-  // DEBUG EFFECT: Log uploadQueue status changes only (not progress updates)
-  const prevStatusRef = useRef<string>('')
-  useEffect(() => {
-    if (uploadQueue.length > 0) {
-      const statusKey = uploadQueue.map(f => `${f.name}:${f.status}`).join('|')
-      if (statusKey !== prevStatusRef.current) {
-        prevStatusRef.current = statusKey
-        console.log('[DEBUG-STATE] UploadQueue:', uploadQueue.map(f => `${f.name} (${f.status})`))
-      }
-    }
-  }, [uploadQueue])
-
-  // Add files to queue
-  const addFilesToQueue = useCallback((files: FileList | File[]) => {
-    const newFiles: UploadingFile[] = []
-    const filesToProcess: { id: string; file: File }[] = []
-
-    console.log(`[QUEUE] addFilesToQueue: analizzando ${Array.from(files).length} oggetti`)
-
-    Array.from(files).forEach((file, index) => {
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-      console.log(`[QUEUE] Controllo: ${file.name} (Size: ${file.size}, Type: ${file.type}, isPdf: ${isPdf})`)
-
-      if (isPdf) {
-        // Use a more unique ID to avoid collisions (timestamp + index + random string)
-        const fileId = `${file.name}-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 9)}`
-        newFiles.push({
-          id: fileId,
-          name: file.name,
-          status: 'queued',
-          progress: 0
-        })
-        filesToProcess.push({ id: fileId, file })
-      } else {
-        console.warn(`[QUEUE] File SCARTATO: ${file.name} (Non PDF o corrotto)`)
-      }
-    })
-
-    if (newFiles.length === 0) {
-      console.error('[QUEUE] Nessun file PDF valido trovato nel batch')
-      alert('Per favore carica solo file PDF')
-      return
-    }
-
-    console.log(`[QUEUE] addFilesToQueue: aggiunta di ${newFiles.length} file`)
-
-    setUploadQueue(prev => {
-      const combined = [...prev, ...newFiles]
-      const totalInSession = combined.length
-
-      // Update EVERY file in the list with the NEW total and correct index
-      return combined.map((f, i) => ({
-        ...f,
-        index: i + 1,
-        total: totalInSession
-      }))
-    })
-    fileQueueRef.current.push(...filesToProcess)
-    console.log('[QUEUE] Added to internal ref. Pending:', fileQueueRef.current.length)
-  }, [])
 
   const [dragCounter, setDragCounter] = useState(0)
   const [fullPageDragCounter, setFullPageDragCounter] = useState(0)
@@ -985,8 +752,8 @@ function DashboardContent() {
     setFullPageDragCounter(0)
 
     const files = e.dataTransfer.files
-    if (files && files.length > 0) {
-      addFilesToQueue(files)
+    if (files && files.length > 0 && user) {
+      contextAddFilesToQueue(files, user.id)
     }
   }
 
@@ -1014,9 +781,7 @@ function DashboardContent() {
     setDragCounter(0)
 
     const files = e.dataTransfer.files
-    if (files && files.length > 0) {
-      console.log(`[DEBUG-DROP] Drop React: ${files.length} file rilevati`)
-
+    if (files && files.length > 0 && user) {
       // Accumulate to handle fragmented drops
       batchAccumulatorRef.current.push(...Array.from(files))
 
@@ -1026,21 +791,15 @@ function DashboardContent() {
         const batch = [...batchAccumulatorRef.current]
         batchAccumulatorRef.current = []
         batchTimeoutRef.current = null
-        addFilesToQueue(batch)
+        contextAddFilesToQueue(batch, user.id)
       }, 150)
     }
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (files) {
-      console.log(`[EVENT] handleFileSelect: selezionati ${files.length} file`)
-      for (let i = 0; i < files.length; i++) {
-        console.log(`[EVENT] File ${i}: ${files[i].name} (${files[i].type})`)
-      }
-      if (files.length > 0) {
-        addFilesToQueue(files)
-      }
+    if (files && files.length > 0 && user) {
+      contextAddFilesToQueue(files, user.id)
     }
     // Reset input to allow selecting same files again
     if (e.target) e.target.value = ''
@@ -1098,7 +857,8 @@ function DashboardContent() {
     if (!acc) return 'ND';
     const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
     if (segments.length === 0) return 'ND';
-    const core = segments.slice(-2);
+    // Use only last segment — the account identifier is unique per bank
+    const core = segments.slice(-1);
     return core.join('').toUpperCase() || 'ND';
   };
 
@@ -1307,19 +1067,18 @@ function DashboardContent() {
     const docEnd = new Date(doc.period_end)
     const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
     // Trova il documento immediatamente precedente (stesso conto)
+    // Usa period_end < docEnd (non <= docStart) per gestire periodi con date sovrapposte
     const prevDoc = analyses
       .filter((a: any) => a.id !== doc.id && a.account_type === 'DOSSIER'
         && normalizeAcc(a.benchmark_comparison || '') === normAcc
         && a.period_end && a.period_start
-        && new Date(a.period_end) <= docStart)
+        && new Date(a.period_end) < docEnd)
       .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
     if (!prevDoc) { coherenceMap[doc.id] = 'missing'; return }
-    // Verifica che il periodo precedente sia contiguo
-    // Per documenti snapshot (period_start ≈ period_end), il gap tra mesi è ~30gg → tolleriamo fino a 35gg
+    // Verifica che il periodo precedente non sia troppo lontano (max 200gg tra period_end)
     const prevEnd = new Date(prevDoc.period_end!)
-    const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
-    const maxGap = docDays < 2 ? 35 : 5
-    if (gapDays > maxGap) { coherenceMap[doc.id] = 'missing'; return }
+    const endGapDays = (docEnd.getTime() - prevEnd.getTime()) / 86400000
+    if (endGapDays > 200 || endGapDays <= 0) { coherenceMap[doc.id] = 'missing'; return }
     // Verifica basata sui trimestri: prevDoc deve essere dal trimestre immediatamente precedente
     // (es. Q4 deve avere predecessore Q3, non Q2 — anche se le date sembrano contigue)
     const getQuarter = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
@@ -1334,6 +1093,8 @@ function DashboardContent() {
       if (prevEnd.getMonth() !== expPrevM || prevEnd.getFullYear() !== expPrevMY) {
         coherenceMap[doc.id] = 'missing'; return
       }
+    } else if (docDays > 330) {
+      // Per annuali (> 330gg): il gap check già fatto è sufficiente
     } else if (docDays > 150) {
       // Per semestrali (> 150gg): il predecessore deve finire nel semestre precedente
       const getHalf = (d: Date) => ({ h: d.getMonth() < 6 ? 0 : 1, y: d.getFullYear() })
@@ -1347,18 +1108,27 @@ function DashboardContent() {
       // Per trimestrali: prevDoc deve finire nel trimestre precedente
       coherenceMap[doc.id] = 'missing'; return
     }
+    // Skip coherence check if the PDF has no MOVIMENTI section (e.g. some quarterly statements only have portfolio)
+    // With 0 movements, calcInit = currentQty for all ISINs, so any mismatch is just portfolio change without explanatory movements
+    const secMovements = doc.costs_breakdown?.securityMovements || []
+    if (secMovements.length === 0 && doc.costs_breakdown?.hasMovementsSection === false) {
+      coherenceMap[doc.id] = true; return
+    }
+
     const prevH: Record<string, number> = {}
-    ;(prevDoc.holdings || []).forEach((h: any) => { prevH[h.isin || 'X'] = h.quantity || 0 })
+    ;(prevDoc.holdings || []).forEach((h: any) => { if (h.isin) prevH[h.isin] = h.quantity || 0 })
     const movD: Record<string, { b: number; s: number }> = {}
-    ;(doc.costs_breakdown?.securityMovements || []).forEach((m: any) => {
-      const isin = m.isin || 'X'
+    ;(secMovements).forEach((m: any) => {
+      const isin = m.isin
+      if (!isin) return
       if (!movD[isin]) movD[isin] = { b: 0, s: 0 }
       if (m.operationType === 'Acquisto') movD[isin].b += m.quantity || 0
       else if (m.operationType === 'Vendita') movD[isin].s += m.quantity || 0
     })
     const calcInit: Record<string, number> = {}
     ;(doc.holdings || []).forEach((h: any) => {
-      const isin = h.isin || 'X'
+      const isin = h.isin
+      if (!isin) return
       const d = movD[isin] || { b: 0, s: 0 }
       calcInit[isin] = (h.quantity || 0) - d.b + d.s
     })
@@ -1369,8 +1139,10 @@ function DashboardContent() {
     const nameMapB: Record<string, string> = {}
     ;(prevDoc.holdings || []).forEach((h: any) => { if (h.isin) nameMapB[h.isin] = h.name || h.description || h.isin })
     ;(doc.holdings || []).forEach((h: any) => { if (h.isin) nameMapB[h.isin] = h.name || h.description || h.isin })
-    ;(doc.costs_breakdown?.securityMovements || []).forEach((m: any) => { if (m.isin && m.name) nameMapB[m.isin] = m.name })
+    ;(secMovements).forEach((m: any) => { if (m.isin && m.name) nameMapB[m.isin] = m.name })
 
+    const currH: Record<string, number> = {}
+    ;(doc.holdings || []).forEach((h: any) => { if (h.isin) currH[h.isin] = h.quantity || 0 })
     const allIsins = new Set([...Object.keys(prevH), ...Object.keys(calcInit)])
     let matchCount = 0
     let totalCount = 0
@@ -1378,6 +1150,16 @@ function DashboardContent() {
     allIsins.forEach(isin => {
       totalCount++
       if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) {
+        // Skip holdings that fully disappeared or appeared without any movements
+        // (DOSSIER has no MOVIMENTAZIONE section — only CONSISTENZA)
+        const mov = movD[isin]
+        const hasNoMovements = !mov || (mov.b === 0 && mov.s === 0)
+        const fullyDisappeared = (prevH[isin] || 0) > 0 && (currH[isin] || 0) === 0
+        const fullyAppeared = (prevH[isin] || 0) === 0 && (currH[isin] || 0) > 0
+        if (hasNoMovements && (fullyDisappeared || fullyAppeared)) {
+          matchCount++
+          return
+        }
         mismatchIsinsB.push(isin)
       } else {
         matchCount++
@@ -1409,14 +1191,15 @@ function DashboardContent() {
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  // Determine document frequency: monthly (< 45 days), quarterly (45-150), semiannual (> 150)
-  type DocFrequency = 'monthly' | 'quarterly' | 'semiannual';
+  // Determine document frequency: monthly (< 45 days), quarterly (45-150), semiannual (150-330), annual (> 330)
+  type DocFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
   const getDocFrequency = (a: Analysis): DocFrequency => {
     if (!a.period_start || !a.period_end) return 'quarterly';
     const start = new Date(a.period_start);
     const end = new Date(a.period_end);
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
     if (diffDays < 45) return 'monthly';
+    if (diffDays > 330) return 'annual';
     if (diffDays > 150) return 'semiannual';
     return 'quarterly';
   };
@@ -1447,6 +1230,12 @@ function DashboardContent() {
       // This document's month uses its own frequency
       freqMap[endMonth] = docFreq;
 
+      // For annual, mark all 12 months
+      if (docFreq === 'annual') {
+        for (let m = 0; m < 12; m++) {
+          freqMap[m] = 'annual';
+        }
+      }
       // For semiannual, mark all months in the half-year
       if (docFreq === 'semiannual') {
         const halfStart = endMonth < 6 ? 0 : 6;
@@ -1473,9 +1262,9 @@ function DashboardContent() {
   // If ANY account has 'monthly' for a given month, the merged result is 'monthly'.
   // This ensures all rows within the same year group share the same slot structure → vertical alignment.
   const buildMergedFrequencyMap = (group: BankGroup, year: number): DocFrequency[] => {
-    // Start with lowest priority (semiannual). More granular frequencies always win.
-    const priority: Record<DocFrequency, number> = { 'monthly': 3, 'quarterly': 2, 'semiannual': 1 };
-    const merged: DocFrequency[] = Array(12).fill('semiannual');
+    // Start with lowest priority (annual). More granular frequencies always win.
+    const priority: Record<DocFrequency, number> = { 'monthly': 4, 'quarterly': 3, 'semiannual': 2, 'annual': 1 };
+    const merged: DocFrequency[] = Array(12).fill('annual');
     const allAccounts = [...group.dossiers, ...group.liquidityAccounts];
     allAccounts.forEach(account => {
       const accountMap = buildYearFrequencyMap(account.analyses, year);
@@ -1492,86 +1281,119 @@ function DashboardContent() {
   // Build the slots to render based on frequency map
   const buildYearSlots = (freqMap: DocFrequency[], accountAnalyses: Analysis[], year: number) => {
     const slots: { type: DocFrequency; month: number; quarter?: number; half?: number; file?: Analysis }[] = [];
+
+    // Build per-month document mapping: for each month, which doc owns it?
+    const yearDocs = accountAnalyses
+      .filter(a => a.period_end && new Date(a.period_end).getFullYear() === year)
+      .sort((a, b) => new Date(a.period_end!).getTime() - new Date(b.period_end!).getTime());
+
+    const monthDoc: (Analysis | undefined)[] = Array(12).fill(undefined);
+
+    for (const doc of yearDocs) {
+      const freq = getDocFrequency(doc);
+      const endMonth = new Date(doc.period_end!).getMonth();
+
+      if (freq === 'annual') {
+        for (let i = 0; i < 12; i++) {
+          if (!monthDoc[i]) monthDoc[i] = doc;
+        }
+      } else if (freq === 'semiannual') {
+        const start = endMonth < 6 ? 0 : 6;
+        const end = endMonth < 6 ? 5 : 11;
+        for (let i = start; i <= end; i++) {
+          if (!monthDoc[i]) monthDoc[i] = doc;
+        }
+      } else if (freq === 'quarterly') {
+        const start = Math.floor(endMonth / 3) * 3;
+        const end = start + 2;
+        for (let i = start; i <= end; i++) {
+          if (!monthDoc[i]) monthDoc[i] = doc;
+        }
+      } else {
+        monthDoc[endMonth] = doc; // Monthly always takes its own month
+      }
+    }
+
+    const renderedDocIds = new Set<string>();
     let m = 0;
 
     while (m < 12) {
-      const freq = freqMap[m];
+      const doc = monthDoc[m];
 
-      if (freq === 'semiannual') {
-        // Semiannual: H1 = Jan-Jun (months 0-5), H2 = Jul-Dec (months 6-11)
-        const half = m < 6 ? 1 : 2;
-        const halfStart = half === 1 ? 0 : 6;
-        const halfEnd = half === 1 ? 5 : 11;
+      if (doc && !renderedDocIds.has(doc.id)) {
+        renderedDocIds.add(doc.id);
+        const freq = getDocFrequency(doc);
 
-        // Check if any month in this half is more granular
-        const hasMonthly = freqMap.slice(halfStart, halfEnd + 1).includes('monthly');
-        const hasQuarterly = freqMap.slice(halfStart, halfEnd + 1).includes('quarterly');
-
-        if (hasMonthly || hasQuarterly) {
-          // Fall back to more granular rendering for this half
-          // Don't skip — let the loop process each month individually with its actual freq
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            return d.getFullYear() === year && d.getMonth() === m;
-          });
-          slots.push({ type: 'monthly', month: m, file });
-          m++;
-        } else {
-          // Pure semiannual — create single wide slot
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            return d.getFullYear() === year && d.getMonth() >= halfStart && d.getMonth() <= halfEnd;
-          });
-          slots.push({ type: 'semiannual', month: halfEnd, half, file });
+        // Docs tile at their natural frequency
+        if (freq === 'annual') {
+          slots.push({ type: 'annual', month: 11, file: doc });
+          m = 12;
+        } else if (freq === 'semiannual') {
+          const halfEnd = m < 6 ? 5 : 11;
+          slots.push({ type: 'semiannual', month: halfEnd, half: m < 6 ? 1 : 2, file: doc });
           m = halfEnd + 1;
+        } else if (freq === 'quarterly') {
+          const qEnd = Math.floor(m / 3) * 3 + 2;
+          slots.push({ type: 'quarterly', month: qEnd, quarter: Math.floor(m / 3) + 1, file: doc });
+          m = qEnd + 1;
+        } else {
+          slots.push({ type: 'monthly', month: m, file: doc });
+          m++;
         }
-      } else if (freq === 'quarterly') {
-        // Find which quarter this month belongs to
-        const quarter = Math.floor(m / 3) + 1; // 1-4
-        const quarterStartMonth = (quarter - 1) * 3; // 0, 3, 6, 9
-        const quarterEndMonth = quarter * 3 - 1; // 2, 5, 8, 11 (0-indexed)
+      } else if (doc && renderedDocIds.has(doc.id)) {
+        // Doc already rendered at an earlier month — empty slot here
+        slots.push({ type: 'monthly', month: m });
+        m++;
+      } else {
+        // No doc — empty slot using merged freqMap
+        const freq = freqMap[m];
 
-        // Check if ANY month in this quarter is 'monthly' - if so, render entire quarter as monthly
-        const hasMonthlyInQuarter = freqMap.slice(quarterStartMonth, quarterEndMonth + 1).includes('monthly');
-
-        if (hasMonthlyInQuarter) {
-          // Process this quarter month by month
-          while (m <= quarterEndMonth) {
-            const file = accountAnalyses.find(a => {
-              if (!a.period_end) return false;
-              const d = new Date(a.period_end);
-              return d.getFullYear() === year && d.getMonth() === m;
-            });
-            slots.push({ type: 'monthly', month: m, file });
+        if (freq === 'annual') {
+          let hasDocLater = false;
+          for (let i = m + 1; i < 12; i++) {
+            if (monthDoc[i]) { hasDocLater = true; break; }
+          }
+          if (hasDocLater) {
+            slots.push({ type: 'monthly', month: m });
             m++;
+          } else {
+            slots.push({ type: 'annual', month: 11 });
+            m = 12;
+          }
+        } else if (freq === 'semiannual') {
+          const halfStart = m < 6 ? 0 : 6;
+          const halfEnd = m < 6 ? 5 : 11;
+          let hasDocLater = false;
+          for (let i = m + 1; i <= halfEnd; i++) {
+            if (monthDoc[i]) { hasDocLater = true; break; }
+          }
+          if (hasDocLater || m > halfStart) {
+            slots.push({ type: 'monthly', month: m });
+            m++;
+          } else {
+            slots.push({ type: 'semiannual', month: halfEnd, half: m < 6 ? 1 : 2 });
+            m = halfEnd + 1;
+          }
+        } else if (freq === 'quarterly') {
+          const qStart = Math.floor(m / 3) * 3;
+          const qEnd = qStart + 2;
+          let hasDocLater = false;
+          for (let i = m + 1; i <= qEnd; i++) {
+            if (monthDoc[i]) { hasDocLater = true; break; }
+          }
+          if (hasDocLater || m > qStart) {
+            // Mid-quarter or doc coming later: emit monthly slot
+            slots.push({ type: 'monthly', month: m });
+            m++;
+          } else {
+            const quarter = Math.floor(m / 3) + 1;
+            slots.push({ type: 'quarterly', month: qEnd, quarter });
+            m = qEnd + 1;
           }
         } else {
-          // All months in quarter are quarterly - create single quarterly slot
-          const file = accountAnalyses.find(a => {
-            if (!a.period_end) return false;
-            const d = new Date(a.period_end);
-            const docMonth = d.getMonth();
-            const docYear = d.getFullYear();
-            return docYear === year && docMonth >= quarterStartMonth && docMonth <= quarterEndMonth;
-          });
-
-          slots.push({ type: 'quarterly', month: quarterEndMonth, quarter, file });
-
-          // Skip to next quarter
-          m = quarterEndMonth + 1;
+          slots.push({ type: 'monthly', month: m });
+          m++;
         }
-      } else {
-        // Monthly slot
-        const file = accountAnalyses.find(a => {
-          if (!a.period_end) return false;
-          const d = new Date(a.period_end);
-          return d.getFullYear() === year && d.getMonth() === m;
-        });
-
-        slots.push({ type: 'monthly', month: m, file });
-        m++;
       }
     }
 
@@ -1716,161 +1538,6 @@ function DashboardContent() {
             <input type="file" id="file-input" hidden accept=".pdf" multiple onChange={handleFileSelect} />
           </div>
 
-          {/* Upload Queue */}
-          {uploadQueue.length > 0 && (
-            <div style={{ width: '100%', maxWidth: '600px', margin: '1.5rem auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {uploadQueue.map(file => {
-                // Calcola progress e stage direttamente da startTime (evita problemi di closure/stale state)
-                const isActive = file.status === 'uploading' || file.status === 'analyzing'
-                const expectedDuration = 90
-                const elapsed = isActive && file.startTime ? (Date.now() - file.startTime) / 1000 : 0
-                const ratio = elapsed / expectedDuration
-                const computedProgress = isActive && file.startTime
-                  ? Math.max(5, Math.min(98, Math.round(98 * (1 - Math.exp(-2.5 * ratio)))))
-                  : file.progress
-
-                const progressStages = [
-                  [0, 'Caricamento PDF'],
-                  [5, 'Conversione documento'],
-                  [10, 'Invio a Gemini AI'],
-                  [15, 'Analisi AI in corso'],
-                  [30, 'Estrazione movimenti'],
-                  [45, 'Lettura portafoglio titoli'],
-                  [55, 'Validazione dati'],
-                  [65, 'Calcolo commissioni'],
-                  [75, 'Controllo coerenza'],
-                  [85, 'Normalizzazione dati'],
-                  [95, 'Finalizzazione'],
-                ] as const
-                const dots = isActive ? '.'.repeat((Math.floor(elapsed) % 3) + 1) : ''
-                const computedStage = isActive && file.startTime
-                  ? ([...progressStages].reverse().find(([t]) => elapsed >= t)?.[1] || progressStages[0][1]) + dots + ` (${Math.floor(elapsed)}s)`
-                  : file.stage
-
-                return (
-                <div key={file.id} style={{
-                  background: 'white',
-                  borderRadius: '12px',
-                  padding: '16px 20px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                  border: '1px solid #e2e8f0'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{
-                        fontSize: '1.2rem',
-                        animation: isActive ? 'pulse 1.5s ease-in-out infinite' : 'none'
-                      }}>
-                        {file.status === 'queued' && '⏳'}
-                        {file.status === 'uploading' && '📤'}
-                        {file.status === 'analyzing' && '🧠'}
-                        {file.status === 'done' && '✅'}
-                        {file.status === 'error' && '❌'}
-                      </span>
-                      <span style={{
-                        fontWeight: 700,
-                        color: '#0f172a',
-                        fontSize: '0.9rem',
-                        maxWidth: '300px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {file.name}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {/* File counter for active files */}
-                      {file.total && file.total > 0 && (
-                        <span className={styles.fileCounterBadge}>
-                          {file.index || 1}/{file.total}
-                        </span>
-                      )}
-                      <span style={{
-                        fontWeight: 600,
-                        fontSize: '0.8rem',
-                        color: '#64748b',
-                        maxWidth: '200px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {file.status === 'queued' && 'In attesa'}
-                        {isActive && (computedStage || 'Analisi AI')}
-                        {file.status === 'done' && 'Completato'}
-                        {file.status === 'error' && 'Errore'}
-                      </span>
-                      <span style={{
-                        fontWeight: 900,
-                        fontSize: '1rem',
-                        color: file.status === 'done' ? '#10b981' : file.status === 'error' ? '#ef4444' : '#10b981',
-                        minWidth: '45px',
-                        textAlign: 'right'
-                      }}>
-                        {computedProgress}%
-                      </span>
-                    </div>
-                  </div>
-
-
-                  {/* Progress Bar */}
-                  <div style={{
-                    width: '100%',
-                    height: '10px',
-                    background: '#e2e8f0',
-                    borderRadius: '5px',
-                    overflow: 'hidden',
-                    position: 'relative'
-                  }}>
-                    <div style={{
-                      width: `${computedProgress}%`,
-                      height: '100%',
-                      background: file.status === 'error' ? '#ef4444' :
-                        file.status === 'done' ? '#10b981' :
-                          'linear-gradient(90deg, #10b981, #34d399)',
-                      borderRadius: '5px',
-                      transition: 'width 0.3s ease',
-                      position: 'relative',
-                      overflow: 'hidden'
-                    }}>
-                      {/* Animated shine effect */}
-                      {(file.status === 'uploading' || file.status === 'analyzing') && (
-                        <div style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-                          animation: 'shimmer 1.5s infinite'
-                        }} />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* CSS animations */}
-                  <style>{`
-  @keyframes shimmer {
-    0 % { transform: translateX(-100 %); }
-    100 % { transform: translateX(100 %); }
-  }
-  @keyframes pulse {
-    0 %, 100 % { opacity: 1; }
-    50 % { opacity: 0.5; }
-  }
-  `}</style>
-
-                  {/* Error message */}
-                  {file.status === 'error' && file.error && (
-                    <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '8px', marginBottom: 0 }}>
-                      {file.error}
-                    </p>
-                  )}
-                </div>
-                )
-              })}
-            </div>
-          )}
         </div>
       </header>
 
@@ -2081,11 +1748,15 @@ function DashboardContent() {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
                                 const isSemiannual = slot.type === 'semiannual'
+                                const isAnnual = slot.type === 'annual'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
                                 const coh = isPresent ? coherenceMap[slot.file!.id] : undefined
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
-                                if (isSemiannual) {
+                                if (isAnnual) {
+                                  displayLabel = `${year}`
+                                  dates = { start: `01/01/${year}`, end: `31/12/${year}` }
+                                } else if (isSemiannual) {
                                   displayLabel = `H${slot.half}`
                                   dates = getSlotDates(year, slot.half!, 'semiannual')
                                 } else if (isMonthly) {
@@ -2100,15 +1771,14 @@ function DashboardContent() {
                                   const docEnd = new Date(slot.file!.period_end)
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
+                                  // Only downgrade: wider doc in narrower slot → show slot-appropriate label
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
-                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
-                                  else if (docDays >= 45 && docDays <= 150 && isSemiannual) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  else if (docDays >= 45 && docDays <= 150 && (isSemiannual || isAnnual)) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
-                                const sizeClass = isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
+                                const sizeClass = isAnnual ? styles.dualCardA : isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
@@ -2152,10 +1822,14 @@ function DashboardContent() {
                                 const isPresent = !!slot.file
                                 const isMonthly = slot.type === 'monthly'
                                 const isSemiannual = slot.type === 'semiannual'
+                                const isAnnualLiq = slot.type === 'annual'
                                 const prevSlotWithFile = slots.slice(0, idx).reverse().find(s => s.file)
                                 let displayLabel: string
                                 let dates: { start: string; end: string }
-                                if (isSemiannual) {
+                                if (isAnnualLiq) {
+                                  displayLabel = `${year}`
+                                  dates = { start: `01/01/${year}`, end: `31/12/${year}` }
+                                } else if (isSemiannual) {
                                   displayLabel = `H${slot.half}`
                                   dates = getSlotDates(year, slot.half!, 'semiannual')
                                 } else if (isMonthly) {
@@ -2170,15 +1844,14 @@ function DashboardContent() {
                                   const docEnd = new Date(slot.file!.period_end)
                                   const docDays = (docEnd.getTime() - new Date(slot.file!.period_start).getTime()) / 86400000
                                   const mn2 = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC']
+                                  // Only downgrade: wider doc in narrower slot → show slot-appropriate label
                                   if (docDays < 45 && !isMonthly) { displayLabel = mn2[docEnd.getMonth()]; dates = getSlotDates(year, docEnd.getMonth() + 1, 'monthly') }
-                                  else if (docDays > 150 && !isSemiannual) { const h = docEnd.getMonth() < 6 ? 1 : 2; displayLabel = `H${h}`; dates = getSlotDates(year, h, 'semiannual') }
-                                  else if (docDays >= 45 && docDays <= 150 && isMonthly) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
-                                  else if (docDays >= 45 && docDays <= 150 && isSemiannual) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
+                                  else if (docDays >= 45 && docDays <= 150 && (isSemiannual || isAnnualLiq)) { const q = Math.ceil((docEnd.getMonth()+1)/3); displayLabel = `Q${q}`; dates = getSlotDates(year, q, 'quarterly') }
                                 }
                                 const startDateDisplay = isPresent && prevSlotWithFile?.file?.period_end
                                   ? new Date(prevSlotWithFile.file.period_end).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                   : (isPresent && slot.file!.period_start ? new Date(slot.file!.period_start).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) : dates.start)
-                                const liqSizeClass = isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
+                                const liqSizeClass = isAnnualLiq ? styles.dualCardA : isSemiannual ? styles.dualCardS : (!isMonthly ? styles.dualCardQ : '')
                                 return (
                                   <div key={idx}
                                     data-analysis-id={isPresent ? slot.file!.id : undefined}
@@ -2546,8 +2219,8 @@ function DashboardContent() {
                     a.id !== inspectorData.id &&
                     a.account_type === 'DOSSIER' &&
                     normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
-                    a.period_end && inspectorData.period_start &&
-                    new Date(a.period_end) <= new Date(inspectorData.period_start)
+                    a.period_end && inspectorData.period_end &&
+                    new Date(a.period_end) < new Date(inspectorData.period_end)
                   )
                   .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
 
@@ -2728,17 +2401,16 @@ function DashboardContent() {
                       a.account_type === 'DOSSIER' &&
                       normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
                       a.period_end && a.period_start &&
-                      new Date(a.period_end) <= new Date(inspectorData.period_start)
+                      new Date(a.period_end) < new Date(inspectorData.period_end)
                     )
                     .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
                   if (!candidate) return null
-                  const docStart = new Date(inspectorData.period_start)
                   const docEnd = new Date(inspectorData.period_end)
                   const prevEnd = new Date(candidate.period_end!)
-                  const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
+                  const endGapDays = (docEnd.getTime() - prevEnd.getTime()) / 86400000
+                  if (endGapDays > 200 || endGapDays <= 0) return null
+                  const docStart = new Date(inspectorData.period_start)
                   const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
-                  const maxGap = docDays < 2 ? 35 : 5
-                  if (gapDays > maxGap) return null
                   const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
                   const dQ = getQ(docEnd), pQ = getQ(prevEnd)
                   if (docDays < 45) {
@@ -2766,8 +2438,19 @@ function DashboardContent() {
                   prevHoldings[isin] = { name: h.name || h.description || isin, qty: h.quantity || 0, value: h.marketValue || 0 }
                 })
 
-                // Portafoglio iniziale calcolato del periodo corrente (finale - acquisti + vendite)
+                // Skip coherence check if PDF has no MOVIMENTI section
                 const movements = inspectorData.costs_breakdown?.securityMovements || []
+                if (movements.length === 0 && inspectorData.costs_breakdown?.hasMovementsSection === false) {
+                  return (
+                    <div style={{ margin: '0.75rem 0', padding: '0.75rem 1rem', borderRadius: '12px', border: '2px solid #94a3b8', background: '#f8fafc' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                        Nessuna sezione Movimenti nel PDF &mdash; controllo coerenza non applicabile
+                      </div>
+                    </div>
+                  )
+                }
+
+                // Portafoglio iniziale calcolato del periodo corrente (finale - acquisti + vendite)
                 const movDeltas: Record<string, { buys: number; sells: number }> = {}
                 movements.forEach((m: any) => {
                   const isin = m.isin || 'UNKNOWN'
@@ -2811,8 +2494,19 @@ function DashboardContent() {
                     match: Math.abs(qtyDiff) < 0.0001
                   }
                 })
-                // Separate corporate action ISINs from real mismatches
-                const allMismatches = rows.filter(r => !r.match)
+                // Separate corporate action ISINs and full disappearance/appearance from real mismatches
+                const currHoldingsI: Record<string, number> = {}
+                ;(inspectorData.holdings || []).forEach((h: any) => { if (h.isin) currHoldingsI[h.isin] = h.quantity || 0 })
+                const allMismatches = rows.filter(r => {
+                  if (r.match) return false
+                  // Skip holdings that fully disappeared or appeared without any movements
+                  const mov = movDeltas[r.isin]
+                  const hasNoMovements = !mov || (mov.buys === 0 && mov.sells === 0)
+                  const fullyDisappeared = (prevHoldings[r.isin]?.qty || 0) > 0 && (currHoldingsI[r.isin] || 0) === 0
+                  const fullyAppeared = (prevHoldings[r.isin]?.qty || 0) === 0 && (currHoldingsI[r.isin] || 0) > 0
+                  if (hasNoMovements && (fullyDisappeared || fullyAppeared)) return false
+                  return true
+                })
                 const nameMapC: Record<string, string> = {}
                 rows.forEach(r => { nameMapC[r.isin] = r.name })
                 const caIsinsC = findCorporateActionIsins(allMismatches.map(r => r.isin), nameMapC)
@@ -2847,7 +2541,7 @@ function DashboardContent() {
                     {/* Riepilogo quote */}
                     <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569', flexWrap: 'wrap' }}>
                       <span>Strumenti confrontati: <strong>{rows.length}</strong></span>
-                      <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.filter(r => r.match).length}</strong></span>
+                      <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.length - allMismatches.length}</strong></span>
                       {caMismatches.length > 0 && <span>Corporate Action: <strong style={{ color: '#d97706' }}>{caMismatches.length}</strong></span>}
                       {realMismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{realMismatches.length}</strong></span>}
                     </div>
@@ -3098,16 +2792,15 @@ function DashboardContent() {
                           a.account_type === inspectorData.account_type &&
                           normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
                           a.period_end && a.period_start &&
-                          new Date(a.period_end) <= new Date(inspectorData.period_start))
+                          new Date(a.period_end) < new Date(inspectorData.period_end))
                         .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
                       if (!candidate) return null
-                      const docStart = new Date(inspectorData.period_start)
                       const docEnd = new Date(inspectorData.period_end)
                       const prevEnd = new Date(candidate.period_end!)
-                      const gapDays = (docStart.getTime() - prevEnd.getTime()) / 86400000
+                      const endGapDays = (docEnd.getTime() - prevEnd.getTime()) / 86400000
+                      if (endGapDays > 200 || endGapDays <= 0) return null
+                      const docStart = new Date(inspectorData.period_start)
                       const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
-                      const maxGap = docDays < 2 ? 35 : 5
-                      if (gapDays > maxGap) return null
                       const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
                       const dQ = getQ(docEnd), pQ = getQ(prevEnd)
                       if (docDays < 45) {

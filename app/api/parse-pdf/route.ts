@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import * as https from 'https'
 import crypto from 'crypto'
+import { PDFParse } from 'pdf-parse'
 
 // Allow up to 5 minutes for Gemini PDF processing
 export const maxDuration = 300
@@ -94,15 +95,31 @@ function normalizeItalianQuantity(
 ): number {
     if (quantity <= 0 || price <= 0 || referenceValue <= 0) return quantity
 
+    const originalProduct = quantity * price * exchangeRate
+    const originalError = Math.abs(originalProduct - referenceValue) / referenceValue
+
+    // === PHASE 1: Standard check — qty needs ×1000 with same price ===
+    // Triggers when original product is way off (> 50% error)
     for (const multiplier of [1000, 1000000]) {
-        const originalExpected = quantity * price * exchangeRate
-        const correctedExpected = quantity * multiplier * price * exchangeRate
-
-        const originalRatio = Math.abs(originalExpected - referenceValue) / referenceValue
-        const correctedRatio = Math.abs(correctedExpected - referenceValue) / referenceValue
-
-        if (originalRatio > 0.5 && correctedRatio < 0.15) {
+        const correctedProduct = quantity * multiplier * price * exchangeRate
+        const correctedError = Math.abs(correctedProduct - referenceValue) / referenceValue
+        if (originalError > 0.5 && correctedError < 0.15) {
             return quantity * multiplier
+        }
+    }
+
+    // === PHASE 2: Both qty AND price wrong, original far off ===
+    // Case: qty=10, price=987, mktVal=98700 (real: qty=10000, price=9.87)
+    // Phase 1 fails because 10000×987 is too high. But 10000×(987/100)=98700 works.
+    if (originalError > 0.5 && price > 50) {
+        for (const qMult of [1000, 1000000]) {
+            for (const pDiv of [100, 1000]) {
+                const altProduct = quantity * qMult * (price / pDiv) * exchangeRate
+                const altError = Math.abs(altProduct - referenceValue) / referenceValue
+                if (altError < 0.15) {
+                    return quantity * qMult
+                }
+            }
         }
     }
 
@@ -110,10 +127,16 @@ function normalizeItalianQuantity(
 }
 
 // === BOND PRICE NORMALIZATION ===
-// Obbligazioni (BTP, BOT, CCT, CTZ, corporate bonds) sono quotate in "centesimi"
+// Obbligazioni (BTP, BOT, CCT, CTZ, corporate bonds, structured notes) sono quotate in "centesimi"
 // ovvero percentuale del valore nominale (es. 98,79 = 98,79% del nominale).
 // Il prezzo reale è price / 100 (es. 0,9879 EUR per EUR nominale).
-function isBondQuotedInCentesimi(name: string): boolean {
+function isBondQuotedInCentesimi(name: string, isin?: string): boolean {
+    // ISIN-based detection — XS = international bonds/structured notes (Euroclear/Clearstream)
+    if (isin) {
+        const upperIsin = isin.toUpperCase().trim()
+        if (upperIsin.startsWith('XS')) return true
+    }
+
     if (!name) return false
     const upper = name.toUpperCase()
     // Titoli di stato italiani — sempre quotati in percentuale
@@ -122,6 +145,8 @@ function isBondQuotedInCentesimi(name: string): boolean {
     if (/\bOBBLIGAZION[EI]\b/.test(upper) && !/OBBLIGAZIONARI/i.test(upper)) return true
     // Bond con cedola nel nome (es. "ENI 4.75% 2028") — escludendo fondi/ETF
     if (/\d+[,.]?\d*\s*%/.test(name) && !/\b(FUND|FONDO|ETF|SICAV|COMPARTO|CLASSE)\b/i.test(upper)) return true
+    // Certificates and structured notes
+    if (/\b(CERTIFICATE|CERTIFICAT[OI]|NOTA STRUTTURATA)\b/i.test(upper)) return true
     return false
 }
 
@@ -130,9 +155,77 @@ function normalizeBondPrice(price: number): number {
     return price / 100
 }
 
+// Smart bond normalization: when both qty and price can be wrong due to Italian format,
+// tries all combinations of qty×{1,1000} and price/{100,1000} to find the best match
+// against marketValue (or grossAmount for movements).
+function normalizeBondValues(
+    quantity: number,
+    price: number,
+    referenceValue: number,
+    exchangeRate: number = 1
+): { quantity: number; price: number } {
+    if (quantity <= 0 || price <= 0 || referenceValue <= 0) return { quantity, price }
+
+    let bestQty = quantity
+    let bestPrice = price
+    let bestError = Infinity
+
+    // If price is already normalized (< 1), only try qty corrections
+    if (price <= 1) {
+        const rateVars = exchangeRate !== 1 ? [exchangeRate, 1 / exchangeRate] : [1]
+        for (const qm of [1/1000, 1, 1000, 1000000]) {
+            for (const rate of rateVars) {
+                const product = quantity * qm * price * rate
+                const error = Math.abs(product - referenceValue) / referenceValue
+                if (error < bestError) {
+                    bestError = error
+                    bestQty = quantity * qm
+                    bestPrice = price
+                }
+            }
+        }
+        return bestError < 0.15 ? { quantity: bestQty, price: bestPrice } : { quantity, price }
+    }
+
+    // Price > 1: try all combinations of qty adjustments and price adjustments.
+    // Includes qty÷1000 for Italian format errors ("30,000" parsed as 30000 instead of 30)
+    // and price÷1 (no change) for structured notes priced per-unit, not in centesimi.
+    // Order matters for ties: prefer keeping price as-is (÷1) over dividing,
+    // and prefer dividing qty over multiplying, to correctly handle structured notes.
+    bestPrice = price / 100  // fallback: standard centesimi
+
+    const qtyMultipliers = [1/1000, 1, 1000]
+    const priceDivisors = [1, 100, 1000]
+    const rateVariants = exchangeRate !== 1 ? [exchangeRate, 1 / exchangeRate] : [1]
+
+    for (const qm of qtyMultipliers) {
+        for (const pd of priceDivisors) {
+            for (const rate of rateVariants) {
+                const candidateQty = quantity * qm
+                const candidatePrice = price / pd
+                const product = candidateQty * candidatePrice * rate
+                const error = Math.abs(product - referenceValue) / referenceValue
+                if (error < bestError) {
+                    bestError = error
+                    bestQty = candidateQty
+                    bestPrice = candidatePrice
+                }
+            }
+        }
+    }
+
+    // Only apply correction if reasonably close (< 15%)
+    if (bestError < 0.15) {
+        return { quantity: bestQty, price: bestPrice }
+    }
+
+    // Fallback: standard /100, no qty change
+    return { quantity, price: price / 100 }
+}
+
 // === PORTFOLIO VALIDATION HELPERS ===
 
-function validatePortfolioTotals(parsed: any): {
+function validatePortfolioTotals(parsed: any, textTotal?: number): {
     needsRetry: boolean
     gap: number
     gapPercent: number
@@ -140,10 +233,18 @@ function validatePortfolioTotals(parsed: any): {
     extractedTotal: number
 } {
     const holdings = parsed.finalPortfolio || []
-    const extractedTotal = parsed.summary?.portfolio_total_extracted || 0
+    // Use Gemini-extracted total, fallback to text-extracted total
+    const extractedTotal = parsed.summary?.portfolio_total_extracted || textTotal || 0
 
-    if (extractedTotal <= 0 || holdings.length === 0) {
+    if (holdings.length === 0) {
         return { needsRetry: false, gap: 0, gapPercent: 0, sumOfMarketValues: 0, extractedTotal }
+    }
+
+    if (extractedTotal <= 0) {
+        // No PDF total to compare against — but if all holdings have marketValue = 0, flag for retry
+        const sum = holdings.reduce((acc: number, h: any) => acc + (h.marketValue || 0), 0)
+        const needsRetry = holdings.length > 0 && sum === 0
+        return { needsRetry, gap: 0, gapPercent: needsRetry ? 100 : 0, sumOfMarketValues: sum, extractedTotal }
     }
 
     const sumOfMarketValues = holdings.reduce(
@@ -163,6 +264,293 @@ function validatePortfolioTotals(parsed: any): {
     const needsRetry = gap > 50 && gapPercent > 0.5
 
     return { needsRetry, gap, gapPercent, sumOfMarketValues, extractedTotal }
+}
+
+// === TEXT-BASED HOLDINGS CORRECTION ===
+// Uses pdf-parse extracted text to correct/fill holdings when Gemini returns zeros.
+// This is the "text-first" approach: raw text is deterministic and doesn't suffer from vision errors.
+
+function parseItalianNumber(s: string): number {
+    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+}
+
+function extractHoldingsFromText(
+    consistenzaText: string
+): Map<string, { numbers: number[]; rawBlock: string }> {
+    const result = new Map<string, { numbers: number[]; rawBlock: string }>()
+    if (!consistenzaText || consistenzaText.length < 50) return result
+
+    // Find all ISINs and their positions (deduplicate: keep first occurrence)
+    const isinRegex = /\b([A-Z]{2}[A-Z0-9]{10})\b/g
+    const positions: { isin: string; pos: number }[] = []
+    const seenIsins = new Set<string>()
+    let m
+    while ((m = isinRegex.exec(consistenzaText)) !== null) {
+        if (!seenIsins.has(m[1])) {
+            positions.push({ isin: m[1], pos: m.index })
+            seenIsins.add(m[1])
+        }
+    }
+
+    for (let i = 0; i < positions.length; i++) {
+        const start = positions[i].pos
+        const end = i + 1 < positions.length
+            ? positions[i + 1].pos
+            : Math.min(start + 600, consistenzaText.length)
+        const block = consistenzaText.substring(start, end)
+
+        // Find Italian-format numbers in priority order:
+        // 1. Full Italian: "1.234,56", "679.531,68" (dot=thousands, comma=decimal)
+        // 2. Short Italian: "283,836" (comma=decimal, 3+ decimal places for quantities)
+        // 3. Short Italian: "45,20" (comma=decimal, 2 decimal places for prices/amounts)
+        // 4. Whole numbers: "1000" (no separators, only if > 0)
+        const numPattern = /(?<!\d)(\d{1,3}(?:\.\d{3})*,\d{2,})(?!\d)|(?<!\d[.,])(\d+,\d{2,})(?!\d)/g
+        const numbers: number[] = []
+        let nm
+        while ((nm = numPattern.exec(block)) !== null) {
+            const raw = nm[1] || nm[2]
+            if (!raw) continue
+            const val = parseItalianNumber(raw)
+            if (!isNaN(val) && val >= 0) numbers.push(val)
+        }
+
+        if (numbers.length > 0) {
+            result.set(positions[i].isin, { numbers, rawBlock: block.substring(0, 300) })
+        }
+    }
+
+    return result
+}
+
+function correctHoldingsFromText(
+    parsed: any,
+    consistenzaText: string,
+    logFn: (tag: string, msg: string) => void,
+    correctedIsins?: Set<string>
+): number {
+    if (!consistenzaText || consistenzaText.length < 50) return 0
+    const holdings = parsed.finalPortfolio || []
+
+    const textMap = extractHoldingsFromText(consistenzaText)
+    if (textMap.size === 0) return 0
+
+    let corrected = 0
+
+    // CASE 1: Fix holdings that have zeros or wrong values
+    for (const h of holdings) {
+        if (!h.isin) continue
+        const td = textMap.get(h.isin)
+        if (!td || td.numbers.length < 2) continue
+        const nums = td.numbers
+
+        // === FIX ZERO VALUES ===
+        if (h.marketValue === 0 && nums.length >= 3) {
+            // Try to find a verified triple: qty × price = mktVal
+            const candidateMktVal = nums[nums.length - 1]
+            if (candidateMktVal > 0) {
+                let verified = false
+                for (let qi = 0; qi < nums.length - 1; qi++) {
+                    for (let pi = qi + 1; pi < nums.length; pi++) {
+                        if (nums[qi] === candidateMktVal || nums[pi] === candidateMktVal) continue
+                        if (Math.abs(nums[qi] * nums[pi] - candidateMktVal) / candidateMktVal < 0.03) {
+                            verified = true
+                            break
+                        }
+                    }
+                    if (verified) break
+                }
+                if (verified) {
+                    h.marketValue = candidateMktVal
+                    logFn('TEXT FIX', `${h.isin}: marketValue 0 → ${candidateMktVal.toFixed(2)}€ (verificato)`)
+                    corrected++; correctedIsins?.add(h.isin)
+                } else if (nums.length >= 2) {
+                    // Can't verify with qty×price but Gemini already confirmed this ISIN exists
+                    // Accept last number as marketValue (ISIN confirmed by Gemini, only number is uncertain)
+                    h.marketValue = candidateMktVal
+                    logFn('TEXT FIX', `${h.isin}: marketValue 0 → ${candidateMktVal.toFixed(2)}€ (ISIN da Gemini)`)
+                    corrected++; correctedIsins?.add(h.isin)
+                }
+            }
+        }
+
+        // === CROSS-VALIDATE MARKET VALUE ===
+        // Even when Gemini returned a non-zero marketValue, verify it matches the text
+        if (h.marketValue > 0 && nums.length >= 1) {
+            const textMktVal = nums[nums.length - 1]
+            if (textMktVal > 0) {
+                const ratio = h.marketValue / textMktVal
+                // Only fix clear 1000x errors (Italian format: dot as thousands separator)
+                // Don't guess — if the ratio isn't clearly 1000x, leave Gemini's value
+                if (ratio > 900 && ratio < 1100) {
+                    logFn('TEXT CROSS-FIX', `${h.isin}: marketValue ${h.marketValue.toFixed(2)} → ${textMktVal.toFixed(2)}€ (÷1000 Italian format)`)
+                    h.marketValue = textMktVal
+                    corrected++; correctedIsins?.add(h.isin)
+                } else if (ratio > 0.0009 && ratio < 0.0011) {
+                    logFn('TEXT CROSS-FIX', `${h.isin}: marketValue ${h.marketValue.toFixed(2)} → ${textMktVal.toFixed(2)}€ (×1000 Italian format)`)
+                    h.marketValue = textMktVal
+                    corrected++; correctedIsins?.add(h.isin)
+                }
+            }
+        }
+
+        // === FIX QUANTITY AND PRICE ===
+        // Try to find qty and price from text numbers that satisfy qty × price ≈ marketValue
+        if ((h.quantity === 0 || h.price === 0) && nums.length >= 3 && h.marketValue > 0) {
+            const mktVal = h.marketValue
+            let found = false
+
+            // Try all pairs to find qty × price ≈ marketValue
+            for (let qi = 0; qi < nums.length - 1 && !found; qi++) {
+                for (let pi = qi + 1; pi < nums.length && !found; pi++) {
+                    if (nums[qi] === mktVal || nums[pi] === mktVal) continue
+
+                    // Direct: qty × price = mktVal
+                    if (mktVal > 0 && Math.abs(nums[qi] * nums[pi] - mktVal) / mktVal < 0.02) {
+                        if (h.quantity === 0) h.quantity = nums[qi]
+                        if (h.price === 0) h.price = nums[pi]
+                        logFn('TEXT FIX', `${h.isin}: qty=${nums[qi]}, price=${nums[pi]}`)
+                        found = true; correctedIsins?.add(h.isin)
+                    }
+
+                    // With exchange rate: qty × price × rate = mktVal
+                    if (!found) {
+                        for (let ei = 0; ei < nums.length; ei++) {
+                            if (ei === qi || ei === pi || nums[ei] === mktVal) continue
+                            if (nums[ei] >= 0.5 && nums[ei] <= 2.0) {
+                                if (Math.abs(nums[qi] * nums[pi] * nums[ei] - mktVal) / mktVal < 0.02) {
+                                    if (h.quantity === 0) h.quantity = nums[qi]
+                                    if (h.price === 0) h.price = nums[pi]
+                                    if (!h.exchangeRate || h.exchangeRate === 1) h.exchangeRate = nums[ei]
+                                    logFn('TEXT FIX', `${h.isin}: qty=${nums[qi]}, price=${nums[pi]}, rate=${nums[ei]}`)
+                                    found = true; correctedIsins?.add(h.isin)
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // === MATH VERIFICATION: qty × price × rate ≈ marketValue ===
+        if (h.quantity > 0 && h.price > 0 && h.marketValue > 0) {
+            const rate = h.exchangeRate && h.exchangeRate !== 0 ? h.exchangeRate : 1
+            const computed = h.quantity * h.price * rate
+            const err = Math.abs(computed - h.marketValue) / h.marketValue
+
+            if (err > 0.5 && nums.length >= 3) {
+                // Product is way off — try to find correct qty/price from text
+                const mktVal = h.marketValue
+                for (let qi = 0; qi < nums.length - 1; qi++) {
+                    for (let pi = qi + 1; pi < nums.length; pi++) {
+                        if (nums[qi] === mktVal || nums[pi] === mktVal) continue
+                        const product = nums[qi] * nums[pi]
+                        if (mktVal > 0 && Math.abs(product - mktVal) / mktVal < 0.05) {
+                            logFn('MATH FIX', `${h.isin}: qty ${h.quantity}→${nums[qi]}, price ${h.price}→${nums[pi]} (product was ${computed.toFixed(0)}, expected ${mktVal.toFixed(0)})`)
+                            h.quantity = nums[qi]
+                            h.price = nums[pi]
+                            corrected++; correctedIsins?.add(h.isin)
+                            break
+                        }
+                        // Try with exchange rate
+                        for (let ei = 0; ei < nums.length; ei++) {
+                            if (ei === qi || ei === pi || nums[ei] === mktVal) continue
+                            if (nums[ei] >= 0.5 && nums[ei] <= 2.0) {
+                                const productRate = nums[qi] * nums[pi] * nums[ei]
+                                if (Math.abs(productRate - mktVal) / mktVal < 0.05) {
+                                    logFn('MATH FIX', `${h.isin}: qty→${nums[qi]}, price→${nums[pi]}, rate→${nums[ei]}`)
+                                    h.quantity = nums[qi]
+                                    h.price = nums[pi]
+                                    h.exchangeRate = nums[ei]
+                                    corrected++; correctedIsins?.add(h.isin)
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    if (h.quantity !== 0 && h.price !== 0) break
+                }
+            }
+        }
+    }
+
+    // CASE 2: Gemini returned empty finalPortfolio — build from text
+    // ONLY add holdings where we can VERIFY qty × price = mktVal (no guessing)
+    if (holdings.length === 0 && textMap.size > 0) {
+        logFn('TEXT BUILD', `Gemini non ha estratto holdings — verifico ${textMap.size} ISIN dal testo`)
+        for (const [isin, td] of textMap) {
+            if (td.numbers.length < 3) continue // Need at least qty, price, mktVal
+            const mktVal = td.numbers[td.numbers.length - 1]
+            if (mktVal <= 0) continue
+
+            // MUST find qty × price ≈ mktVal — otherwise we can't trust this is a holding
+            let qty = 0, price = 0
+            for (let qi = 0; qi < td.numbers.length - 1; qi++) {
+                for (let pi = qi + 1; pi < td.numbers.length; pi++) {
+                    if (td.numbers[qi] === mktVal || td.numbers[pi] === mktVal) continue
+                    if (Math.abs(td.numbers[qi] * td.numbers[pi] - mktVal) / mktVal < 0.03) {
+                        qty = td.numbers[qi]
+                        price = td.numbers[pi]
+                        break
+                    }
+                }
+                if (qty > 0) break
+            }
+            if (qty === 0 || price === 0) continue // Can't verify — skip, don't guess
+
+            holdings.push({
+                isin,
+                name: isin,
+                currency: 'EUR',
+                exchangeRate: 1,
+                quantity: qty,
+                price,
+                marketValue: mktVal,
+            })
+            logFn('TEXT BUILD', `${isin}: qty=${qty} × price=${price} = ${(qty * price).toFixed(2)} ≈ ${mktVal.toFixed(2)}€ ✓`)
+            corrected++
+        }
+        if (holdings.length > 0) parsed.finalPortfolio = holdings
+    }
+
+    // CASE 3: Gemini missed some ISINs — ONLY add if mathematically verified
+    if (holdings.length > 0 && textMap.size > holdings.length) {
+        const holdingIsins = new Set(holdings.map((h: any) => h.isin).filter(Boolean))
+        for (const [isin, td] of textMap) {
+            if (holdingIsins.has(isin)) continue
+            if (td.numbers.length < 3) continue
+            const mktVal = td.numbers[td.numbers.length - 1]
+            if (mktVal <= 0) continue
+
+            let qty = 0, price = 0
+            for (let qi = 0; qi < td.numbers.length - 1; qi++) {
+                for (let pi = qi + 1; pi < td.numbers.length; pi++) {
+                    if (td.numbers[qi] === mktVal || td.numbers[pi] === mktVal) continue
+                    if (Math.abs(td.numbers[qi] * td.numbers[pi] - mktVal) / mktVal < 0.03) {
+                        qty = td.numbers[qi]
+                        price = td.numbers[pi]
+                        break
+                    }
+                }
+                if (qty > 0) break
+            }
+            if (qty === 0 || price === 0) continue // Can't verify — skip
+
+            holdings.push({
+                isin,
+                name: isin,
+                currency: 'EUR',
+                exchangeRate: 1,
+                quantity: qty,
+                price,
+                marketValue: mktVal,
+            })
+            logFn('TEXT ADD', `${isin}: qty=${qty} × price=${price} = ${(qty * price).toFixed(2)} ≈ ${mktVal.toFixed(2)}€ ✓`)
+            corrected++
+        }
+    }
+
+    return corrected
 }
 
 function findSuspiciousMissingIsins(
@@ -292,11 +680,11 @@ function normalizeDateToItalian(value: any): string {
 function inferSecurityOperationType(raw: any): 'Acquisto' | 'Vendita' {
     const op = String(raw?.operationType || raw?.operation_type || '').toLowerCase()
     const text = `${raw?.description || ''} ${raw?.name || ''}`.toLowerCase()
+    const combined = `${op} ${text}`
 
     if (
-        op.includes('vend') || op.includes('riscatt') || op.includes('disinv') ||
-        op.includes('scaric') || op.includes('switch out') ||
-        /vend|riscatt|disinv|switch out|scarico|liquidaz|prelievo quote/.test(text)
+        /vend|riscatt|disinv|scaric|switch.?out|liquidaz|prelievo.?quote|rimborso|estinzion|cedola.?finale|scadenza/
+            .test(combined)
     ) {
         return 'Vendita'
     }
@@ -408,8 +796,8 @@ async function recoverSecurityMovementsFromPdf(
 Regole:
 - Cerca la sezione "Movimenti" / "Operazioni" del dossier titoli.
 - Ogni riga della tabella titoli deve diventare un elemento di "securityMovements".
-- "Sottoscrizione", "Acquisto", "Switch In", "Carico" => operationType "Acquisto"
-- "Vendita", "Riscatto", "Switch Out", "Disinvestimento", "Scarico" => operationType "Vendita"
+- "Sottoscrizione", "Acquisto", "Switch In", "Carico", "ACQ.CONT.SU MERC.", "VERS.TITOLI", "SICAV: SOTT PAC", "SICAV: SOTTOSCR", "FONDI: SOTTOSCR", "GIRO ALTRO DOSSIER" => operationType "Acquisto"
+- "Vendita", "Riscatto", "Switch Out", "Disinvestimento", "Scarico", "VEN.CONT.SU MERC.", "SICAV: RIMBORSO", "FONDI: RIMBORSO" => operationType "Vendita"
 - quantity deve essere positiva.
 - netAmount deve essere positivo.
 - currency default "EUR", exchangeRate default 1.
@@ -640,6 +1028,7 @@ const PARSE_PDF_JSON_SCHEMA = {
                 accountNumber: { type: 'string' },
                 period_start: { type: 'string' },
                 period_end: { type: 'string' },
+                periodFrequency: { type: 'string', enum: ['monthly', 'quarterly', 'semiannual', 'annual'] },
                 holder: { type: 'string' },
                 settlementAccount: { type: 'string' }
             },
@@ -770,11 +1159,15 @@ function callGemini(
     model: string,
     systemPrompt: string,
     pdfBase64: string,
-    options?: { thinkingLevel?: string; jsonSchema?: any; cachedContent?: string }
+    options?: { thinkingLevel?: string; jsonSchema?: any; cachedContent?: string; supplementaryText?: string }
 ): Promise<string> {
     return new Promise((resolve, reject) => {
         const thinkingLevel = options?.thinkingLevel || 'low'
         const jsonSchema = options?.jsonSchema || null
+
+        // Gemini 3.x uses thinkingLevel (string), Gemini 2.5 uses thinkingBudget (number)
+        const isGemini3 = model.includes('gemini-3') || model.includes('gemini3')
+        const thinkingBudgetMap: Record<string, number> = { low: 1024, medium: 8192, high: 24576 }
 
         const generationConfig: any = {
             responseMimeType: 'application/json',
@@ -782,9 +1175,9 @@ function callGemini(
             topP: 1,
             topK: 1,
             maxOutputTokens: 200000,
-            thinkingConfig: {
-                thinkingLevel
-            }
+            thinkingConfig: isGemini3
+                ? { thinkingLevel }
+                : { thinkingBudget: thinkingBudgetMap[thinkingLevel] || 8192 }
         }
 
         // Add JSON schema enforcement if provided
@@ -792,16 +1185,23 @@ function callGemini(
             generationConfig.responseJsonSchema = jsonSchema
         }
 
+        const pdfPart: any = { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
+        // mediaResolution is only supported by Gemini 3.x models
+        if (isGemini3) {
+            pdfPart.mediaResolution = { level: 'media_resolution_high' }
+        }
+
+        const contentParts: any[] = [
+            { text: 'Analizza questo documento PDF ed estrai i dati in formato JSON.' },
+            pdfPart
+        ]
+        // Add supplementary text (e.g. extracted MOVIMENTI section) as cross-reference for the model
+        if (options?.supplementaryText) {
+            contentParts.push({ text: options.supplementaryText })
+        }
+
         const body: any = {
-            contents: [{
-                parts: [
-                    { text: 'Analizza questo documento PDF ed estrai i dati in formato JSON.' },
-                    {
-                        inlineData: { mimeType: 'application/pdf', data: pdfBase64 },
-                        mediaResolution: { level: 'media_resolution_high' }
-                    }
-                ]
-            }],
+            contents: [{ parts: contentParts }],
             generationConfig
         }
 
@@ -851,8 +1251,12 @@ function callGemini(
 }
 
 // Text-only variant for recovery paths
-function callGeminiWithText(apiKey: string, model: string, systemPrompt: string, documentText: string): Promise<string> {
+function callGeminiWithText(apiKey: string, model: string, systemPrompt: string, documentText: string, options?: { thinkingLevel?: string }): Promise<string> {
     return new Promise((resolve, reject) => {
+        const thinkingLevel = options?.thinkingLevel || 'low'
+        const isGemini3 = model.includes('gemini-3') || model.includes('gemini3')
+        const thinkingBudgetMap: Record<string, number> = { low: 1024, medium: 8192, high: 24576 }
+
         const requestBody = JSON.stringify({
             system_instruction: {
                 parts: [{ text: systemPrompt }]
@@ -868,9 +1272,9 @@ function callGeminiWithText(apiKey: string, model: string, systemPrompt: string,
                 topP: 1,
                 topK: 1,
                 maxOutputTokens: 200000,
-                thinkingConfig: {
-                    thinkingLevel: 'low'
-                }
+                thinkingConfig: isGemini3
+                    ? { thinkingLevel }
+                    : { thinkingBudget: thinkingBudgetMap[thinkingLevel] || 8192 }
             }
         })
 
@@ -927,6 +1331,7 @@ export async function POST(request: NextRequest) {
         const userId = formData.get('userId') as string
         const guestEmail = formData.get('guestEmail') as string
         const forceRecalculate = formData.get('force') === 'true'
+        const dryRun = formData.get('dryRun') === 'true'  // Test mode: skip DB save, return normalized data
         const reanalyzeId = formData.get('reanalyzeId') as string // ID analisi da ri-analizzare
 
         let fileName = file?.name || 'documento.pdf'
@@ -990,6 +1395,100 @@ export async function POST(request: NextRequest) {
         const base64Data = pdfBuffer.toString('base64')
         logProgress('PDF CONVERTITO', `${(base64Data.length / 1024).toFixed(0)}KB base64`)
 
+        // Extract text from PDF for reliable text-based retries (bypasses Gemini vision issues at page boundaries)
+        let pdfExtractedText = ''
+        let hasMovementsSection = false
+        try {
+            const pdfParser = new PDFParse(new Uint8Array(pdfBuffer))
+            const textResult = await pdfParser.getText()
+            pdfExtractedText = textResult.text || ''
+            hasMovementsSection = pdfExtractedText.toUpperCase().includes('MOVIMENTI')
+            if (pdfExtractedText.length > 100) {
+                logProgress('PDF TEXT', `${pdfExtractedText.length} car, MOVIMENTI: ${hasMovementsSection ? 'sì' : 'no'}`)
+            }
+        } catch (textErr: any) {
+            logProgress('PDF TEXT SKIP', `Estrazione testo fallita: ${textErr.message?.substring(0, 80)}`)
+        }
+
+        // Extract MOVIMENTI section from text for targeted retries
+        let movimentiSectionText = ''
+        if (hasMovementsSection && pdfExtractedText.length > 0) {
+            const movStart = pdfExtractedText.toUpperCase().indexOf('MOVIMENTI')
+            let movEnd = pdfExtractedText.toUpperCase().indexOf('DIVIDENDI', movStart > 0 ? movStart : 0)
+            if (movEnd === -1) movEnd = pdfExtractedText.length
+            movimentiSectionText = pdfExtractedText.substring(Math.max(0, movStart - 20), movEnd).trim()
+        }
+
+        // Extract CONSISTENZA section from text for DOSSIER cross-reference
+        let consistenzaSectionText = ''
+        const upperText = pdfExtractedText.toUpperCase()
+        const isDossierFromText = upperText.includes('DOSSIER TITOLI') || upperText.includes('ESTRATTO CONTO TITOLI')
+            || upperText.includes('RENDICONTO') || upperText.includes('PORTAFOGLIO TITOLI')
+        if (isDossierFromText && pdfExtractedText.length > 0) {
+            // Search for the start of the portfolio/holdings section
+            const consistKeywords = [
+                'CONSISTENZA FINALE', 'CONSISTENZA DI FINE', 'CONSISTENZA AL',
+                'CONSISTENZA', 'PORTAFOGLIO TITOLI', 'SITUAZIONE TITOLI',
+                'COMPOSIZIONE PORTAFOGLIO', 'COMPOSIZIONE DEL PORTAFOGLIO',
+                'ELENCO TITOLI', 'DETTAGLIO TITOLI', 'SITUAZIONE AL',
+                'STRUMENTI FINANZIARI'
+            ]
+            let consStart = -1
+            for (const kw of consistKeywords) {
+                const idx = upperText.indexOf(kw)
+                if (idx !== -1 && (consStart === -1 || idx < consStart)) consStart = idx
+            }
+            if (consStart !== -1) {
+                // End at MOVIMENTI/OPERAZIONI section or end of text
+                const endKeywords = ['MOVIMENTI', 'OPERAZIONI SU TITOLI', 'RIEPILOGO OPERAZIONI', 'DIVIDENDI']
+                let consEnd = -1
+                for (const ek of endKeywords) {
+                    const idx = upperText.indexOf(ek, consStart + 50)
+                    if (idx !== -1 && (consEnd === -1 || idx < consEnd)) consEnd = idx
+                }
+                if (consEnd === -1) consEnd = Math.min(consStart + 30000, pdfExtractedText.length)
+                consistenzaSectionText = pdfExtractedText.substring(Math.max(0, consStart - 20), consEnd).trim()
+
+                // Strip page headers/footers that break table continuity
+                consistenzaSectionText = consistenzaSectionText
+                    .replace(/Pagina\s+\d+\s+di\s+\d+/gi, '')
+                    .replace(/Pag\.\s*\d+/gi, '')
+                    .replace(/\f/g, ' ') // form feed = page break
+            }
+        }
+
+        // Pre-extract portfolio total from text as ground truth
+        let textPortfolioTotal = 0
+        if (isDossierFromText && pdfExtractedText.length > 0) {
+            const totalPatterns = [
+                // Standard patterns
+                /CONTROVALORE\s+TOTALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
+                /TOTALE\s+(?:APPARENTE|PORTAFOGLIO|GENERALE)[\s\S]{0,80}?([\d.]+,\d{2})/i,
+                /CONTROV\.\s*TOTALE[\s\S]{0,60}?([\d.]+,\d{2})/i,
+                // Crédit Agricole / Cariparma patterns
+                /TOTALE\s+DOSSIER[\s\S]{0,80}?([\d.]+,\d{2})/i,
+                /TOTALE\s+CONTROVALORE[\s\S]{0,80}?([\d.]+,\d{2})/i,
+                // Intesa Sanpaolo
+                /VALORE\s+COMPLESSIVO[\s\S]{0,80}?([\d.]+,\d{2})/i,
+                /CONTROV\.\s*COMPLESSIVO[\s\S]{0,60}?([\d.]+,\d{2})/i,
+                // BPM, BPER
+                /TOTALE\s+GENERALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
+                // Specific: "Totale in Euro" (not generic "Totale" which could match anything)
+                /TOTALE\s+IN\s+EURO\s*([\d.]+,\d{2})/i,
+            ]
+            for (const pat of totalPatterns) {
+                const m = pdfExtractedText.match(pat)
+                if (m) {
+                    const candidate = parseFloat(m[1].replace(/\./g, '').replace(',', '.'))
+                    if (candidate > 0) {
+                        textPortfolioTotal = candidate
+                        logProgress('TEXT PORTFOLIO TOTAL', `Estratto dal testo: ${textPortfolioTotal.toFixed(2)}€`)
+                        break
+                    }
+                }
+            }
+        }
+
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
 Il tuo compito è analizzare il documento PDF ed estrarre i dati in formato JSON rigoroso.
 
@@ -1009,18 +1508,14 @@ Intesa Sanpaolo, UniCredit, Banco BPM, BPER Banca, Monte dei Paschi di Siena, Cr
 - Esempio: se il saldo iniziale ha data 01/07/2025 e il saldo finale ha data 31/08/2025, allora period_start = "2025-07-01" e period_end = "2025-08-31" (è un estratto bimestrale).
 
 **Per DOSSIER**: Determina il periodo ESATTO del rendiconto:
-- Cerca "PERIODO RENDICONTATO", "PERIODO DI RIFERIMENTO", "DAL ... AL ..."
-- "SITUAZIONE AL [data]" o "CONSISTENZA AL [data]" indica la data di FINE periodo (period_end)
-- Il period_start è la fine del periodo PRECEDENTE (= inizio di questo periodo)
-- Per DOSSIER MENSILI: period_start = fine mese precedente, period_end = fine mese corrente
-  Esempio: "Situazione al 30/11/2024" → period_start = "2024-10-31", period_end = "2024-11-30"
-  Esempio: "Situazione al 31/05/2024" → period_start = "2024-04-30", period_end = "2024-05-31"
-- Per DOSSIER TRIMESTRALI: period_start = fine trimestre precedente, period_end = fine trimestre corrente
-  Esempio: "Situazione al 30/09/2024" → period_start = "2024-06-30", period_end = "2024-09-30"
-  Esempio: "Situazione al 31/03/2025" → period_start = "2024-12-31", period_end = "2025-03-31"
-- ATTENZIONE: NON usare date di "confronto precedente", "situazione precedente" o "riferimento precedente" come period_start. Queste sono date del VECCHIO rendiconto, non di questo.
-- Se il documento mostra "DAL 30/06/2024 AL 30/11/2024" ma contiene dati di UN SOLO MESE (novembre), allora period_start = "2024-10-31", period_end = "2024-11-30". La data 30/06 è un riferimento storico, non l'inizio del periodo.
-- I periodi DOSSIER validi sono: ~30 giorni (mensile), ~90 giorni (trimestrale), ~180 giorni (semestrale), ~365 giorni (annuale). Se il tuo periodo non corrisponde a uno di questi, probabilmente hai preso la data di inizio sbagliata.
+- **period_end** (CRITICO): Cerca "SITUAZIONE AL [data]", "CONSISTENZA AL [data]", "PERIODO RENDICONTATO", "DAL ... AL ...". La data finale è il period_end.
+- **period_start**: La data di inizio periodo (fine del periodo precedente). Se non sei sicuro, metti la tua migliore stima — verrà validata automaticamente.
+- **periodFrequency** (CRITICO): Determina la frequenza del rendiconto:
+  - "monthly" = mensile (~30 giorni, es. "Situazione al 30/11/2024" copre solo novembre)
+  - "quarterly" = trimestrale (~90 giorni, es. "Situazione al 30/09/2024" copre luglio-settembre)
+  - "semiannual" = semestrale (~180 giorni, es. copre gennaio-giugno)
+  - "annual" = annuale (~365 giorni, es. copre tutto l'anno)
+  Come determinare la frequenza: guarda quanti MESI copre il rendiconto. Se mostra "DAL 30/06/2024 AL 30/11/2024" ma i movimenti titoli sono solo di novembre, è MENSILE (non semestrale). La data 30/06 è solo un riferimento storico.
 
 ### REGOLE SPECIFICHE PER CRÉDIT AGRICOLE
 Se il documento è di Crédit Agricole (CA, Crédit Agricole, Cariparma, Friuladria):
@@ -1381,6 +1876,11 @@ Per OGNI movimento titoli estrai:
 - **date**: Data operazione (formato "DD/MM/YYYY")
 - **name**: Nome/Descrizione del titolo
 - **operationType**: "Acquisto" o "Vendita" (normalizza sempre a questi due valori)
+  Se il valore è nella colonna "Carico" → "Acquisto". Se nella colonna "Scarico" → "Vendita".
+  Mappatura: "Sottoscrizione","ACQ.CONT.SU MERC.","VERS.TITOLI","SICAV: SOTT PAC","SICAV: SOTTOSCR","FONDI: SOTTOSCR","GIRO ALTRO DOSSIER","Switch In","Carico" → "Acquisto"
+  "Vendita","VEN.CONT.SU MERC.","SICAV: RIMBORSO","FONDI: RIMBORSO","Riscatto","Switch Out","Disinvestimento","Scarico" → "Vendita"
+  IMPORTANTE: "GIRO ALTRO DOSSIER" (trasferimento titoli da altro dossier) è un movimento reale, NON ignorarlo.
+  IMPORTANTE: Leggi TUTTE le pagine della sezione MOVIMENTI fino alla fine. NON fermarti a metà pagina. I movimenti in fondo alla pagina o su pagine successive sono altrettanto importanti.
 - **quantity**: Quantità/Numero quote (positivo)
 - **price**: Prezzo/Quotazione unitario
 - **exchangeRate**: Tasso di cambio (1 se EUR o non specificato)
@@ -1416,6 +1916,27 @@ Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
 - ERRORE COMUNE: leggere "6.000" come 6.0 o "84.000" come 84.0. Questo è SBAGLIATO! Il punto è separatore migliaia.
 - VERIFICA: se la quantità del movimento è molto piccola rispetto al controvalore (es. qty=6, amount=14.707) probabilmente hai sbagliato. qty=6000 è corretto.
 
+**9.4 AUTO-VERIFICA MOVIMENTI (OBBLIGATORIA):**
+Alcune banche (es. Crédit Agricole) nella sezione MOVIMENTI mostrano per ogni strumento:
+- "Consistenza iniziale di periodo" (quantità all'inizio)
+- Ogni riga di carico/scarico (i singoli movimenti)
+- "Consistenza finale di periodo" (quantità alla fine)
+
+Se il PDF contiene queste informazioni, DEVI:
+1. Estrarre la "Consistenza iniziale di periodo" nel campo **movementsStartQuantities** (oggetto ISIN→quantità)
+2. Verificare: iniziale + somma(carichi) - somma(scarichi) = finale
+3. Se NON corrisponde → hai SALTATO un movimento. Rileggi la tabella e trova la riga mancante.
+
+Se il PDF NON mostra le consistenze iniziale/finale per strumento (es. mostra solo la lista operazioni senza totali), lascia **movementsStartQuantities** come oggetto vuoto {}.
+
+ERRORE COMUNE: estrarre solo 2-3 PAC quando ce ne sono 4-5 (PAC mensili = fino a 3-4-5 righe per trimestre).
+NON fermarti se la verifica non torna — cerca TUTTE le righe per ogni ISIN.
+
+PATTERN CRITICO: Quando per un ISIN c'è un RIMBORSO totale seguito da un SOTT PAC (o simile acquisto), sono DUE movimenti distinti:
+  - Riga 1: SICAV: RIMBORSO → Vendita (scarico di tutte le quote)
+  - Riga 2: SICAV: SOTT PAC → Acquisto (carico di nuove quote)
+  Il valore del SOTT PAC può coincidere con la consistenza finale, ma è comunque un MOVIMENTO SEPARATO. NON confonderli.
+
 ### STRUTTURA JSON RICHIESTA:
 {
   "type": "DOSSIER" | "LIQUIDITY",
@@ -1425,6 +1946,7 @@ Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
     "accountNumber": "Numero Conto o Dossier Titoli (es. 445/0000004742990)",
     "period_start": "YYYY-MM-DD",
     "period_end": "YYYY-MM-DD",
+    "periodFrequency": "monthly | quarterly | semiannual | annual",
     "holder": "Intestatario",
     "settlementAccount": "Per DOSSIER: cerca 'Conto di Regolamento', 'Conto Regolamento', 'Conto di appoggio', 'Conto corrente tecnico', 'Cash account', 'C/C Regolamento', 'Conto Corrente', 'N. Conto Corrente', 'C/EURO' (es. C/EURO 00445/00035652638). Per LIQUIDITY: IBAN"
   },
@@ -1489,6 +2011,7 @@ Come per il portafoglio, anche i movimenti titoli usano il formato italiano:
       "netAmount": 0
     }
   ],
+  "movementsStartQuantities": {},
   "dividends": []
 }
 
@@ -1504,20 +2027,50 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             logProgress('CONTEXT CACHE', 'Fallback a system_instruction inline')
         }
 
-        // First pass: low thinking for speed. If validation fails, retry with high thinking.
+        // First pass: DOSSIER gets medium thinking (more complex extraction), LIQUIDITY gets low
         const maxRetries = 3
         let resText = ''
         let parseSuccess = false
         let lastParseError = ''
-        let currentThinkingLevel = 'low'
+        let currentThinkingLevel = isDossierFromText ? 'medium' : 'low'
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName} (thinking: ${currentThinkingLevel})`)
+                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName} (thinking: ${currentThinkingLevel}, dossier: ${isDossierFromText})`)
+
+                // Build supplementary text with all available cross-references
+                const supplementaryParts: string[] = []
+
+                // MOVIMENTI section text
+                if (movimentiSectionText.length > 50 && movimentiSectionText.length < 15000) {
+                    supplementaryParts.push(
+                        `IMPORTANTE — TESTO ESTRATTO SEZIONE MOVIMENTI:\nQuesto è il testo raw della sezione MOVIMENTI del PDF. Usalo come FONTE PRIMARIA per estrarre securityMovements e movementsStartQuantities. Include tutti i movimenti anche quelli vicini ai bordi di pagina o che attraversano il page break.\nATTENZIONE: Le righe con solo data+numero senza tipo operazione sono "Consistenza iniziale/finale", NON movimenti. Le righe con data+numero+tipo operazione (es. SICAV: SOTT PAC, FONDI: SOTTOSCR) sono movimenti reali.\n\n${movimentiSectionText}`
+                    )
+                }
+
+                // CONSISTENZA section text (for DOSSIER)
+                if (consistenzaSectionText.length > 50 && consistenzaSectionText.length < 20000) {
+                    supplementaryParts.push(
+                        `IMPORTANTE — TESTO ESTRATTO SEZIONE CONSISTENZA/PORTAFOGLIO:\nQuesto è il testo raw della sezione CONSISTENZA del PDF. Usalo come RIFERIMENTO per estrarre TUTTI i titoli in finalPortfolio. Ogni riga con un codice ISIN è un titolo da estrarre. Confronta i controvalore con i numeri nel testo per evitare errori di formato italiano.\n\n${consistenzaSectionText}`
+                    )
+                }
+
+                // Pre-extracted portfolio total as ground truth
+                if (textPortfolioTotal > 0) {
+                    supplementaryParts.push(
+                        `VERIFICA PORTFOLIO: Il controvalore totale estratto dal testo del PDF è ${textPortfolioTotal.toFixed(2)}€. La somma dei marketValue in finalPortfolio DEVE essere circa uguale a questo valore.`
+                    )
+                }
+
+                const supplementaryText = supplementaryParts.length > 0
+                    ? '\n\n' + supplementaryParts.join('\n\n')
+                    : undefined
+
                 resText = await callGemini(GEMINI_API_KEY!, modelName, systemPrompt, base64Data, {
                     thinkingLevel: currentThinkingLevel,
                     jsonSchema: PARSE_PDF_JSON_SCHEMA,
-                    cachedContent: cachedContent || undefined
+                    cachedContent: cachedContent || undefined,
+                    supplementaryText
                 })
                 logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da Gemini`)
 
@@ -1543,6 +2096,11 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     errMsg.includes('503') || errMsg.includes('Internal Server Error')
 
                 if (isRateLimit) {
+                    // Daily quota exhausted - no point retrying
+                    if (errMsg.includes('per_day') || errMsg.includes('per_model_per_day')) {
+                        logProgress('QUOTA GIORNALIERA ESAURITA', 'Nessun retry possibile')
+                        break
+                    }
                     const waitTime = Math.pow(2, attempt) * 30000 // 60s, 120s, 240s
                     logProgress('RATE LIMIT', `Attendo ${waitTime / 1000}s prima del prossimo tentativo`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
@@ -1615,9 +2173,13 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         const validationExpected = validationFinal - validationInitial
         const validationError = Math.abs(validationExpected - validationSum)
 
+        const dossierHoldingsSum = parsed.type === 'DOSSIER'
+            ? (parsed.finalPortfolio || []).reduce((s: number, h: any) => s + (h.marketValue || 0), 0)
+            : 0
         const needsValidationRetry = parsed.type === 'DOSSIER'
-            ? // DOSSIER: retry solo se nessun holding estratto
-              (!parsed.finalPortfolio || parsed.finalPortfolio.length === 0)
+            ? // DOSSIER: retry se nessun holding estratto O se tutti gli holdings hanno marketValue = 0
+              (!parsed.finalPortfolio || parsed.finalPortfolio.length === 0 ||
+               (parsed.finalPortfolio.length > 0 && dossierHoldingsSum === 0))
             : // LIQUIDITY: retry se la matematica dei saldi non torna
               (validationInitial !== 0 && validationFinal !== 0 && validationError > 5) ||
               (validationInitial === 0 && validationFinal === 0 && validationMovements.length > 0)
@@ -1966,58 +2528,293 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
             }
         }
 
+        // === PHASE A-MOV: Self-contained Movement Validation ===
+        // Compare extracted scalar_data counts/amounts against actual securityMovements array.
+        // If the PDF says "3 acquisti" but we only have 1 in the array → movements are missing.
+        // This works WITHOUT any previous period — purely self-contained.
+        if (isDossier && parsed.securityMovements) {
+            const scalarBuyCount = parsed.scalar_data?.acquisto_titoli_count || 0
+            const scalarSellCount = parsed.scalar_data?.vendita_titoli_count || 0
+            const scalarTotalCount = parsed.scalar_data?.movimenti_titoli_count || (scalarBuyCount + scalarSellCount)
+            const scalarBuyAmount = Math.abs(parsed.scalar_data?.acquisto_titoli_amount || 0)
+            const scalarSellAmount = Math.abs(parsed.scalar_data?.vendita_titoli_amount || 0)
+
+            const actualBuys = parsed.securityMovements.filter((m: any) => m.operationType === 'Acquisto')
+            const actualSells = parsed.securityMovements.filter((m: any) => m.operationType === 'Vendita')
+            const actualBuyCount = actualBuys.length
+            const actualSellCount = actualSells.length
+            const actualBuyAmount = actualBuys.reduce((s: number, m: any) => s + Math.abs(m.grossAmount || m.netAmount || 0), 0)
+            const actualSellAmount = actualSells.reduce((s: number, m: any) => s + Math.abs(m.grossAmount || m.netAmount || 0), 0)
+
+            const countMismatch = scalarTotalCount > 0 && Math.abs((actualBuyCount + actualSellCount) - scalarTotalCount) > 0
+            const amountGapBuy = scalarBuyAmount > 0 ? Math.abs(actualBuyAmount - scalarBuyAmount) / scalarBuyAmount : 0
+            const amountGapSell = scalarSellAmount > 0 ? Math.abs(actualSellAmount - scalarSellAmount) / scalarSellAmount : 0
+            const hasAmountGap = amountGapBuy > 0.1 || amountGapSell > 0.1 // >10% gap
+
+            if (countMismatch || hasAmountGap) {
+                logProgress('⚠️ PHASE A-MOV: MISMATCH MOVIMENTI',
+                    `PDF dice: ${scalarBuyCount} acquisti (€${scalarBuyAmount.toFixed(0)}) + ${scalarSellCount} vendite (€${scalarSellAmount.toFixed(0)}) = ${scalarTotalCount} tot | ` +
+                    `Estratti: ${actualBuyCount} acquisti (€${actualBuyAmount.toFixed(0)}) + ${actualSellCount} vendite (€${actualSellAmount.toFixed(0)}) = ${actualBuyCount + actualSellCount} tot`
+                )
+
+                // Retry: ask Gemini to re-extract ALL movements with reinforced prompt
+                // Skip if we've already used > 180s to avoid timeout
+                const elapsedBeforeMov = (Date.now() - startTime) / 1000
+                if (elapsedBeforeMov >= 180) {
+                    logProgress('PHASE A-MOV SKIP', `Budget tempo esaurito (${elapsedBeforeMov.toFixed(0)}s), salto retry movimenti`)
+                } else
+                try {
+                    const missingInfo = []
+                    if (scalarBuyCount > actualBuyCount) missingInfo.push(`${scalarBuyCount - actualBuyCount} acquisti mancanti`)
+                    if (scalarSellCount > actualSellCount) missingInfo.push(`${scalarSellCount - actualSellCount} vendite mancanti`)
+
+                    const retryMovPrompt = `ATTENZIONE: L'estrazione iniziale dei movimenti titoli è INCOMPLETA.
+Il PDF riporta ${scalarTotalCount} operazioni titoli (${scalarBuyCount} acquisti per €${scalarBuyAmount.toFixed(0)}, ${scalarSellCount} vendite per €${scalarSellAmount.toFixed(0)}).
+Ma sono stati estratti solo ${actualBuyCount + actualSellCount} movimenti (${actualBuyCount} acquisti, ${actualSellCount} vendite).
+${missingInfo.length > 0 ? `Mancano: ${missingInfo.join(', ')}.` : ''}
+
+Riesamina TUTTE le pagine del PDF e estrai TUTTI i movimenti titoli (acquisti e vendite).
+Cerca in: "Movimenti Titoli", "Operazioni", "Compravendite", "Negoziazioni", tabelle con colonne come Data/ISIN/Quantità/Importo.
+
+Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY", "name": "...", "operationType": "Acquisto|Vendita", "quantity": 0, "price": 0, "grossAmount": 0, "netAmount": 0, "fees": 0, "taxes": 0, "currency": "EUR", "exchangeRate": 1 }] }`
+
+                    const retryMovText = await callGemini(
+                        GEMINI_API_KEY!, modelName, retryMovPrompt, base64Data,
+                        { thinkingLevel: 'medium' }
+                    )
+                    const retryMovJson = retryMovText.match(/\{[\s\S]*\}/)
+                    if (retryMovJson) {
+                        let retryMovParsed: any
+                        try {
+                            retryMovParsed = JSON.parse(retryMovJson[0])
+                        } catch {
+                            const repaired = repairTruncatedJson(retryMovJson[0])
+                            if (repaired) retryMovParsed = JSON.parse(repaired)
+                        }
+
+                        if (retryMovParsed?.securityMovements?.length) {
+                            const retryNormalized = normalizeSecurityMovementsArray(retryMovParsed.securityMovements)
+                            const retryBuys = retryNormalized.filter((m: any) => m.operationType === 'Acquisto').length
+                            const retrySells = retryNormalized.filter((m: any) => m.operationType === 'Vendita').length
+                            const retryTotal = retryBuys + retrySells
+
+                            // Use retry result if it's closer to scalar counts
+                            const origDiff = Math.abs((actualBuyCount + actualSellCount) - scalarTotalCount)
+                            const retryDiff = Math.abs(retryTotal - scalarTotalCount)
+
+                            if (retryDiff < origDiff || retryNormalized.length > parsed.securityMovements.length) {
+                                logProgress('✅ PHASE A-MOV RETRY OK',
+                                    `Retry: ${retryBuys} acquisti + ${retrySells} vendite = ${retryTotal} tot (era ${actualBuyCount + actualSellCount}). Uso retry.`
+                                )
+                                parsed.securityMovements = retryNormalized
+                            } else {
+                                logProgress('PHASE A-MOV RETRY SKIP',
+                                    `Retry non migliore: ${retryTotal} vs originale ${actualBuyCount + actualSellCount}. Mantengo originale.`
+                                )
+                            }
+                        }
+                    }
+                } catch (retryMovErr: any) {
+                    logProgress('PHASE A-MOV RETRY ERROR', retryMovErr.message)
+                }
+            } else if (scalarTotalCount > 0) {
+                logProgress('✅ PHASE A-MOV OK',
+                    `Movimenti verificati: ${actualBuyCount} acquisti + ${actualSellCount} vendite = ${actualBuyCount + actualSellCount} tot (PDF: ${scalarTotalCount})`
+                )
+            }
+        }
+
+        // === PHASE SELF-CHECK: Self-contained coherence (works WITHOUT previous period) ===
+        // Validates that movements are internally consistent with holdings.
+        // Check 1: calcInit = currentQty - buys + sells must be >= 0 (can't have negative initial qty)
+        // Check 2: if calcInit < 0, try swapping Acquisto↔Vendita for that ISIN
+        // Check 3: verify each movement qty * price ≈ grossAmount (catches Italian format errors)
+        if (isDossier && parsed.securityMovements?.length > 0 && parsed.finalPortfolio?.length > 0) {
+            const selfMovMap: Record<string, { b: number; s: number }> = {}
+            ;(parsed.securityMovements || []).forEach((m: any) => {
+                const isin = m.isin || ''
+                if (!isin) return
+                if (!selfMovMap[isin]) selfMovMap[isin] = { b: 0, s: 0 }
+                if (m.operationType === 'Acquisto') selfMovMap[isin].b += (m.quantity || 0)
+                else if (m.operationType === 'Vendita') selfMovMap[isin].s += (m.quantity || 0)
+            })
+
+            const selfHoldings: Record<string, number> = {}
+            ;(parsed.finalPortfolio || []).forEach((h: any) => { if (h.isin) selfHoldings[h.isin] = h.quantity || 0 })
+
+            // Check 1 & 2: Negative calcInit detection + operation type swap fix
+            let swapCount = 0
+            Object.keys(selfMovMap).forEach(isin => {
+                const curr = selfHoldings[isin] || 0
+                const mov = selfMovMap[isin]
+                const calcInit = curr - mov.b + mov.s
+
+                if (calcInit < -0.0001) {
+                    // calcInit negativo → impossibile. Proviamo a invertire Acquisto↔Vendita per questo ISIN
+                    const swappedCalcInit = curr - mov.s + mov.b
+                    if (swappedCalcInit >= -0.0001) {
+                        // Lo swap risolve! Invertiamo i tipi operazione per questo ISIN
+                        parsed.securityMovements.forEach((m: any) => {
+                            if (m.isin === isin) {
+                                if (m.operationType === 'Acquisto') m.operationType = 'Vendita'
+                                else if (m.operationType === 'Vendita') m.operationType = 'Acquisto'
+                            }
+                        })
+                        swapCount++
+                        logProgress('SELF-CHECK FIX',
+                            `${isin}: calcInit era ${calcInit.toFixed(2)} (negativo!) → invertito Acquisto↔Vendita → calcInit=${swappedCalcInit.toFixed(2)}`
+                        )
+                    } else {
+                        logProgress('SELF-CHECK WARN',
+                            `${isin}: calcInit=${calcInit.toFixed(2)} (negativo!) — movimenti probabilmente sbagliati`
+                        )
+                    }
+                }
+            })
+            if (swapCount > 0) {
+                logProgress('✅ SELF-CHECK', `${swapCount} ISIN con tipo operazione invertito (Acquisto↔Vendita)`)
+            }
+
+            // Check 3: Movement qty * price ≈ grossAmount (catches Italian format errors in qty)
+            let qtyFixCount = 0
+            parsed.securityMovements.forEach((m: any) => {
+                if (!m.quantity || !m.price || !m.grossAmount) return
+                if (m.quantity <= 0 || m.price <= 0 || m.grossAmount <= 0) return
+                const exchangeRate = m.exchangeRate && m.exchangeRate !== 0 ? m.exchangeRate : 1
+                const expected = m.quantity * m.price * exchangeRate
+                const ratio = Math.abs(expected - m.grossAmount) / m.grossAmount
+
+                if (ratio > 0.5) {
+                    // Il prodotto qty*price è lontano dal grossAmount → prova a correggere qty
+                    for (const mult of [1000, 1000000]) {
+                        const corrected = m.quantity * mult * m.price * exchangeRate
+                        const corrRatio = Math.abs(corrected - m.grossAmount) / m.grossAmount
+                        if (corrRatio < 0.15) {
+                            logProgress('SELF-CHECK QTY FIX',
+                                `${m.isin} ${m.operationType}: qty ${m.quantity} → ${m.quantity * mult} (×${mult}, grossAmount=${m.grossAmount.toFixed(0)})`
+                            )
+                            m.quantity = m.quantity * mult
+                            qtyFixCount++
+                            break
+                        }
+                    }
+                    // Prova anche divisione (qty troppo grande)
+                    if (ratio > 0.5) {
+                        for (const div of [1000, 1000000]) {
+                            const corrected = (m.quantity / div) * m.price * exchangeRate
+                            const corrRatio = Math.abs(corrected - m.grossAmount) / m.grossAmount
+                            if (corrRatio < 0.15) {
+                                logProgress('SELF-CHECK QTY FIX',
+                                    `${m.isin} ${m.operationType}: qty ${m.quantity} → ${m.quantity / div} (÷${div}, grossAmount=${m.grossAmount.toFixed(0)})`
+                                )
+                                m.quantity = m.quantity / div
+                                qtyFixCount++
+                                break
+                            }
+                        }
+                    }
+                }
+            })
+            if (qtyFixCount > 0) {
+                logProgress('✅ SELF-CHECK', `${qtyFixCount} quantità movimenti corrette via cross-check con grossAmount`)
+            }
+
+            // Final self-check summary
+            const finalSelfMovMap: Record<string, { b: number; s: number }> = {}
+            ;(parsed.securityMovements || []).forEach((m: any) => {
+                const isin = m.isin || ''
+                if (!isin) return
+                if (!finalSelfMovMap[isin]) finalSelfMovMap[isin] = { b: 0, s: 0 }
+                if (m.operationType === 'Acquisto') finalSelfMovMap[isin].b += (m.quantity || 0)
+                else if (m.operationType === 'Vendita') finalSelfMovMap[isin].s += (m.quantity || 0)
+            })
+            let negativeCount = 0
+            Object.keys(finalSelfMovMap).forEach(isin => {
+                const curr = selfHoldings[isin] || 0
+                const mov = finalSelfMovMap[isin]
+                const calcInit = curr - mov.b + mov.s
+                if (calcInit < -0.0001) negativeCount++
+            })
+            if (negativeCount === 0 && (swapCount > 0 || qtyFixCount > 0)) {
+                logProgress('✅ SELF-CHECK OK', `Coerenza auto-verificata: nessun calcInit negativo`)
+            } else if (negativeCount > 0) {
+                logProgress('⚠️ SELF-CHECK', `${negativeCount} ISIN con calcInit ancora negativo — movimenti potrebbero essere incompleti`)
+            }
+        }
+
         logProgress('✅ ANALISI COMPLETATA', fileName)
         console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
 
-        // === PERIOD DATE VALIDATION ===
-        // Validate that period_start/period_end form a standard banking period
-        if (parsed.info?.period_start && parsed.info?.period_end) {
-            const pStart = new Date(parsed.info.period_start)
-            const pEnd = new Date(parsed.info.period_end)
-            const diffDays = Math.round((pEnd.getTime() - pStart.getTime()) / (1000 * 60 * 60 * 24))
+        // === LAYER 1: DOSSIER period_start computed from detected frequency + period_end ===
+        // For DOSSIER: Gemini's period_start is unreliable. We determine frequency from multiple
+        // signals (movement dates, Gemini frequency, period_start hint) and compute period_start ourselves.
+        if (isDossier && parsed.info?.period_end) {
+            const detectedFreq = determineDossierFrequency(parsed)
+            if (detectedFreq) {
+                const freqMonths: Record<string, number> = { monthly: 1, quarterly: 3, semiannual: 6, annual: 12 }
+                const months = freqMonths[detectedFreq]
+                if (months) {
+                    const computedStart = computeStandardPeriodStart(parsed.info.period_end, months)
+                    const geminiStart = parsed.info.period_start || '?'
+                    const signal = (parsed.securityMovements?.length > 0) ? 'movimenti' :
+                        (parsed.info.periodFrequency ? 'gemini+hint' : 'hint')
+                    if (computedStart !== parsed.info.period_start) {
+                        logProgress('📅 LAYER 1: PERIOD_START CALCOLATO',
+                            `freq=${detectedFreq} (via ${signal}) → period_start: ${geminiStart} → ${computedStart}`
+                        )
+                    }
+                    parsed.info.period_start = computedStart
+                    parsed.info.periodFrequency = detectedFreq // store for reference
+                }
+            }
+        }
 
-            // Standard periods with tolerance: monthly(28-35), bimonthly(56-66), quarterly(85-100), semiannual(175-190), annual(360-370)
+        // === LAYER 3: Fallback for non-standard periods (LIQUIDITY or missing frequency) ===
+        // If after Layer 1 the period is still non-standard, normalize to closest standard
+        if (parsed.info?.period_start && parsed.info?.period_end) {
+            const pEnd = new Date(parsed.info.period_end)
+            const diffDays = Math.round((pEnd.getTime() - new Date(parsed.info.period_start).getTime()) / (1000 * 60 * 60 * 24))
+
             const isStandard = (
-                (diffDays >= 28 && diffDays <= 35) ||   // monthly
+                (diffDays >= 25 && diffDays <= 36) ||   // monthly
                 (diffDays >= 56 && diffDays <= 66) ||   // bimonthly
                 (diffDays >= 85 && diffDays <= 100) ||  // quarterly
-                (diffDays >= 175 && diffDays <= 190) || // semiannual
-                (diffDays >= 360 && diffDays <= 370)    // annual
+                (diffDays >= 175 && diffDays <= 195) || // semiannual
+                (diffDays >= 355 && diffDays <= 375)    // annual
             )
 
-            if (!isStandard && diffDays > 0) {
-                logProgress('⚠️ PERIODO NON STANDARD',
-                    `${diffDays} giorni (${parsed.info.period_start} → ${parsed.info.period_end}). Normalizzo period_start.`
-                )
-
-                // Use period_end as anchor (more reliable), compute closest standard period_start
-                // Find closest standard duration
-                const standards = [30, 61, 91, 182, 365]
+            if (!isStandard && diffDays > 0 && isDossier) {
+                const standards = [30, 91, 182, 365]
                 const closest = standards.reduce((best, d) =>
                     Math.abs(d - diffDays) < Math.abs(best - diffDays) ? d : best
                 )
+                const monthsMap: Record<number, number> = { 30: 1, 91: 3, 182: 6, 365: 12 }
+                const correctedStart = computeStandardPeriodStart(parsed.info.period_end, monthsMap[closest])
 
-                // Compute new period_start by subtracting the closest standard months from period_end
-                const monthsMap: Record<number, number> = { 30: 1, 61: 2, 91: 3, 182: 6, 365: 12 }
-                const monthsToSubtract = monthsMap[closest] || 1
-                const newStart = new Date(pEnd)
-                newStart.setMonth(newStart.getMonth() - monthsToSubtract)
-                // Adjust to end-of-month (banking periods end on last day of month)
-                // E.g., if period_end = 30/11/2024 and monthly, newStart should be 31/10/2024
-                const lastDayOfNewStartMonth = new Date(newStart.getFullYear(), newStart.getMonth() + 1, 0)
-                const correctedStart = lastDayOfNewStartMonth.toISOString().split('T')[0]
-
-                logProgress('📅 PERIODO CORRETTO',
-                    `${parsed.info.period_start} → ${correctedStart} (${closest} giorni standard, ${monthsToSubtract} mesi)`
+                logProgress('📅 LAYER 3: PERIODO NON STANDARD CORRETTO',
+                    `${diffDays}d (${parsed.info.period_start} → ${parsed.info.period_end}) → ${correctedStart} (closest: ${closest}d)`
                 )
                 parsed.info.period_start = correctedStart
+            }
+        }
+
+        // === TEXT CORRECTION: Fix holdings numbers from extracted text ===
+        const textCorrectedIsins = new Set<string>()
+        if (isDossier && consistenzaSectionText.length > 50) {
+            try {
+                const textCorrected = correctHoldingsFromText(parsed, consistenzaSectionText, logProgress, textCorrectedIsins)
+                if (textCorrected > 0) {
+                    logProgress('TEXT CORRECTION', `Corretti ${textCorrected} titoli con dati dal testo PDF`)
+                }
+            } catch (textCorrErr: any) {
+                logProgress('TEXT CORRECTION ERROR', textCorrErr.message)
             }
         }
 
         // === PHASE A: Self-contained Portfolio Total Validation ===
         if (isDossier) {
             try {
-                const phaseAResult = validatePortfolioTotals(parsed)
+                const phaseAResult = validatePortfolioTotals(parsed, textPortfolioTotal)
 
                 logProgress('PHASE A',
                     `Somma titoli: ${phaseAResult.sumOfMarketValues.toFixed(2)}€ | ` +
@@ -2025,7 +2822,8 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
                     `Gap: ${phaseAResult.gap.toFixed(2)}€ (${phaseAResult.gapPercent.toFixed(1)}%)`
                 )
 
-                if (phaseAResult.needsRetry) {
+                const elapsedBeforePhaseA = (Date.now() - startTime) / 1000
+                if (phaseAResult.needsRetry && elapsedBeforePhaseA < 150) {
                     const holdingsCount = (parsed.finalPortfolio || []).length
                     logProgress('PHASE A RETRY',
                         `Gap significativo (${phaseAResult.gap.toFixed(0)}€, ${phaseAResult.gapPercent.toFixed(1)}%). Retry con prompt rinforzato.`
@@ -2054,7 +2852,7 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                             }
 
                             if (retryParsed?.finalPortfolio?.length) {
-                                const retryValidation = validatePortfolioTotals(retryParsed)
+                                const retryValidation = validatePortfolioTotals(retryParsed, textPortfolioTotal)
 
                                 logProgress('PHASE A RESULT',
                                     `Retry: ${retryParsed.finalPortfolio.length} titoli, gap ${retryValidation.gap.toFixed(0)}€ | ` +
@@ -2084,49 +2882,121 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                     } catch (phaseAErr: any) {
                         logProgress('PHASE A ERROR', `Retry fallito: ${phaseAErr.message}. Proseguo con originale.`)
                     }
+                } else if (phaseAResult.needsRetry) {
+                    logProgress('PHASE A SKIP TEMPO', `Budget tempo esaurito (${elapsedBeforePhaseA.toFixed(0)}s), salto retry portafoglio`)
                 } else {
                     logProgress('PHASE A OK', 'Totali portafoglio corrispondono')
                 }
             } catch (phaseAOuterErr: any) {
                 logProgress('PHASE A SKIP', `Errore: ${phaseAOuterErr.message}`)
             }
+
+            // === POST-PHASE-A TEXT CORRECTION ===
+            // If Phase A retry replaced finalPortfolio, re-apply text correction to fix any new errors
+            if (consistenzaSectionText.length > 50) {
+                try {
+                    const postCorrected = correctHoldingsFromText(parsed, consistenzaSectionText, logProgress, textCorrectedIsins)
+                    if (postCorrected > 0) {
+                        logProgress('POST-PHASE-A TEXT FIX', `Corretti ${postCorrected} titoli dopo Phase A retry`)
+                    }
+                } catch (postCorrErr: any) {
+                    logProgress('POST-PHASE-A TEXT ERROR', postCorrErr.message)
+                }
+            }
+
+            // === FINAL PORTFOLIO TOTAL CHECK ===
+            // Compare sum of holdings against text-extracted total — last chance to catch errors
+            if (textPortfolioTotal > 0) {
+                const finalSum = (parsed.finalPortfolio || []).reduce((s: number, h: any) => s + (h.marketValue || 0), 0)
+                const finalGap = Math.abs(finalSum - textPortfolioTotal)
+                const finalGapPct = textPortfolioTotal > 0 ? (finalGap / textPortfolioTotal) * 100 : 0
+                if (finalGapPct > 5 && finalGap > 100) {
+                    logProgress('⚠️ PORTFOLIO GAP', `Somma holdings (${finalSum.toFixed(0)}€) vs PDF totale (${textPortfolioTotal.toFixed(0)}€) = gap ${finalGapPct.toFixed(1)}%`)
+                } else {
+                    logProgress('✅ PORTFOLIO CHECK', `Somma ${finalSum.toFixed(0)}€ ≈ PDF ${textPortfolioTotal.toFixed(0)}€ (gap ${finalGapPct.toFixed(1)}%)`)
+                }
+            }
         }
 
         // Check for duplicate period BEFORE saving (unless force flag is set)
         const supabase = await createClient()
-        const periodStart = parseDate(parsed.info?.period_start)
+        let periodStart = parseDate(parsed.info?.period_start)
         const periodEnd = parseDate(parsed.info?.period_end)
         const accountNumber = parsed.info?.accountNumber
 
-        // Auto-replace duplicate period (soft-delete old, save new) — avoids double Gemini call
+        // Auto-replace duplicate/overlapping period (soft-delete old, save new)
         let replacedAnalysisId: string | null = null
         if (!isReanalysis && userId && periodStart && periodEnd && accountNumber) {
-            logProgress('CHECK DUPLICATI', 'Verifico periodo già caricato')
+            logProgress('CHECK DUPLICATI/OVERLAP', 'Verifico periodo già caricato o sovrapposto')
+
+            // Fetch all docs for this account to check for ANY overlap (not just exact match)
             const { data: existingAnalyses } = await supabase
                 .from('analyses')
                 .select('id, period_start, period_end, benchmark_comparison')
                 .eq('user_id', userId)
-                .eq('period_start', periodStart)
-                .eq('period_end', periodEnd)
                 .is('deleted_at', null)
 
             const normalizedNew = normalizeAccountNumber(accountNumber)
-            const existingAnalysis = existingAnalyses?.find(a =>
+            const sameAccountDocs = (existingAnalyses || []).filter(a =>
                 normalizeAccountNumber(a.benchmark_comparison || '') === normalizedNew
             )
 
-            if (existingAnalysis) {
-                logProgress('⚠️ DUPLICATO → SOSTITUZIONE', `Soft-delete ${existingAnalysis.id}, salvo nuova analisi`)
-                replacedAnalysisId = existingAnalysis.id
+            // === PRE-SAVE: Account-context period_start validation ===
+            // If this account already has docs, use their frequency to validate/correct period_start.
+            // This fixes Gemini errors where period_start is read from the wrong place in the PDF.
+            // period_end is always reliable; period_start is recomputed if it doesn't match account frequency.
+            if (sameAccountDocs.length >= 2) {
+                const durations = sameAccountDocs.map(a =>
+                    a.period_start && a.period_end
+                        ? Math.round((new Date(a.period_end).getTime() - new Date(a.period_start).getTime()) / 86400000)
+                        : 0
+                ).filter(d => d > 0)
+
+                const buckets: Record<string, number> = { monthly: 0, quarterly: 0, semiannual: 0, annual: 0 }
+                for (const d of durations) {
+                    if (d >= 25 && d <= 36) buckets.monthly++
+                    else if (d >= 85 && d <= 100) buckets.quarterly++
+                    else if (d >= 175 && d <= 195) buckets.semiannual++
+                    else if (d >= 355 && d <= 375) buckets.annual++
+                }
+
+                const sortedBuckets = Object.entries(buckets).sort((a, b) => b[1] - a[1])
+                const [majorityFreq, majorityCount] = sortedBuckets[0]
+
+                if (majorityCount >= 2) {
+                    const currentDays = Math.round(
+                        (new Date(periodEnd).getTime() - new Date(periodStart).getTime()) / 86400000
+                    )
+                    if (!doesMatchFrequency(currentDays, majorityFreq)) {
+                        const monthsMap: Record<string, number> = { monthly: 1, quarterly: 3, semiannual: 6, annual: 12 }
+                        const correctedStart = computeStandardPeriodStart(periodEnd, monthsMap[majorityFreq])
+                        logProgress('🔧 PRE-SAVE FIX',
+                            `period_start corretto da ${periodStart} a ${correctedStart} (freq conto: ${majorityFreq}, era ${currentDays}d)`
+                        )
+                        parsed.info.period_start = correctedStart
+                        periodStart = correctedStart
+                    }
+                }
+            }
+
+            // Check exact duplicate (uses potentially corrected periodStart)
+            const exactDuplicate = sameAccountDocs.find(a =>
+                a.period_start === periodStart && a.period_end === periodEnd
+            )
+
+            if (exactDuplicate) {
+                logProgress('⚠️ DUPLICATO → SOSTITUZIONE', `Soft-delete ${exactDuplicate.id}, salvo nuova analisi`)
+                replacedAnalysisId = exactDuplicate.id
                 await supabase
                     .from('analyses')
                     .update({ deleted_at: new Date().toISOString() })
-                    .eq('id', existingAnalysis.id)
+                    .eq('id', exactDuplicate.id)
             }
         }
 
         // === PHASE B: Cross-period Portfolio Validation ===
-        if (isDossier && userId && periodStart && periodEnd) {
+        const elapsedBeforeB = (Date.now() - startTime) / 1000
+        if (isDossier && userId && periodStart && periodEnd && elapsedBeforeB < 180) {
             try {
                 logProgress('PHASE B', 'Verifica cross-period con periodo precedente')
 
@@ -2137,7 +3007,7 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                     .select('id, period_start, period_end, holdings, costs_breakdown, benchmark_comparison')
                     .eq('user_id', userId)
                     .eq('account_type', 'DOSSIER')
-                    .lt('period_end', periodStart)
+                    .lte('period_end', periodStart)
                     .is('deleted_at', null)
                     .order('period_end', { ascending: false })
                     .limit(5)
@@ -2250,6 +3120,723 @@ Rispondi SOLO con questo JSON:
             }
         }
 
+        // === SELF-VALIDATION: Verify movements using MOVIMENTI initial/final quantities ===
+        // This catches missing movements WITHOUT needing the previous period
+        const elapsedBeforeSV = (Date.now() - startTime) / 1000
+        if (isDossier && parsed.movementsStartQuantities && Object.keys(parsed.movementsStartQuantities).length > 0 && parsed.securityMovements?.length > 0 && elapsedBeforeSV < 120) {
+            try {
+                const startQties = parsed.movementsStartQuantities as Record<string, number>
+                const svCurrentH: Record<string, number> = {}
+                ;(parsed.finalPortfolio || []).forEach((h: any) => { if (h.isin) svCurrentH[h.isin] = h.quantity || 0 })
+
+                const svMovMap: Record<string, { b: number; s: number }> = {}
+                ;(parsed.securityMovements || []).forEach((m: any) => {
+                    const isin = m.isin || ''
+                    if (!isin) return
+                    if (!svMovMap[isin]) svMovMap[isin] = { b: 0, s: 0 }
+                    if (m.operationType === 'Acquisto') svMovMap[isin].b += (m.quantity || 0)
+                    else if (m.operationType === 'Vendita') svMovMap[isin].s += (m.quantity || 0)
+                })
+
+                const svMismatches: { isin: string; startQty: number; gap: number; actualFinal: number }[] = []
+                for (const [isin, startQty] of Object.entries(startQties)) {
+                    if (typeof startQty !== 'number' || startQty <= 0) continue
+                    const mov = svMovMap[isin] || { b: 0, s: 0 }
+                    const expectedFinal = startQty + mov.b - mov.s
+                    const actualFinal = svCurrentH[isin] || 0
+                    if (actualFinal <= 0) continue
+                    const gap = Math.abs(expectedFinal - actualFinal)
+                    if (gap > 0.001 && gap / actualFinal > 0.001) {
+                        svMismatches.push({ isin, startQty, gap, actualFinal })
+                        logProgress('MOV CHECK', `${isin}: iniziale=${startQty} + buys=${mov.b.toFixed(3)} - sells=${mov.s.toFixed(3)} = ${expectedFinal.toFixed(3)} ≠ finale=${actualFinal.toFixed(3)} (gap=${gap.toFixed(3)})`)
+                    }
+                }
+
+                if (svMismatches.length > 0 && svMismatches.length <= 10) {
+                    const searchList = svMismatches.map(m => {
+                        const mov = svMovMap[m.isin] || { b: 0, s: 0 }
+                        const name = (parsed.securityMovements || []).find((mv: any) => mv.isin === m.isin)?.name ||
+                                     (parsed.finalPortfolio || []).find((h: any) => h.isin === m.isin)?.name || m.isin
+                        const expectedFinal = m.startQty + mov.b - mov.s
+                        const missingQty = m.actualFinal - expectedFinal
+                        const missingType = missingQty > 0 ? 'Acquisto (carico)' : 'Vendita (scarico)'
+                        const missingAbs = Math.abs(missingQty).toFixed(3)
+                        return `- ${m.isin} (${name}): consistenza iniziale=${m.startQty}, consistenza finale=${m.actualFinal}. MANCA: ${missingType} di ~${missingAbs} quote. Cerca SOTT PAC, SOTTOSCR, ACQ.CONT.SU MERC., GIRO ALTRO DOSSIER, RIMBORSO o altro nella riga con questo valore nella colonna Carico/Scarico.`
+                    }).join('\n')
+
+                    logProgress('MOV RETRY', `Auto-validazione: ${svMismatches.length} strumenti con movimenti mancanti`)
+
+                    const svPrompt = `Nella sezione MOVIMENTI del PDF, per alcuni strumenti mancano dei movimenti.
+
+${searchList}
+
+Estrai TUTTI i movimenti (carico E scarico) per questi ISIN dalla sezione MOVIMENTI. Per ogni ISIN, leggi TUTTE le righe tra la "Consistenza iniziale di periodo" e la "Consistenza finale di periodo".
+
+REGOLE CRITICHE:
+- Ogni riga con una data e un valore nella colonna "Carico" è un Acquisto
+- Ogni riga con una data e un valore nella colonna "Scarico" è una Vendita
+- Se il valore di un carico (es. 287,572) coincide con la consistenza finale, sono comunque DUE righe distinte: il carico è un movimento reale
+- SICAV: SOTT PAC, SICAV: SOTTOSCR → Acquisto
+- SICAV: RIMBORSO, FONDI: RIMBORSO → Vendita
+- GIRO ALTRO DOSSIER → Acquisto
+- I PAC mensili possono avere 3, 4, 5 righe per trimestre
+
+Rispondi con JSON contenente TUTTI i movimenti trovati (filtreremo noi i duplicati):
+{ "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY", "name": "...", "operationType": "Acquisto"|"Vendita", "quantity": 0, "price": 0, "grossAmount": 0, "netAmount": 0, "fees": 0, "taxes": 0, "currency": "EUR", "exchangeRate": 1 }] }`
+
+                    // Use text-based retry when MOVIMENTI text is available (bypasses Gemini vision issues at page boundaries)
+                    let svText: string
+                    if (movimentiSectionText.length > 50) {
+                        logProgress('MOV RETRY', 'Usando testo estratto (non PDF image)')
+                        svText = await callGeminiWithText(GEMINI_API_KEY!, modelName, svPrompt,
+                            `Ecco il testo estratto dalla sezione MOVIMENTI del documento:\n\n${movimentiSectionText}`,
+                            { thinkingLevel: 'medium' })
+                    } else {
+                        svText = await callGemini(GEMINI_API_KEY!, modelName, svPrompt, base64Data, { thinkingLevel: 'medium' })
+                    }
+                    const svJson = svText.match(/\{[\s\S]*\}/)
+                    if (svJson) {
+                        let svParsed: any
+                        try { svParsed = JSON.parse(svJson[0]) }
+                        catch { const r = repairTruncatedJson(svJson[0]); if (r) svParsed = JSON.parse(r) }
+
+                        if (svParsed?.securityMovements?.length) {
+                            const svFoundMovs = normalizeSecurityMovementsArray(svParsed.securityMovements)
+                            const svTargetIsins = new Set(svMismatches.map(m => m.isin))
+                            let svAdded = 0
+
+                            // Group found movements by ISIN (filter duplicates)
+                            const svGrouped: Record<string, any[]> = {}
+                            for (const mov of svFoundMovs) {
+                                if (!mov.isin || !svTargetIsins.has(mov.isin)) continue
+                                const isDup = parsed.securityMovements.some((ex: any) =>
+                                    ex.isin === mov.isin && ex.operationType === mov.operationType &&
+                                    Math.abs((ex.quantity || 0) - (mov.quantity || 0)) < 0.01
+                                )
+                                if (isDup) continue
+                                if (!svGrouped[mov.isin]) svGrouped[mov.isin] = []
+                                svGrouped[mov.isin].push(mov)
+                            }
+
+                            // Validate as a GROUP per ISIN (not individually)
+                            // This handles cases like DB X TRACKERS where buy+sell together resolve the gap
+                            for (const [isin, movs] of Object.entries(svGrouped)) {
+                                const mm = svMismatches.find(m => m.isin === isin)!
+                                const eMov = svMovMap[isin] || { b: 0, s: 0 }
+                                let groupB = eMov.b, groupS = eMov.s
+                                for (const mov of movs) {
+                                    if (mov.operationType === 'Acquisto') groupB += (mov.quantity || 0)
+                                    else if (mov.operationType === 'Vendita') groupS += (mov.quantity || 0)
+                                }
+                                const newGap = Math.abs((mm.startQty + groupB - groupS) - mm.actualFinal)
+                                if (newGap >= mm.gap) {
+                                    logProgress('MOV RETRY SKIP', `${isin}: gruppo di ${movs.length} movimenti non migliora (gap ${mm.gap.toFixed(3)}→${newGap.toFixed(3)})`)
+                                    continue
+                                }
+                                for (const mov of movs) {
+                                    parsed.securityMovements.push(mov)
+                                    if (!svMovMap[mov.isin]) svMovMap[mov.isin] = { b: 0, s: 0 }
+                                    if (mov.operationType === 'Acquisto') svMovMap[mov.isin].b += (mov.quantity || 0)
+                                    else svMovMap[mov.isin].s += (mov.quantity || 0)
+                                    svAdded++
+                                    logProgress('MOV FOUND', `+ ${mov.operationType} ${mov.isin}: ${(mov.quantity || 0).toFixed(3)} quote`)
+                                }
+                            }
+                            if (svAdded > 0) logProgress('✅ MOV FIXED', `${svAdded} movimenti mancanti trovati e aggiunti`)
+                        }
+                    }
+
+                    // SECOND RETRY: ultra-targeted prompt for remaining mismatches
+                    const svRemaining: typeof svMismatches = []
+                    for (const mm of svMismatches) {
+                        const mov = svMovMap[mm.isin] || { b: 0, s: 0 }
+                        const ef = mm.startQty + mov.b - mov.s
+                        if (Math.abs(ef - mm.actualFinal) > 0.001) svRemaining.push(mm)
+                    }
+                    if (svRemaining.length > 0 && (Date.now() - startTime) / 1000 < 160) {
+                        logProgress('MOV RETRY2', `Secondo tentativo mirato per ${svRemaining.length} ISIN`)
+                        const retry2List = svRemaining.map(m => {
+                            const mov = svMovMap[m.isin] || { b: 0, s: 0 }
+                            const ef = m.startQty + mov.b - mov.s
+                            const missing = m.actualFinal - ef
+                            const name = (parsed.finalPortfolio || []).find((h: any) => h.isin === m.isin)?.name || m.isin
+                            return `${m.isin} (${name}): consistenza iniziale=${m.startQty.toFixed(3)}, consistenza finale=${m.actualFinal.toFixed(3)}. Manca un ${missing > 0 ? 'CARICO (Acquisto)' : 'SCARICO (Vendita)'} di ESATTAMENTE ${Math.abs(missing).toFixed(3)} quote. Cerca la riga con questo valore tra il primo e l'ultimo rigo di questo ISIN.`
+                        }).join('\n')
+
+                        const retry2Prompt = `COMPITO PRECISO: nella sezione MOVIMENTI del PDF, per ogni ISIN sotto c'è un movimento che non è stato letto. Trova la riga ESATTA.
+
+${retry2List}
+
+COME LEGGERE LA TABELLA MOVIMENTI:
+- La prima riga per ogni ISIN (con data e valore nella colonna "Consistenza iniziale") è il saldo iniziale, NON un movimento
+- L'ultima riga per ogni ISIN (con data e valore nella colonna "Consistenza finale") è il saldo finale, NON un movimento
+- Tutte le righe INTERMEDIE con data e valore nella colonna "Carico" sono Acquisti
+- Tutte le righe INTERMEDIE con data e valore nella colonna "Scarico" sono Vendite
+- ATTENZIONE: un valore Carico può coincidere con la Consistenza finale (stessa quantità, righe diverse!)
+
+Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY", "name": "...", "operationType": "Acquisto"|"Vendita", "quantity": 0, "price": 0, "grossAmount": 0, "netAmount": 0, "fees": 0, "taxes": 0, "currency": "EUR", "exchangeRate": 1 }] }`
+
+                        try {
+                            // Use text-based retry when available
+                            let sv2Text: string
+                            if (movimentiSectionText.length > 50) {
+                                sv2Text = await callGeminiWithText(GEMINI_API_KEY!, modelName, retry2Prompt,
+                                    `Testo estratto dalla sezione MOVIMENTI:\n\n${movimentiSectionText}`,
+                                    { thinkingLevel: 'high' })
+                            } else {
+                                sv2Text = await callGemini(GEMINI_API_KEY!, modelName, retry2Prompt, base64Data, { thinkingLevel: 'high' })
+                            }
+                            const sv2Json = sv2Text.match(/\{[\s\S]*\}/)
+                            if (sv2Json) {
+                                let sv2Parsed: any
+                                try { sv2Parsed = JSON.parse(sv2Json[0]) }
+                                catch { const r = repairTruncatedJson(sv2Json[0]); if (r) sv2Parsed = JSON.parse(r) }
+                                if (sv2Parsed?.securityMovements?.length) {
+                                    const sv2Movs = normalizeSecurityMovementsArray(sv2Parsed.securityMovements)
+                                    const sv2Targets = new Set(svRemaining.map(m => m.isin))
+                                    const sv2Grouped: Record<string, any[]> = {}
+                                    for (const mov of sv2Movs) {
+                                        if (!mov.isin || !sv2Targets.has(mov.isin)) continue
+                                        const isDup = parsed.securityMovements.some((ex: any) =>
+                                            ex.isin === mov.isin && ex.operationType === mov.operationType &&
+                                            Math.abs((ex.quantity || 0) - (mov.quantity || 0)) < 0.01
+                                        )
+                                        if (isDup) continue
+                                        if (!sv2Grouped[mov.isin]) sv2Grouped[mov.isin] = []
+                                        sv2Grouped[mov.isin].push(mov)
+                                    }
+                                    for (const [isin, movs] of Object.entries(sv2Grouped)) {
+                                        const mm = svRemaining.find(m => m.isin === isin)!
+                                        const eMov = svMovMap[isin] || { b: 0, s: 0 }
+                                        let gB = eMov.b, gS = eMov.s
+                                        for (const mov of movs) {
+                                            if (mov.operationType === 'Acquisto') gB += (mov.quantity || 0)
+                                            else if (mov.operationType === 'Vendita') gS += (mov.quantity || 0)
+                                        }
+                                        const newGap = Math.abs((mm.startQty + gB - gS) - mm.actualFinal)
+                                        if (newGap >= mm.gap) continue
+                                        for (const mov of movs) {
+                                            parsed.securityMovements.push(mov)
+                                            if (!svMovMap[mov.isin]) svMovMap[mov.isin] = { b: 0, s: 0 }
+                                            if (mov.operationType === 'Acquisto') svMovMap[mov.isin].b += (mov.quantity || 0)
+                                            else svMovMap[mov.isin].s += (mov.quantity || 0)
+                                            logProgress('MOV FOUND2', `+ ${mov.operationType} ${mov.isin}: ${(mov.quantity || 0).toFixed(3)} quote (2° tentativo)`)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (sv2Err: any) {
+                            logProgress('MOV RETRY2 ERROR', sv2Err.message)
+                        }
+                    }
+                } else if (svMismatches.length === 0 && Object.keys(startQties).length > 0) {
+                    logProgress('✅ MOV CHECK OK', `Movimenti auto-validati per ${Object.keys(startQties).length} strumenti`)
+                }
+            } catch (svErr: any) {
+                logProgress('MOV CHECK ERROR', svErr.message)
+            }
+        }
+
+        // === PORTFOLIO CROSS-CHECK: find ISINs in portfolio but completely missing from MOVIMENTI ===
+        // This catches ISINs the model missed entirely (e.g. bottom of page) WITHOUT needing previous period
+        const elapsedBeforeXC = (Date.now() - startTime) / 1000
+        if (isDossier && parsed.movementsStartQuantities && Object.keys(parsed.movementsStartQuantities).length > 0
+            && parsed.finalPortfolio?.length > 0 && elapsedBeforeXC < 150) {
+            try {
+                const startQties = parsed.movementsStartQuantities as Record<string, number>
+                const movIsins = new Set([
+                    ...Object.keys(startQties),
+                    ...(parsed.securityMovements || []).map((m: any) => m.isin).filter(Boolean)
+                ])
+                const portfolioIsins = (parsed.finalPortfolio || []).map((h: any) => h.isin).filter(Boolean)
+                const missingFromMov = portfolioIsins.filter((isin: string) => !movIsins.has(isin))
+
+                if (missingFromMov.length > 0 && missingFromMov.length <= 10) {
+                    const missingNames = missingFromMov.map((isin: string) => {
+                        const h = parsed.finalPortfolio.find((x: any) => x.isin === isin)
+                        return `- ${isin} (${h?.name || isin}): quantità nel portafoglio = ${(h?.quantity || 0).toFixed(3)}`
+                    }).join('\n')
+
+                    logProgress('XC CHECK', `${missingFromMov.length} ISIN nel portafoglio ma non nei MOVIMENTI estratti — verifico`)
+
+                    const xcPrompt = `Nella sezione MOVIMENTI del PDF (tabella con colonne: Codice, Descrizione, Data, Consistenza iniziale, Carico, Scarico, Consistenza finale), verifica se questi ISIN appaiono:
+
+${missingNames}
+
+Per ogni ISIN che TROVI nella sezione MOVIMENTI, estrai TUTTI i movimenti (ogni riga con data e valore in Carico o Scarico) E la "Consistenza iniziale di periodo".
+
+Se un ISIN NON appare nella sezione MOVIMENTI, non includerlo.
+
+Rispondi con JSON: { "found": { "ISIN": { "startQty": 0, "movements": [{ "isin": "...", "date": "DD/MM/YYYY", "name": "...", "operationType": "Acquisto"|"Vendita", "quantity": 0, "price": 0, "grossAmount": 0, "netAmount": 0, "fees": 0, "taxes": 0, "currency": "EUR", "exchangeRate": 1 }] } } }`
+
+                    // Use text-based retry when available
+                    let xcText: string
+                    if (movimentiSectionText.length > 50) {
+                        xcText = await callGeminiWithText(GEMINI_API_KEY!, modelName, xcPrompt,
+                            `Testo estratto dalla sezione MOVIMENTI:\n\n${movimentiSectionText}`,
+                            { thinkingLevel: 'high' })
+                    } else {
+                        xcText = await callGemini(GEMINI_API_KEY!, modelName, xcPrompt, base64Data, { thinkingLevel: 'high' })
+                    }
+                    const xcJson = xcText.match(/\{[\s\S]*\}/)
+                    if (xcJson) {
+                        let xcParsed: any
+                        try { xcParsed = JSON.parse(xcJson[0]) }
+                        catch { const r = repairTruncatedJson(xcJson[0]); if (r) xcParsed = JSON.parse(r) }
+                        if (xcParsed?.found) {
+                            let xcAdded = 0
+                            for (const [isin, data] of Object.entries(xcParsed.found) as [string, any][]) {
+                                if (!data) continue
+                                // Add to movementsStartQuantities
+                                if (typeof data.startQty === 'number' && data.startQty > 0) {
+                                    (parsed.movementsStartQuantities as any)[isin] = data.startQty
+                                    logProgress('XC FOUND', `${isin}: consistenza iniziale = ${data.startQty}`)
+                                }
+                                // Add movements
+                                if (data.movements?.length) {
+                                    const xcMovs = normalizeSecurityMovementsArray(data.movements)
+                                    for (const mov of xcMovs) {
+                                        if (!mov.isin) mov.isin = isin
+                                        const isDup = parsed.securityMovements.some((ex: any) =>
+                                            ex.isin === mov.isin && ex.operationType === mov.operationType &&
+                                            Math.abs((ex.quantity || 0) - (mov.quantity || 0)) < 0.01
+                                        )
+                                        if (isDup) continue
+                                        parsed.securityMovements.push(mov)
+                                        xcAdded++
+                                        logProgress('XC MOV', `+ ${mov.operationType} ${mov.isin}: ${(mov.quantity || 0).toFixed(3)} quote`)
+                                    }
+                                }
+                            }
+                            if (xcAdded > 0) logProgress('✅ XC FIXED', `${xcAdded} movimenti recuperati da ISIN mancanti`)
+                        }
+                    }
+                }
+            } catch (xcErr: any) {
+                logProgress('XC ERROR', xcErr.message)
+            }
+        }
+
+        // Track ISINs whose quantity was corrected by Phase C — skip normalizeItalianQuantity for these
+        const phaseCFixedIsins = new Set<string>()
+
+        // === PHASE C: Movement Coherence Validation + Targeted Retry ===
+        // For each ISIN: calcInit = currentQty - buys + sells. Compare against prevDoc's holdings.
+        // If mismatch → ask Gemini to search for the specific missing movements in the PDF.
+        // SKIP if we've already used > 240s to avoid 5min timeout
+        const elapsedBeforeC = (Date.now() - startTime) / 1000
+        if (isDossier && userId && periodStart && periodEnd && elapsedBeforeC < 240) {
+            try {
+                const normalizedAccC = normalizeAccountNumber(accountNumber || '')
+                const { data: prevAnalysesC } = await supabase
+                    .from('analyses')
+                    .select('id, period_start, period_end, holdings, costs_breakdown, benchmark_comparison')
+                    .eq('user_id', userId)
+                    .eq('account_type', 'DOSSIER')
+                    .lte('period_end', periodStart)
+                    .is('deleted_at', null)
+                    .order('period_end', { ascending: false })
+                    .limit(20)
+
+                const prevDocC = prevAnalysesC?.find(a =>
+                    normalizeAccountNumber(a.benchmark_comparison || '') === normalizedAccC
+                )
+                if (!prevDocC) {
+                    logProgress('PHASE C SKIP', 'Nessun periodo precedente per validare coerenza movimenti')
+                }
+
+                if (prevDocC?.holdings?.length) {
+                    // Check if previous document is immediately adjacent (within ~1.5 quarters)
+                    const prevEndDate = new Date(prevDocC.period_end)
+                    const currStartDate = new Date(periodStart)
+                    const daysBetweenPeriods = Math.round((currStartDate.getTime() - prevEndDate.getTime()) / 86400000)
+                    const isPrevAdjacent = daysBetweenPeriods >= 0 && daysBetweenPeriods <= 45
+                    if (!isPrevAdjacent) {
+                        logProgress('PHASE C INFO', `Periodo precedente ${prevDocC.period_end} non adiacente (${daysBetweenPeriods}gg gap) — skip targeted retry`)
+                    }
+
+                    // Build previous holdings map
+                    const prevH: Record<string, number> = {}
+                    prevDocC.holdings.forEach((h: any) => { if (h.isin) prevH[h.isin] = h.quantity || 0 })
+
+                    // Build movements map from current doc
+                    const movMap: Record<string, { b: number; s: number }> = {}
+                    ;(parsed.securityMovements || []).forEach((m: any) => {
+                        const isin = m.isin || ''
+                        if (!isin) return
+                        if (!movMap[isin]) movMap[isin] = { b: 0, s: 0 }
+                        const qty = m.quantity || 0
+                        if (m.operationType === 'Acquisto') movMap[isin].b += qty
+                        else if (m.operationType === 'Vendita') movMap[isin].s += qty
+                    })
+
+                    // Compute calcInit for each ISIN and find mismatches
+                    const mismatches: { isin: string; prevQty: number; currQty: number; calcInit: number; buys: number; sells: number }[] = []
+                    const currentH: Record<string, number> = {}
+                    ;(parsed.finalPortfolio || []).forEach((h: any) => { if (h.isin) currentH[h.isin] = h.quantity || 0 })
+
+                    const allIsins = new Set([...Object.keys(prevH), ...Object.keys(currentH)])
+                    allIsins.forEach(isin => {
+                        const curr = currentH[isin] || 0
+                        const prev = prevH[isin] || 0
+                        const mov = movMap[isin] || { b: 0, s: 0 }
+                        const calcInit = curr - mov.b + mov.s
+
+                        // Sanity check: if movements make coherence WORSE, discard them (likely hallucinated)
+                        if ((mov.b > 0 || mov.s > 0) && Math.abs(calcInit - prev) > Math.abs(curr - prev) + 0.01) {
+                            logProgress('PHASE C DISCARD', `${isin}: movimenti peggiorano coerenza (with=${calcInit.toFixed(0)} vs without=${curr.toFixed(0)} vs prev=${prev.toFixed(0)}), scartati`)
+                            // Remove hallucinated movements from parsed data
+                            parsed.securityMovements = (parsed.securityMovements || []).filter((m: any) => m.isin !== isin)
+                            movMap[isin] = { b: 0, s: 0 }
+                            if (Math.abs(curr - prev) >= 0.0001) {
+                                mismatches.push({ isin, prevQty: prev, currQty: curr, calcInit: curr, buys: 0, sells: 0 })
+                            }
+                            return
+                        }
+
+                        if (Math.abs(calcInit - prev) >= 0.0001) {
+                            mismatches.push({ isin, prevQty: prev, currQty: curr, calcInit, buys: mov.b, sells: mov.s })
+                        }
+                    })
+
+                    // Filter out corporate actions (RAGGRUPPAMENTO, SPLIT, etc.) — same logic as dashboard
+                    const CA_KW = ['RAGGR', 'DIRITTO', 'DIRITTI', 'FRAZION', 'CONCAMBIO', 'CONVERSIONE', 'SPLIT AZ']
+                    const nameMapC: Record<string, string> = {}
+                    prevDocC.holdings.forEach((h: any) => { if (h.isin) nameMapC[h.isin] = h.name || h.description || h.isin })
+                    ;(parsed.finalPortfolio || []).forEach((h: any) => { if (h.isin) nameMapC[h.isin] = h.name || h.description || h.isin })
+                    ;(parsed.securityMovements || []).forEach((m: any) => { if (m.isin && m.name) nameMapC[m.isin] = m.name })
+
+                    // Only flag ISINs whose name directly contains a CA keyword (no "shared words" expansion)
+                    const caFlagged = new Set<string>()
+                    mismatches.forEach(m => {
+                        const u = (nameMapC[m.isin] || '').toUpperCase()
+                        if (CA_KW.some(kw => u.includes(kw)) || /^DIR\s+[A-Z]/i.test(nameMapC[m.isin] || '')) caFlagged.add(m.isin)
+                    })
+                    const realMismatches = mismatches.filter(m => !caFlagged.has(m.isin))
+                    if (caFlagged.size > 0) {
+                        logProgress('PHASE C CA', `${caFlagged.size} mismatch spiegati da corporate actions: ${Array.from(caFlagged).join(', ')}`)
+                    }
+
+                    // === STEP 1: Fix Italian number format errors in holdings quantities ===
+                    // If corrected calcInit (with qty×factor) ≈ prevQty, it's a "35.000" → 35 error
+                    // Works both with and without movements for the ISIN
+                    // Helper: check if qty matches marketValue better (try multiple price interpretations)
+                    const qtyMatchesMV = (qty: number, price: number, mv: number, exRate: number) => {
+                        if (mv <= 0 || price <= 0) return Infinity
+                        const rates = exRate !== 1 ? [exRate, 1 / exRate, 1] : [1]
+                        let best = Infinity
+                        for (const pd of [1, 100, 1000]) {
+                            for (const r of rates) {
+                                const err = Math.abs(qty * (price / pd) * r - mv) / mv
+                                if (err < best) best = err
+                            }
+                        }
+                        return best
+                    }
+
+                    const qtyFixedIsins: string[] = []
+                    for (const m of realMismatches) {
+                        if (m.prevQty <= 0 || m.currQty <= 0) continue
+                        const holding = (parsed.finalPortfolio || []).find((h: any) => h.isin === m.isin)
+                        if (!holding) continue
+                        const mv = holding.marketValue || 0
+                        const pr = holding.price || 0
+                        const exR = (holding.exchangeRate && holding.exchangeRate !== 0) ? holding.exchangeRate : 1
+
+                        for (const factor of [10, 100, 1000, 1000000]) {
+                            // currQty too small? (35 should be 35000)
+                            const fixedQty = m.currQty * factor
+                            const fixedCalcInit = fixedQty - m.buys + m.sells
+                            if (Math.abs(fixedCalcInit - m.prevQty) / m.prevQty < 0.02) {
+                                // Cross-check: fixedQty should match marketValue better than original
+                                if (mv > 0 && pr > 0) {
+                                    const origErr = qtyMatchesMV(m.currQty, pr, mv, exR)
+                                    const fixedErr = qtyMatchesMV(fixedQty, pr, mv, exR)
+                                    if (origErr < fixedErr && origErr < 0.15) {
+                                        logProgress('PHASE C SKIP MV', `${m.isin}: skip ×${factor}, currQty(${m.currQty}) matches MV(${mv.toFixed(0)}) better (err=${(origErr*100).toFixed(1)}% vs ${(fixedErr*100).toFixed(1)}%)`)
+                                        break
+                                    }
+                                }
+                                logProgress('PHASE C QTY FIX',
+                                    `${m.isin}: qty ${m.currQty} → ${fixedQty} (×${factor}, calcInit=${fixedCalcInit.toFixed(0)}≈prevQty=${m.prevQty.toFixed(0)})`
+                                )
+                                holding.quantity = fixedQty
+                                currentH[m.isin] = fixedQty
+                                qtyFixedIsins.push(m.isin)
+                                break
+                            }
+                            // currQty too large? (35000 should be 35) — raro ma possibile
+                            const fixedQtyDown = m.currQty / factor
+                            const fixedCalcInitDown = fixedQtyDown - m.buys + m.sells
+                            if (Math.abs(fixedCalcInitDown - m.prevQty) / m.prevQty < 0.02) {
+                                // Cross-check: fixedQtyDown should match marketValue better than original
+                                if (mv > 0 && pr > 0) {
+                                    const origErr = qtyMatchesMV(m.currQty, pr, mv, exR)
+                                    const fixedErr = qtyMatchesMV(fixedQtyDown, pr, mv, exR)
+                                    if (origErr < fixedErr && origErr < 0.15) {
+                                        logProgress('PHASE C SKIP MV', `${m.isin}: skip ÷${factor}, currQty(${m.currQty}) matches MV(${mv.toFixed(0)}) better (err=${(origErr*100).toFixed(1)}% vs ${(fixedErr*100).toFixed(1)}%)`)
+                                        break
+                                    }
+                                }
+                                logProgress('PHASE C QTY FIX',
+                                    `${m.isin}: qty ${m.currQty} → ${fixedQtyDown} (÷${factor}, calcInit=${fixedCalcInitDown.toFixed(0)}≈prevQty=${m.prevQty.toFixed(0)})`
+                                )
+                                holding.quantity = fixedQtyDown
+                                currentH[m.isin] = fixedQtyDown
+                                qtyFixedIsins.push(m.isin)
+                                break
+                            }
+                        }
+                    }
+                    if (qtyFixedIsins.length > 0) {
+                        qtyFixedIsins.forEach(isin => phaseCFixedIsins.add(isin))
+                        logProgress('✅ PHASE C QTY', `${qtyFixedIsins.length} quantità holdings corrette: ${qtyFixedIsins.join(', ')}`)
+                    }
+
+                    // Remove fixed ISINs from mismatches
+                    let remainingMismatches = realMismatches.filter(m => !qtyFixedIsins.includes(m.isin))
+
+                    // === STEP 1.5: Fix Italian number format errors in movement quantities ===
+                    // e.g., "35.000" parsed as both 35000 and 35 → two Vendita movements, sells=35035 instead of 35000
+                    const movFixedIsins: string[] = []
+                    for (const m of remainingMismatches) {
+                        if (m.prevQty <= 0) continue
+                        const movements = (parsed.securityMovements || []).filter((mv: any) => mv.isin === m.isin)
+                        if (movements.length === 0) continue
+
+                        let fixed = false
+                        for (let i = 0; i < movements.length && !fixed; i++) {
+                            const mv = movements[i]
+                            const origQty = mv.quantity || 0
+                            if (origQty <= 0) continue
+
+                            for (const factor of [10, 100, 1000, 1000000]) {
+                                // Try dividing (movement qty too large, e.g. 35000 should be 35)
+                                for (const dir of ['down', 'up'] as const) {
+                                    const newQty = dir === 'down' ? origQty / factor : origQty * factor
+                                    if (newQty < 0.0001) continue
+                                    let newBuys = 0, newSells = 0
+                                    for (let j = 0; j < movements.length; j++) {
+                                        const q = j === i ? newQty : (movements[j].quantity || 0)
+                                        if (movements[j].operationType === 'Acquisto') newBuys += q
+                                        else if (movements[j].operationType === 'Vendita') newSells += q
+                                    }
+                                    const newCalcInit = m.currQty - newBuys + newSells
+                                    if (Math.abs(newCalcInit - m.prevQty) / m.prevQty < 0.005) {
+                                        const op = dir === 'up' ? '×' : '÷'
+                                        logProgress('PHASE C MOV FIX',
+                                            `${m.isin}: mov ${mv.operationType} qty ${origQty} → ${newQty} (${op}${factor})`
+                                        )
+                                        mv.quantity = newQty
+                                        movFixedIsins.push(m.isin)
+                                        fixed = true
+                                        break
+                                    }
+                                }
+                                if (fixed) break
+                            }
+                        }
+                    }
+                    if (movFixedIsins.length > 0) {
+                        logProgress('✅ PHASE C MOV', `${movFixedIsins.length} quantità movimenti corrette: ${movFixedIsins.join(', ')}`)
+                        // Recalculate mismatches after movement fixes
+                        const movMap2: Record<string, { b: number; s: number }> = {}
+                        ;(parsed.securityMovements || []).forEach((mv: any) => {
+                            const isin = mv.isin || ''
+                            if (!isin) return
+                            if (!movMap2[isin]) movMap2[isin] = { b: 0, s: 0 }
+                            const qty = mv.quantity || 0
+                            if (mv.operationType === 'Acquisto') movMap2[isin].b += qty
+                            else if (mv.operationType === 'Vendita') movMap2[isin].s += qty
+                        })
+                        remainingMismatches = remainingMismatches.filter(m => {
+                            if (!movFixedIsins.includes(m.isin)) return true
+                            const mov = movMap2[m.isin] || { b: 0, s: 0 }
+                            const newCalcInit = (currentH[m.isin] || 0) - mov.b + mov.s
+                            return Math.abs(newCalcInit - m.prevQty) >= 0.0001
+                        })
+                    }
+
+                    if (remainingMismatches.length === 0) {
+                        logProgress('PHASE C OK', `Coerenza portafoglio verificata dopo fix quantità${caFlagged.size > 0 ? ` (${caFlagged.size} corporate actions)` : ''}`)
+                    } else if (remainingMismatches.length > 25) {
+                        logProgress('PHASE C SKIP', `${remainingMismatches.length} mismatch — troppi, probabile portafoglio diverso o primo caricamento`)
+                    } else {
+                        // === STEP 2: TARGETED RETRY for remaining mismatches ===
+                        const elapsedBeforeCRetry = (Date.now() - startTime) / 1000
+                        if (!isPrevAdjacent) {
+                            // Previous period not adjacent (e.g. Q2 found instead of Q3 due to parallel upload)
+                            // Don't retry — the gap is expected when intermediate period hasn't been processed yet
+                            for (const m of remainingMismatches) {
+                                const diff = m.calcInit - m.prevQty
+                                logProgress('PHASE C MISMATCH',
+                                    `${m.isin}: calcInit=${m.calcInit.toFixed(2)} ≠ prevQty=${m.prevQty.toFixed(2)} gap=${Math.abs(diff).toFixed(2)} (periodo non adiacente, ${daysBetweenPeriods}gg — skip retry)`
+                                )
+                            }
+                        } else if (elapsedBeforeCRetry >= 280) {
+                            for (const m of remainingMismatches) {
+                                const diff = m.calcInit - m.prevQty
+                                const opType = diff > 0 ? 'Acquisto' : 'Vendita'
+                                logProgress('PHASE C MISMATCH',
+                                    `${m.isin}: calcInit=${m.calcInit.toFixed(2)} ≠ prevQty=${m.prevQty.toFixed(2)} → manca ${opType} ${Math.abs(diff).toFixed(2)} (no time for retry)`
+                                )
+                            }
+                        } else {
+                            // Build a targeted prompt listing exactly what movements we expect
+                            const searchList = remainingMismatches.map(m => {
+                                const diff = m.calcInit - m.prevQty
+                                const opType = diff > 0 ? 'Acquisto' : 'Vendita'
+                                const missingQty = Math.abs(diff)
+                                const name = nameMapC[m.isin] || m.isin
+                                return `- ${m.isin} (${name}): cerco ${opType} di circa ${missingQty.toFixed(0)} quote (portafoglio precedente: ${m.prevQty.toFixed(0)}, attuale: ${m.currQty.toFixed(0)}, acquisti estratti: ${m.buys.toFixed(0)}, vendite estratte: ${m.sells.toFixed(0)})`
+                            }).join('\n')
+
+                            logProgress('PHASE C RETRY', `Cerco ${remainingMismatches.length} movimenti mancanti nel PDF...`)
+
+                            try {
+                                const phaseCPrompt = `Verifica se nel PDF ci sono movimenti titoli (acquisti/vendite) per i seguenti ISIN che potrebbero essere stati saltati nella prima estrazione.
+
+Per ciascun ISIN, ti dico cosa mi aspetto di trovare basandomi sul confronto tra portafoglio precedente e attuale:
+${searchList}
+
+Cerca nelle sezioni "Movimenti Titoli", "Operazioni", "Compravendite", "Negoziazioni" o tabelle simili.
+Se trovi un movimento per uno di questi ISIN, includilo. Se NON lo trovi nel PDF, NON inventarlo — rispondi con array vuoto.
+
+IMPORTANTE: Restituisci SOLO i movimenti che TROVI EFFETTIVAMENTE nel PDF. Non inventare dati.
+
+Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY", "name": "...", "operationType": "Acquisto|Vendita", "quantity": 0, "price": 0, "grossAmount": 0, "netAmount": 0, "fees": 0, "taxes": 0, "currency": "EUR", "exchangeRate": 1 }] }`
+
+                                // Use text-based retry when MOVIMENTI text is available
+                                let phaseCText: string
+                                if (movimentiSectionText.length > 50) {
+                                    phaseCText = await callGeminiWithText(GEMINI_API_KEY!, modelName, phaseCPrompt,
+                                        `Testo estratto dalla sezione MOVIMENTI:\n\n${movimentiSectionText}`,
+                                        { thinkingLevel: 'medium' })
+                                } else {
+                                    phaseCText = await callGemini(
+                                        GEMINI_API_KEY!, modelName, phaseCPrompt, base64Data,
+                                        { thinkingLevel: 'medium' })
+                                }
+                                const phaseCJson = phaseCText.match(/\{[\s\S]*\}/)
+                                if (phaseCJson) {
+                                    let phaseCParsed: any
+                                    try {
+                                        phaseCParsed = JSON.parse(phaseCJson[0])
+                                    } catch {
+                                        const repaired = repairTruncatedJson(phaseCJson[0])
+                                        if (repaired) phaseCParsed = JSON.parse(repaired)
+                                    }
+
+                                    if (phaseCParsed?.securityMovements?.length) {
+                                        const foundMovs = normalizeSecurityMovementsArray(phaseCParsed.securityMovements)
+                                        // Only accept movements for the ISINs we asked about
+                                        const targetIsins = new Set(remainingMismatches.map(m => m.isin))
+                                        const validMovs = foundMovs.filter((m: any) => m.isin && targetIsins.has(m.isin))
+
+                                        if (validMovs.length > 0) {
+                                            // Group by ISIN, filter duplicates
+                                            const pcGrouped: Record<string, any[]> = {}
+                                            for (const mov of validMovs) {
+                                                const isDup = parsed.securityMovements.some((existing: any) =>
+                                                    existing.isin === mov.isin &&
+                                                    existing.operationType === mov.operationType &&
+                                                    Math.abs((existing.quantity || 0) - (mov.quantity || 0)) < 0.01
+                                                )
+                                                if (isDup) continue
+                                                if (!pcGrouped[mov.isin]) pcGrouped[mov.isin] = []
+                                                pcGrouped[mov.isin].push(mov)
+                                            }
+
+                                            // Validate as GROUP per ISIN (buy+sell together may resolve gap)
+                                            let added = 0
+                                            for (const [isin, movs] of Object.entries(pcGrouped)) {
+                                                const curr = currentH[isin] || 0
+                                                const prev = prevH[isin] || 0
+                                                if (prev > 0) {
+                                                    let eBuys = 0, eSells = 0
+                                                    parsed.securityMovements.filter((m: any) => m.isin === isin).forEach((m: any) => {
+                                                        if (m.operationType === 'Acquisto') eBuys += (m.quantity || 0)
+                                                        else if (m.operationType === 'Vendita') eSells += (m.quantity || 0)
+                                                    })
+                                                    const curDist = Math.abs((curr - eBuys + eSells) - prev)
+                                                    let nB = eBuys, nS = eSells
+                                                    for (const mov of movs) {
+                                                        if (mov.operationType === 'Acquisto') nB += (mov.quantity || 0)
+                                                        else if (mov.operationType === 'Vendita') nS += (mov.quantity || 0)
+                                                    }
+                                                    const newDist = Math.abs((curr - nB + nS) - prev)
+                                                    if (newDist >= curDist) {
+                                                        logProgress('PHASE C RETRY SKIP', `${isin}: gruppo di ${movs.length} movimenti non migliora coerenza (${curDist.toFixed(2)}→${newDist.toFixed(2)})`)
+                                                        continue
+                                                    }
+                                                }
+                                                for (const mov of movs) {
+                                                    parsed.securityMovements.push(mov)
+                                                    added++
+                                                    logProgress('PHASE C FOUND',
+                                                        `+ ${mov.operationType} ${mov.isin}: ${(mov.quantity || 0).toFixed(2)} quote @ ${(mov.price || 0).toFixed(4)}`
+                                                    )
+                                                }
+                                            }
+                                            if (added > 0) {
+                                                logProgress('✅ PHASE C FIXED', `${added} movimenti trovati nel PDF e aggiunti`)
+                                            }
+                                        } else {
+                                            logProgress('PHASE C RETRY EMPTY', `Gemini non ha trovato movimenti aggiuntivi nel PDF`)
+                                        }
+                                    } else {
+                                        logProgress('PHASE C RETRY EMPTY', `Nessun movimento aggiuntivo trovato nel PDF`)
+                                    }
+                                }
+
+                                // Log remaining mismatches after retry
+                                const movMapAfter: Record<string, { b: number; s: number }> = {}
+                                ;(parsed.securityMovements || []).forEach((m: any) => {
+                                    const isin = m.isin || ''
+                                    if (!isin) return
+                                    if (!movMapAfter[isin]) movMapAfter[isin] = { b: 0, s: 0 }
+                                    if (m.operationType === 'Acquisto') movMapAfter[isin].b += (m.quantity || 0)
+                                    else if (m.operationType === 'Vendita') movMapAfter[isin].s += (m.quantity || 0)
+                                })
+                                let stillMismatch = 0
+                                for (const m of remainingMismatches) {
+                                    const curr = currentH[m.isin] || 0
+                                    const mov = movMapAfter[m.isin] || { b: 0, s: 0 }
+                                    const newCalcInit = curr - mov.b + mov.s
+                                    if (Math.abs(newCalcInit - m.prevQty) >= 0.0001) {
+                                        stillMismatch++
+                                        const diff = newCalcInit - m.prevQty
+                                        const opType = diff > 0 ? 'Acquisto' : 'Vendita'
+                                        logProgress('PHASE C STILL MISMATCH',
+                                            `${m.isin}: calcInit=${newCalcInit.toFixed(2)} ≠ prevQty=${m.prevQty.toFixed(2)} → manca ${opType} ${Math.abs(diff).toFixed(2)}`
+                                        )
+                                    }
+                                }
+                                if (stillMismatch === 0) {
+                                    logProgress('✅ PHASE C ALL OK', `Tutti i mismatch risolti dopo retry`)
+                                }
+                            } catch (phaseCRetryErr: any) {
+                                logProgress('PHASE C RETRY ERROR', phaseCRetryErr.message)
+                                // Log mismatches even if retry failed
+                                for (const m of remainingMismatches) {
+                                    const diff = m.calcInit - m.prevQty
+                                    const opType = diff > 0 ? 'Acquisto' : 'Vendita'
+                                    logProgress('PHASE C MISMATCH',
+                                        `${m.isin}: calcInit=${m.calcInit.toFixed(2)} ≠ prevQty=${m.prevQty.toFixed(2)} → manca ${opType} ${Math.abs(diff).toFixed(2)}`
+                                    )
+                                }
+                            }
+                        }
+
+                    }
+                } else {
+                    logProgress('PHASE C SKIP', 'Nessun periodo precedente per validare coerenza movimenti')
+                }
+            } catch (phaseCOuterErr: any) {
+                logProgress('PHASE C SKIP', `Errore: ${phaseCOuterErr.message}`)
+            }
+        }
+
         // Salvataggio su Supabase
         logProgress('SALVATAGGIO DATABASE', 'Inserimento dati in Supabase')
 
@@ -2262,13 +3849,19 @@ Rispondi SOLO con questo JSON:
             const marketValue = h.marketValue || 0
             let quantity = h.quantity || 0
 
-            // Bond price normalization: 98.79 → 0.9879
-            if (isBondQuotedInCentesimi(h.name) && price > 1) {
-                price = normalizeBondPrice(price)
+            if (phaseCFixedIsins.has(h.isin) || textCorrectedIsins.has(h.isin)) {
+                // Text or Phase C already corrected this quantity — skip normalizeItalianQuantity to preserve
+                if (isBondQuotedInCentesimi(h.name, h.isin) && price > 1) {
+                    price = normalizeBondPrice(price)
+                }
+            } else if (isBondQuotedInCentesimi(h.name, h.isin)) {
+                const result = normalizeBondValues(quantity, price, marketValue, exchangeRate)
+                quantity = result.quantity
+                price = result.price
+            } else {
+                // Non-bond: only fix Italian number format in quantity (skip Phase C-corrected ISINs)
+                quantity = normalizeItalianQuantity(quantity, price, marketValue, exchangeRate)
             }
-
-            // Cross-validate quantity with marketValue via price
-            quantity = normalizeItalianQuantity(quantity, price, marketValue, exchangeRate)
 
             return {
                 ...h,
@@ -2312,22 +3905,37 @@ Rispondi SOLO con questo JSON:
             let quantity = m.quantity || 0
             let price = m.price || 0
 
-            // Bond price normalization: 98.79 → 0.9879
-            if (isBondQuotedInCentesimi(m.name) && price > 1) {
-                price = normalizeBondPrice(price)
+            if (isBondQuotedInCentesimi(m.name, m.isin) && price > 1) {
+                // Smart bond normalization: handles both Italian qty format AND centesimi price
+                const grossRef = m.grossAmount || 0
+                if (grossRef > 0) {
+                    const result = normalizeBondValues(quantity, price, grossRef, exchangeRate)
+                    quantity = result.quantity
+                    price = result.price
+                } else {
+                    // No grossAmount reference — standard centesimi normalization
+                    price = normalizeBondPrice(price)
+                }
+            } else {
+                // Non-bond: fix Italian number format misinterpretation
+                // Method 1: Cross-validate with grossAmount
+                if (quantity > 0 && price > 0 && m.grossAmount > 0) {
+                    quantity = normalizeItalianQuantity(quantity, price, m.grossAmount, exchangeRate)
+                }
             }
-
-            // Fix Italian number format misinterpretation: "6.000" parsed as 6 instead of 6000
-            // Method 1: Cross-validate with grossAmount
-            if (quantity > 0 && price > 0 && m.grossAmount > 0) {
-                quantity = normalizeItalianQuantity(quantity, price, m.grossAmount, exchangeRate)
-            }
-            // Method 2: Cross-validate with holdings for same ISIN
-            if (quantity > 0 && quantity <= 100 && m.isin && holdingsQtyMap[m.isin]) {
+            // Method 2: Cross-validate with holdings for same ISIN (works for all types)
+            if (quantity > 0 && m.isin && holdingsQtyMap[m.isin]) {
                 const holdingQty = holdingsQtyMap[m.isin]
-                const ratio = holdingQty / quantity
-                if (ratio >= 900 && ratio <= 1100) {
-                    quantity = quantity * 1000
+                if (holdingQty > 0) {
+                    const ratio = quantity / holdingQty
+                    // Case A: movement qty is ~1000x too small (e.g. 141.918 vs holding 141918)
+                    if (ratio > 0 && ratio <= 0.1 && holdingQty / quantity >= 900 && holdingQty / quantity <= 1100) {
+                        quantity = quantity * 1000
+                    }
+                    // Case B: movement qty is ~1000x too large (Italian comma "141,918" → 141918 instead of 141.918)
+                    if (ratio >= 900 && ratio <= 1100) {
+                        quantity = quantity / 1000
+                    }
                 }
             }
             const netAmount = m.netAmount || 0
@@ -2371,6 +3979,73 @@ Rispondi SOLO con questo JSON:
             }
         })
 
+        // Post-processing: validate operation types by cross-checking movements against holdings
+        // If flipping Vendita↔Acquisto makes the coherence (calcInit) closer to startQty, flip it
+        if (isDossier && normalizedSecurityMovements.length > 0) {
+            const startQties = (parsed.movementsStartQuantities || {}) as Record<string, number>
+            // Group movements by ISIN
+            const movByIsin: Record<string, any[]> = {}
+            for (const m of normalizedSecurityMovements) {
+                if (!m.isin) continue
+                if (!movByIsin[m.isin]) movByIsin[m.isin] = []
+                movByIsin[m.isin].push(m)
+            }
+            for (const [isin, movs] of Object.entries(movByIsin)) {
+                const hQty = holdingsQtyMap[isin] || 0
+                if (hQty <= 0) continue
+                // Skip ISINs without reference data — flipping toward 0 is harmful
+                if (!(isin in startQties)) continue
+                const expectedStart = startQties[isin] ?? 0
+                // Compute current calcInit
+                let buys = 0, sells = 0
+                for (const m of movs) {
+                    if (m.operationType === 'Acquisto') buys += m.quantity || 0
+                    else if (m.operationType === 'Vendita') sells += m.quantity || 0
+                }
+                let calcInit = hQty - buys + sells
+                let currentGap = Math.abs(calcInit - expectedStart)
+                if (currentGap < 0.01) continue // Already coherent
+                // Multi-pass: repeat until no more improvements (greedy single-pass can miss optimal)
+                let flipImproved = true
+                while (flipImproved) {
+                    flipImproved = false
+                    for (const m of movs) {
+                        const q = m.quantity || 0
+                        const flipped = m.operationType === 'Acquisto' ? 'Vendita' : 'Acquisto'
+                        // Compute new buys/sells if we flip this movement
+                        let newBuys = buys, newSells = sells
+                        if (m.operationType === 'Acquisto') { newBuys -= q; newSells += q }
+                        else { newSells -= q; newBuys += q }
+                        const newCalcInit = hQty - newBuys + newSells
+                        const newGap = Math.abs(newCalcInit - expectedStart)
+                        if (newGap < currentGap - 0.001) {
+                            logProgress('OP FIX', `${isin}: ${m.operationType}→${flipped} (qty=${q.toFixed(3)}, gap ${currentGap.toFixed(3)}→${newGap.toFixed(3)})`)
+                            m.operationType = flipped
+                            buys = newBuys
+                            sells = newSells
+                            currentGap = newGap
+                            flipImproved = true
+                        }
+                    }
+                }
+            }
+        }
+
+        // Final override: operationType based on movement description keywords (takes priority over op-flip)
+        // These are deterministic: RIMBORSO is always a sell, SOTT PAC/SOTTOSCR always a buy
+        for (const m of normalizedSecurityMovements) {
+            const nameUpper = ((m.name || '') + ' ' + (m.description || '')).toUpperCase()
+            const oldOp = m.operationType
+            if (nameUpper.includes('RIMBORSO')) {
+                m.operationType = 'Vendita'
+            } else if (nameUpper.includes('SOTT PAC') || nameUpper.includes('SOTTOSCR') || nameUpper.includes('ACQ.CONT')) {
+                m.operationType = 'Acquisto'
+            }
+            if (m.operationType !== oldOp) {
+                logProgress('OP NAME FIX', `${m.isin}: ${oldOp}→${m.operationType} (keyword in "${m.name}")`)
+            }
+        }
+
         const analysisFields = {
             bank_name: parsed.info?.bankName || 'Banca N/D',
             period_start: parseDate(parsed.info?.period_start),
@@ -2398,9 +4073,132 @@ Rispondi SOLO con questo JSON:
                 securities_net_amount: (parsed.scalar_data?.acquisto_titoli_amount || 0) + (parsed.scalar_data?.vendita_titoli_amount || 0),
                 settlementAccount: parsed.info?.settlementAccount || null,
                 holder: parsed.info?.holder || null,
+                hasMovementsSection,
                 original_ai_data: { ...(parsed.summary || {}) } // Backup for restore
             },
             benchmark_comparison: parsed.info?.accountNumber || 'N/D',
+        }
+
+        // === DRY RUN: Return normalized data without saving to DB ===
+        if (dryRun) {
+            logProgress('🧪 DRY RUN', 'Restituzione dati normalizzati (nessun salvataggio DB)')
+            // Build coherence check for holdings
+            const coherenceErrors: any[] = []
+            for (const h of normalizedHoldings) {
+                if (!h.isin) continue
+                const buys = normalizedSecurityMovements
+                    .filter((m: any) => m.isin === h.isin && m.operationType === 'Acquisto')
+                    .reduce((s: number, m: any) => s + (m.quantity || 0), 0)
+                const sells = normalizedSecurityMovements
+                    .filter((m: any) => m.isin === h.isin && m.operationType === 'Vendita')
+                    .reduce((s: number, m: any) => s + (m.quantity || 0), 0)
+                const calcInit = (h.quantity || 0) - buys + sells
+                if (calcInit < -0.01) {
+                    coherenceErrors.push({
+                        isin: h.isin,
+                        name: h.name,
+                        qty: h.quantity,
+                        buys, sells, calcInit,
+                        issue: 'calcInit negativo (impossibile)'
+                    })
+                }
+            }
+            return NextResponse.json({
+                success: true,
+                dryRun: true,
+                type: parsed.type,
+                bank: parsed.info?.bankName,
+                period: `${parsed.info?.period_start} → ${parsed.info?.period_end}`,
+                account: parsed.info?.accountNumber,
+                holdingsCount: normalizedHoldings.length,
+                movementsCount: normalizedSecurityMovements.length,
+                portfolioTotal: normalizedHoldings.reduce((s: number, h: any) => s + (h.marketValue || 0), 0),
+                coherenceErrors,
+                holdings: normalizedHoldings.map((h: any) => ({
+                    isin: h.isin, name: h.name, qty: h.quantity, price: h.price,
+                    mktVal: h.marketValue, qtyXprice: (h.quantity || 0) * (h.price || 0) * (h.exchangeRate || 1)
+                })),
+                movements: normalizedSecurityMovements.map((m: any) => ({
+                    isin: m.isin, name: m.name, op: m.operationType, qty: m.quantity,
+                    price: m.price, gross: m.grossAmount, date: m.date
+                }))
+            })
+        }
+
+        // === FINAL GUARD: reject DOSSIER with clearly wrong data ===
+        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length === 0) {
+            logProgress('❌ ESTRAZIONE FALLITA', 'DOSSIER senza holdings estratti — rifiutato')
+            return NextResponse.json({
+                success: false,
+                error: 'Estrazione portafoglio fallita: nessun titolo estratto dal PDF. Riprova o verifica il documento.'
+            }, { status: 500 })
+        }
+        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length > 0) {
+            logProgress('❌ ESTRAZIONE FALLITA', `DOSSIER con ${normalizedHoldings.length} holdings ma controvalore totale = 0 — rifiutato`)
+            return NextResponse.json({
+                success: false,
+                error: `Estrazione portafoglio incompleta: ${normalizedHoldings.length} titoli trovati ma tutti con controvalore 0€. Riprova.`
+            }, { status: 500 })
+        }
+        // Guard: if we have a text-extracted total AND the portfolio value is way off, reject
+        if (isDossier && textPortfolioTotal > 100 && analysisFields.portfolio_value > 0) {
+            const guardRatio = analysisFields.portfolio_value / textPortfolioTotal
+            if (guardRatio < 0.3 || guardRatio > 3.0) {
+                logProgress('❌ PORTFOLIO MISMATCH', `Portfolio ${analysisFields.portfolio_value.toFixed(0)}€ vs PDF totale ${textPortfolioTotal.toFixed(0)}€ (ratio ${guardRatio.toFixed(2)})`)
+                return NextResponse.json({
+                    success: false,
+                    error: `Estrazione incoerente: controvalore estratto (${Math.round(analysisFields.portfolio_value)}€) troppo diverso dal totale PDF (${Math.round(textPortfolioTotal)}€). Riprova.`
+                }, { status: 500 })
+            }
+        }
+
+        // === QUALITY SCORE ===
+        // Compute extraction quality (0-100) for transparency
+        let qualityScore = 100
+        const qualityIssues: string[] = []
+        if (isDossier) {
+            // Check portfolio total gap
+            const refTotal = textPortfolioTotal || (parsed.summary?.portfolio_total_extracted || 0)
+            if (refTotal > 0) {
+                const gap = Math.abs(analysisFields.portfolio_value - refTotal) / refTotal
+                if (gap > 0.05) { qualityScore -= 15; qualityIssues.push(`Totale portafoglio gap ${(gap * 100).toFixed(1)}%`) }
+                else if (gap > 0.01) { qualityScore -= 5; qualityIssues.push(`Totale portafoglio gap ${(gap * 100).toFixed(1)}%`) }
+            }
+            // Check for holdings with zero qty or price
+            const zeroQtyCount = normalizedHoldings.filter((h: any) => !h.quantity || h.quantity === 0).length
+            if (zeroQtyCount > 0) { qualityScore -= zeroQtyCount * 3; qualityIssues.push(`${zeroQtyCount} titoli senza quantità`) }
+            // Check math consistency per holding
+            let mathErrors = 0
+            for (const h of normalizedHoldings) {
+                if (h.quantity > 0 && h.price > 0 && h.marketValue > 0) {
+                    const expected = h.quantity * h.price * (h.exchangeRate || 1)
+                    const err = Math.abs(expected - h.marketValue) / h.marketValue
+                    if (err > 0.15) mathErrors++
+                }
+            }
+            if (mathErrors > 0) { qualityScore -= mathErrors * 5; qualityIssues.push(`${mathErrors} titoli con qty×price≠controvalore`) }
+            // Check text ISINs vs extracted ISINs
+            if (consistenzaSectionText.length > 50) {
+                const textIsins = extractHoldingsFromText(consistenzaSectionText)
+                const holdingIsins = new Set(normalizedHoldings.map((h: any) => h.isin).filter(Boolean))
+                const missingFromExtraction = [...textIsins.keys()].filter(isin => !holdingIsins.has(isin))
+                if (missingFromExtraction.length > 0) {
+                    qualityScore -= missingFromExtraction.length * 10
+                    qualityIssues.push(`${missingFromExtraction.length} ISIN nel testo ma non estratti`)
+                }
+            }
+        }
+        qualityScore = Math.max(0, Math.min(100, qualityScore))
+        if (qualityIssues.length > 0) {
+            logProgress('QUALITY', `Score: ${qualityScore}/100 | Issues: ${qualityIssues.join('; ')}`)
+        } else {
+            logProgress('QUALITY', `Score: ${qualityScore}/100`)
+        }
+        // Store quality score in costs_breakdown for dashboard access
+        analysisFields.costs_breakdown = {
+            ...analysisFields.costs_breakdown,
+            qualityScore,
+            qualityIssues: qualityIssues.length > 0 ? qualityIssues : undefined,
         }
 
         let data: any
@@ -2484,11 +4282,101 @@ Rispondi SOLO con questo JSON:
 
 // Normalizza numeri conto: gestisce prefissi filiale variabili
 // es. "3100/1000811", "19812/3100/1000811", "19812/3100/01000811" → "31001000811"
+// Determine DOSSIER frequency from multiple signals (most reliable first)
+function determineDossierFrequency(parsed: any): string | null {
+    // Use parsed.securityMovements (parse-time array), NOT parsed.costs_breakdown.securityMovements (DB format)
+    const movements = parsed.securityMovements || parsed.costs_breakdown?.securityMovements || []
+    const periodEnd = parsed.info?.period_end
+    const periodStartHint = parsed.info?.period_start
+    const geminiFreq = parsed.info?.periodFrequency
+
+    // --- Signal 1: Movement date range (MOST RELIABLE) ---
+    // Security movements have dates that tell us the actual reporting period
+    if (movements.length >= 1 && periodEnd) {
+        const endDate = new Date(periodEnd)
+        const movDates: number[] = []
+        for (const m of movements) {
+            if (!m.date) continue
+            // Parse DD/MM/YYYY or YYYY-MM-DD
+            let d: Date | null = null
+            const parts = String(m.date).split('/')
+            if (parts.length === 3 && parts[2].length === 4) {
+                d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`)
+            } else if (String(m.date).includes('-')) {
+                d = new Date(m.date)
+            }
+            if (d && !isNaN(d.getTime())) {
+                // Only consider movements within a reasonable range (< 400 days before period_end)
+                const daysBefore = (endDate.getTime() - d.getTime()) / 86400000
+                if (daysBefore >= 0 && daysBefore < 400) movDates.push(d.getTime())
+            }
+        }
+
+        if (movDates.length > 0) {
+            const earliestMov = Math.min(...movDates)
+            const movRangeDays = Math.round((endDate.getTime() - earliestMov) / 86400000)
+
+            if (movRangeDays <= 36) return 'monthly'
+            if (movRangeDays <= 100) return 'quarterly'
+            if (movRangeDays <= 195) return 'semiannual'
+            if (movRangeDays <= 375) return 'annual'
+        }
+    }
+
+    // --- Signal 2: Gemini's periodFrequency label (simple classification — more reliable than exact dates) ---
+    // period_start extraction is unreliable (reads wrong dates from PDF). But frequency CLASSIFICATION
+    // is a simpler question — Gemini answers "quarterly" much more reliably than it computes exact dates.
+    if (geminiFreq && ['monthly', 'quarterly', 'semiannual', 'annual'].includes(geminiFreq)) {
+        return geminiFreq
+    }
+
+    // --- Signal 3: period_start hint alone ---
+    if (periodStartHint && periodEnd) {
+        const hintDays = Math.round(
+            (new Date(periodEnd).getTime() - new Date(periodStartHint).getTime()) / 86400000
+        )
+        if (doesMatchFrequency(hintDays, 'monthly')) return 'monthly'
+        if (doesMatchFrequency(hintDays, 'quarterly')) return 'quarterly'
+        if (doesMatchFrequency(hintDays, 'semiannual')) return 'semiannual'
+        if (doesMatchFrequency(hintDays, 'annual')) return 'annual'
+    }
+
+    return null
+}
+
+// Compute correct period_start from period_end by going back N months (end-of-month)
+// IMPORTANT: Uses UTC to avoid timezone bugs (local time → toISOString shifts date back 1 day in CET/CEST)
+function computeStandardPeriodStart(periodEnd: string, monthsBack: number): string {
+    const [y, m] = periodEnd.split('-').map(Number)
+    let targetMonth = m - 1 - monthsBack // 0-indexed
+    let targetYear = y
+    while (targetMonth < 0) { targetMonth += 12; targetYear-- }
+    // Last day of target month (UTC)
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0))
+    const yy = lastDay.getUTCFullYear()
+    const mm = String(lastDay.getUTCMonth() + 1).padStart(2, '0')
+    const dd = String(lastDay.getUTCDate()).padStart(2, '0')
+    return `${yy}-${mm}-${dd}`
+}
+
+// Check if a duration in days matches a frequency bucket
+function doesMatchFrequency(days: number, freq: string): boolean {
+    switch (freq) {
+        case 'monthly': return days >= 25 && days <= 36
+        case 'quarterly': return days >= 85 && days <= 100
+        case 'semiannual': return days >= 175 && days <= 195
+        case 'annual': return days >= 355 && days <= 375
+        default: return false
+    }
+}
+
 function normalizeAccountNumber(acc: string): string {
     if (!acc) return '';
     const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
     if (segments.length === 0) return '';
-    return segments.slice(-2).join('').toUpperCase();
+    // Use only last segment — the account identifier is unique per bank
+    // (filiale code prefix causes mismatches when some PDFs omit it)
+    return segments.slice(-1).join('').toUpperCase();
 }
 
 function parseDate(dateStr: string | undefined): string | null {

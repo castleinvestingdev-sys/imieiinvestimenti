@@ -53,8 +53,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const currentFileIndexRef = useRef<number>(0)
   const onSuccessCallbacks = useRef<Set<OnSuccessCallback>>(new Set())
   const activeHolderRef = useRef<string | null>(null)
-  const batchAccumulatorRef = useRef<File[]>([])
-  const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
@@ -108,7 +106,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               const stages = [
                 [0, 'Caricamento PDF'],
                 [5, 'Conversione documento'],
-                [10, 'Invio a OpenAI'],
+                [10, 'Invio a Gemini AI'],
                 [15, 'Analisi AI in corso'],
                 [30, 'Estrazione movimenti'],
                 [45, 'Lettura portafoglio titoli'],
@@ -122,7 +120,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               const currentStage = [...stages].reverse().find(([t]) => elapsed >= t)?.[1] || stages[0][1]
               const ratio = elapsed / expectedDuration
               const progress = Math.min(98, Math.round(98 * (1 - Math.exp(-2.5 * ratio))))
-              return { ...f, progress, stage: currentStage + dots, startTime: uploadStartTime }
+              return { ...f, progress, stage: currentStage + dots + ` (${Math.floor(elapsed)}s)`, startTime: uploadStartTime }
             }
             return f
           }))
@@ -249,22 +247,20 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Worker pool
-    const workers = Array.from(
-      { length: Math.min(1, fileQueueRef.current.length) },
-      async () => {
-        while (fileQueueRef.current.length > 0) {
-          const item = fileQueueRef.current.shift()
-          if (!item) break
-          currentFileIndexRef.current++
-          await processOneFile(item.id, item.file, item.userId)
-          if (fileQueueRef.current.length > 0) {
-            await new Promise(resolve => setTimeout(resolve, 2000))
-          }
-        }
+    // Parallel with concurrency limit of 3 (matches dashboard behavior)
+    const PARALLEL_LIMIT = 3
+    const executing = new Set<Promise<void>>()
+    while (fileQueueRef.current.length > 0) {
+      const item = fileQueueRef.current.shift()
+      if (!item) break
+      currentFileIndexRef.current++
+      const p = processOneFile(item.id, item.file, item.userId).then(() => { executing.delete(p) })
+      executing.add(p)
+      if (executing.size >= PARALLEL_LIMIT) {
+        await Promise.race(executing)
       }
-    )
-    await Promise.all(workers)
+    }
+    await Promise.all(executing)
 
     setIsProcessing(false)
 
@@ -273,6 +269,15 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
     }, 5000)
   }, [isProcessing, uploadQueue.length])
+
+  // ── Prevent page close during active uploads ─────────────────────────────
+
+  useEffect(() => {
+    if (!hasActiveUploads) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasActiveUploads])
 
   // ── Auto-trigger queue processing ─────────────────────────────────────────
 

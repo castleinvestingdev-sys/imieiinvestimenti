@@ -270,7 +270,8 @@ function normalizeAcc(acc: string): string {
   if (!acc) return ''
   const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0)
   if (segments.length === 0) return ''
-  return segments.slice(-2).join('').toUpperCase()
+  // Use only last segment — the account identifier is unique per bank
+  return segments.slice(-1).join('').toUpperCase()
 }
 
 function getBankKey(name: string): string {
