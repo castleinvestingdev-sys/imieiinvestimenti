@@ -271,6 +271,9 @@ function DashboardContent() {
 
           // Apply security movements from current period
           const securityMovements = curr.costs_breakdown?.securityMovements || []
+          // Skip if movements exist but none have valid operationType (scanned PDFs with garbled OCR)
+          const hasTypedMov = securityMovements.some((m: any) => m.operationType === 'Acquisto' || m.operationType === 'Vendita')
+          if (securityMovements.length > 0 && !hasTypedMov) continue
           securityMovements.forEach((m: any) => {
             if (!m.isin) return
             const existing = prevHoldings.get(m.isin) || { isin: m.isin, name: m.name || m.isin, quantity: 0 }
@@ -1112,6 +1115,11 @@ function DashboardContent() {
     // With 0 movements, calcInit = currentQty for all ISINs, so any mismatch is just portfolio change without explanatory movements
     const secMovements = doc.costs_breakdown?.securityMovements || []
     if (secMovements.length === 0 && doc.costs_breakdown?.hasMovementsSection === false) {
+      coherenceMap[doc.id] = true; return
+    }
+    // Skip coherence if movements exist but NONE have valid operationType (scanned PDFs with garbled OCR data)
+    const hasTypedMovements = secMovements.some((m: any) => m.operationType === 'Acquisto' || m.operationType === 'Vendita')
+    if (secMovements.length > 0 && !hasTypedMovements) {
       coherenceMap[doc.id] = true; return
     }
 
@@ -2440,11 +2448,15 @@ function DashboardContent() {
 
                 // Skip coherence check if PDF has no MOVIMENTI section
                 const movements = inspectorData.costs_breakdown?.securityMovements || []
-                if (movements.length === 0 && inspectorData.costs_breakdown?.hasMovementsSection === false) {
+                const hasTypedInspMov = movements.some((m: any) => m.operationType === 'Acquisto' || m.operationType === 'Vendita')
+                if ((movements.length === 0 && inspectorData.costs_breakdown?.hasMovementsSection === false) ||
+                    (movements.length > 0 && !hasTypedInspMov)) {
                   return (
                     <div style={{ margin: '0.75rem 0', padding: '0.75rem 1rem', borderRadius: '12px', border: '2px solid #94a3b8', background: '#f8fafc' }}>
                       <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        Nessuna sezione Movimenti nel PDF &mdash; controllo coerenza non applicabile
+                        {movements.length > 0 && !hasTypedInspMov
+                          ? 'Movimenti senza tipo operazione (PDF scansionato) — controllo coerenza non applicabile'
+                          : 'Nessuna sezione Movimenti nel PDF — controllo coerenza non applicabile'}
                       </div>
                     </div>
                   )

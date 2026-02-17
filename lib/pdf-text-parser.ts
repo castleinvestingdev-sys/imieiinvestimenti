@@ -1,0 +1,894 @@
+/**
+ * Deterministic PDF text parser for Italian bank statements.
+ *
+ * This is the PRIMARY source for numbers (quantity, price, marketValue).
+ * Gemini is used only for metadata (name, assetType, period, bank).
+ *
+ * Why text-first:
+ * - pdf-parse extracts text deterministically — same PDF = same output every time
+ * - Gemini vision misreads Italian numbers (dot=thousands, comma=decimal)
+ * - Text parsing is verifiable: qty × price × rate = marketValue
+ */
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export interface TextHolding {
+    isin: string
+    currency: string
+    quantity: number
+    price: number
+    marketValue: number       // EUR controvalore
+    exchangeRate: number
+    verified: boolean         // qty × price × rate ≈ marketValue
+    source: 'text_verified' | 'text_unverified'
+}
+
+export interface TextPortfolioResult {
+    holdings: TextHolding[]
+    total: number             // extracted "CONTROVALORE TOTALE" from text (0 if not found)
+    totalSource: 'keyword' | 'none'
+    holdingsSum: number       // sum of holdings marketValues
+    bankDetected: string | null
+    sectionFound: boolean
+}
+
+export interface TextMovement {
+    isin: string
+    date: string              // DD/MM/YYYY
+    quantity: number
+    operationType: 'Acquisto' | 'Vendita'
+    description: string       // raw operation description (e.g. "FONDI: SOTT PAC")
+}
+
+export interface TextMovimentiResult {
+    startQuantities: Record<string, number>   // ISIN → starting quantity
+    endQuantities: Record<string, number>     // ISIN → ending quantity
+    movements: TextMovement[]
+}
+
+// ── Bank Detection ───────────────────────────────────────────────────────────
+
+const BANK_PATTERNS: { name: string; patterns: RegExp[] }[] = [
+    { name: 'Crédit Agricole', patterns: [/CR[ÉE]DIT\s*AGRICOLE/i, /CARIPARMA/i, /FRIULADRIA/i, /\bCA\s+ITALIA/i] },
+    { name: 'Intesa Sanpaolo', patterns: [/INTESA\s*SANPAOLO/i, /SANPAOLO\s*INVEST/i] },
+    { name: 'UniCredit', patterns: [/UNICREDIT/i] },
+    { name: 'Banco BPM', patterns: [/BANCO\s*BPM/i, /BANCA\s*POPOLARE\s*DI\s*MILANO/i] },
+    { name: 'BPER Banca', patterns: [/BPER\s*BANCA/i, /BANCA\s*CARIGE/i] },
+    { name: 'Monte dei Paschi', patterns: [/MONTE\s*DEI\s*PASCHI/i, /MPS/i] },
+    { name: 'FinecoBank', patterns: [/FINECO/i] },
+    { name: 'Banca Mediolanum', patterns: [/MEDIOLANUM/i] },
+    { name: 'Banca Generali', patterns: [/BANCA\s*GENERALI/i] },
+    { name: 'Fideuram', patterns: [/FIDEURAM/i] },
+    { name: 'BNL', patterns: [/\bBNL\b/i, /BNP\s*PARIBAS/i] },
+    { name: 'Deutsche Bank', patterns: [/DEUTSCHE\s*BANK/i] },
+    { name: 'Banca Sella', patterns: [/BANCA\s*SELLA/i] },
+    { name: 'Credem', patterns: [/CREDEM/i] },
+    { name: 'Azimut', patterns: [/AZIMUT/i] },
+    { name: 'IW Bank', patterns: [/IW\s*BANK/i] },
+    { name: 'Banca Aletti', patterns: [/ALETTI/i] },
+]
+
+export function detectBank(text: string): string | null {
+    const upper = text.toUpperCase()
+    for (const bank of BANK_PATTERNS) {
+        for (const pat of bank.patterns) {
+            if (pat.test(upper)) return bank.name
+        }
+    }
+    return null
+}
+
+// ── ISIN Validation ──────────────────────────────────────────────────────────
+
+// Italian words that happen to match the ISIN pattern [A-Z]{2}[A-Z0-9]{10}
+// These would be false positives
+const ITALIAN_WORDS_12 = new Set([
+    'CONTROVALORE', 'COMPLESSIVO', 'DISPONIBILE', 'RENDICONTO',
+    'SOTTOSCRIZI', 'INFORMATIVA', 'CONSISTENZA', 'OBBLIGAZIONI',
+    'COMPOSIZION', 'LIQUIDAZION', 'CAPITALIZZA', 'ACCREDITAME',
+])
+
+// ── Number Parsing ───────────────────────────────────────────────────────────
+
+/** Parse Italian-format number: "1.234,56" → 1234.56, "283,836" → 283.836 */
+export function parseItalianNumber(s: string): number {
+    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+}
+
+/** Extract all Italian-format numbers from a string */
+function extractItalianNumbers(text: string): number[] {
+    const pattern = /(\d{1,3}(?:\.\d{3})*,\d{2,})/g
+    const numbers: number[] = []
+    let m
+    while ((m = pattern.exec(text)) !== null) {
+        const val = parseItalianNumber(m[1])
+        if (!isNaN(val) && val >= 0) numbers.push(val)
+    }
+    return numbers
+}
+
+// ── CONSISTENZA Section Extraction ───────────────────────────────────────────
+
+const SECTION_START_KEYWORDS = [
+    'CONSISTENZA FINALE', 'CONSISTENZA DI FINE', 'CONSISTENZA AL',
+    'RIEPILOGO DEI TITOLI', 'SITUAZIONE FINANZIARIA',
+    'CONSISTENZA', 'PORTAFOGLIO TITOLI', 'SITUAZIONE TITOLI',
+    'COMPOSIZIONE PORTAFOGLIO', 'COMPOSIZIONE DEL PORTAFOGLIO',
+    'ELENCO TITOLI', 'DETTAGLIO TITOLI', 'SITUAZIONE AL',
+    'STRUMENTI FINANZIARI',
+    'DETTAGLIO DEPOSITO AMMINISTRATO', 'FONDI COMUNI', // Intesa Sanpaolo
+]
+
+const SECTION_END_KEYWORDS = [
+    'MOVIMENTI', 'OPERAZIONI SU TITOLI', 'RIEPILOGO OPERAZIONI',
+    'DIVIDENDI', 'DETTAGLIO CEDOLE', 'RIEPILOGO COMMISSIONI',
+    'RIEPILOGO DATI FISCALI', 'DETTAGLIO OPERAZIONI',
+]
+
+export function extractConsistenzaSection(fullText: string): string {
+    const upper = fullText.toUpperCase()
+
+    let start = -1
+    for (const kw of SECTION_START_KEYWORDS) {
+        const idx = upper.indexOf(kw)
+        if (idx !== -1 && (start === -1 || idx < start)) start = idx
+    }
+    if (start === -1) return ''
+
+    let end = -1
+    for (const ek of SECTION_END_KEYWORDS) {
+        const idx = upper.indexOf(ek, start + 50)
+        if (idx !== -1 && (end === -1 || idx < end)) end = idx
+    }
+    if (end === -1) end = Math.min(start + 30000, fullText.length)
+
+    let section = fullText.substring(Math.max(0, start - 20), end).trim()
+
+    // Strip page headers/footers and bank boilerplate
+    section = section
+        .replace(/Pagina\s+\d+\s+di\s+\d+/gi, '')
+        .replace(/Pag\.?\s*\d+\s*(di|\/)\s*\d+/gi, '')
+        .replace(/\f/g, ' ')
+        .replace(/Capitale\s+Sociale\s+euro\s+[\d.,]+\s*i\.v\./gi, '')
+        .replace(/Sede\s+Legale[^.\n]*\./gi, '')
+
+    return section
+}
+
+// ── Portfolio Total Extraction ───────────────────────────────────────────────
+
+const TOTAL_PATTERNS = [
+    /CONTROVALORE\s+TOTALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
+    /TOTALE\s+(?:APPARENTE|PORTAFOGLIO|GENERALE)[\s\S]{0,80}?([\d.]+,\d{2})/i,
+    /CONTROV\.\s*TOTALE[\s\S]{0,60}?([\d.]+,\d{2})/i,
+    /TOTALE\s+DOSSIER[\s\S]{0,80}?([\d.]+,\d{2})/i,
+    /TOTALE\s+CONTROVALORE[\s\S]{0,80}?([\d.]+,\d{2})/i,
+    /VALORE\s+COMPLESSIVO[\s\S]{0,80}?([\d.]+,\d{2})/i,
+    /CONTROV\.\s*COMPLESSIVO[\s\S]{0,60}?([\d.]+,\d{2})/i,
+    /TOTALE\s+GENERALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
+    /TOTALE\s+IN\s+EURO\s*([\d.]+,\d{2})/i,
+]
+
+export function extractPortfolioTotal(fullText: string): { total: number; source: 'keyword' | 'none' } {
+    for (const pat of TOTAL_PATTERNS) {
+        const m = fullText.match(pat)
+        if (m) {
+            const val = parseItalianNumber(m[1])
+            if (val > 0) return { total: val, source: 'keyword' }
+        }
+    }
+    return { total: 0, source: 'none' }
+}
+
+// ── Main CONSISTENZA Table Parser ────────────────────────────────────────────
+
+/**
+ * Parse the CONSISTENZA/PORTAFOGLIO section line-by-line.
+ * Returns verified holdings with deterministic number extraction.
+ *
+ * Table structure (typical Italian bank):
+ *   ISIN          Nome Titolo              Divisa  Quantità    Prezzo    Controv.EUR
+ *   IT0005239360  UNICREDIT ORD            EUR     1.000,000   35,840    35.840,00
+ *   LU0119620416  MORGAN STANLEY FUND      USD     283,836     44,200    11.616,25
+ */
+export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[] {
+    if (!consistenzaText || consistenzaText.length < 50) return []
+
+    const lines = consistenzaText.split(/\n/)
+    const holdings: TextHolding[] = []
+    const seenIsins = new Set<string>()
+
+    // Accumulate data per ISIN
+    let currentIsin = ''
+    let currentCurrency = 'EUR'
+    let currentNumbers: number[] = []
+    let currentRawLines: string[] = []
+
+    // Pending buffer for Intesa format: numbers appear BEFORE the ISIN (on previous line)
+    let pendingNumbers: number[] = []
+    let pendingCurrency = 'EUR'
+    let pendingRawLine = ''
+
+    const flushCurrent = () => {
+        if (currentIsin && currentNumbers.length >= 2 && !seenIsins.has(currentIsin)) {
+            const h = buildHoldingFromNumbers(currentIsin, currentCurrency, currentNumbers)
+            if (h) {
+                holdings.push(h)
+                seenIsins.add(currentIsin)
+            }
+        }
+        currentIsin = ''
+        currentCurrency = 'EUR'
+        currentNumbers = []
+        currentRawLines = []
+    }
+
+    const isSectionBreak = (trimmed: string): boolean =>
+        /^(CONTROVALORE|DIVISA|CODICE|ISIN\s|OBBLIGAZ|WARRANT|RELATIVI|---)/i.test(trimmed)
+        || /^TOTALE\b/i.test(trimmed)
+        || /Dossier\s+Titoli/i.test(trimmed)
+        || /Pag\.?\s*\d+\s*(di|\/)\s*\d+/i.test(trimmed)
+        || /Sede\s+Legale/i.test(trimmed)
+        || /Capitale\s+Sociale/i.test(trimmed)
+        || /Pagina\s+\d+/i.test(trimmed)
+        || /Estratto\s+Conto/i.test(trimmed)
+        || /^\d{2}\/\d{2}\/\d{4}$/.test(trimmed) // standalone date
+
+    for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+
+        // Check for new ISIN (12-char code: 2 letters + 10 alphanumeric)
+        // Must contain at least 1 digit (filters out words like "CONTROVALORE")
+        // Also handle ISINs with spaces (OCR artifact): "LU 1531398904", "IE00B1FZS 467"
+        let isinMatch = trimmed.match(/\b([A-Z]{2}[A-Z0-9]{10})\b/)
+        if (!isinMatch) {
+            const spaceIsinMatch = trimmed.match(/\b([A-Z]{2}[A-Z0-9]*)\s+([A-Z0-9]+)\b/)
+            if (spaceIsinMatch) {
+                const combined = spaceIsinMatch[1] + spaceIsinMatch[2]
+                if (combined.length === 12 && /^[A-Z]{2}[A-Z0-9]{10}$/.test(combined) && /\d/.test(combined)) {
+                    isinMatch = [combined, combined] as unknown as RegExpMatchArray
+                }
+            }
+        }
+        const isRealIsin = isinMatch && /\d/.test(isinMatch[1]) &&
+            !ITALIAN_WORDS_12.has(isinMatch[1])
+
+        if (isRealIsin && isinMatch) {
+            // Flush previous ISIN before starting new one
+            flushCurrent()
+
+            // Skip duplicate ISINs (e.g. ISIN appears in both CONSISTENZA and MOVIMENTI)
+            if (seenIsins.has(isinMatch[1])) continue
+
+            currentIsin = isinMatch[1]
+            currentRawLines.push(trimmed)
+
+            // Detect currency on same line
+            const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
+            if (currMatch) currentCurrency = currMatch[1]
+
+            // Extract numbers from the ISIN line itself
+            const nums = extractItalianNumbers(trimmed)
+            currentNumbers.push(...nums)
+
+            // Intesa format: if this ISIN line has few/no numbers but pending numbers exist
+            // from the previous line, adopt them (numbers-then-ISIN pattern)
+            if (currentNumbers.length < 2 && pendingNumbers.length >= 2) {
+                currentNumbers = [...pendingNumbers, ...currentNumbers]
+                currentCurrency = pendingCurrency
+                currentRawLines.unshift(pendingRawLine)
+            }
+            pendingNumbers = []
+            pendingCurrency = 'EUR'
+            pendingRawLine = ''
+        } else if (currentIsin) {
+            // Continuation line for current ISIN (description, more numbers)
+            // Stop accumulating if we hit a section break, total line, header, or page footer
+            if (isSectionBreak(trimmed)) {
+                flushCurrent()
+                continue
+            }
+
+            // Extract numbers from this line
+            const nums = extractItalianNumbers(trimmed)
+
+            // Intesa format: if current holding already has 2+ numbers and this new line
+            // also has 2+ numbers, it's likely a NEW holding's data line (not a continuation)
+            // (Continuation lines like "CAMBIO: 1,105000" only have 1 number, so this is safe)
+            if (currentNumbers.length >= 2 && nums.length >= 2) {
+                flushCurrent()
+                // Buffer these numbers as pending for the next ISIN
+                pendingNumbers = nums
+                const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
+                pendingCurrency = currMatch ? currMatch[1] : 'EUR'
+                pendingRawLine = trimmed
+                continue
+            }
+
+            currentRawLines.push(trimmed)
+
+            // Detect currency
+            if (currentCurrency === 'EUR') {
+                const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
+                if (currMatch) currentCurrency = currMatch[1]
+            }
+
+            currentNumbers.push(...nums)
+
+            // If we've accumulated many numbers, this is probably enough for one ISIN
+            // (prevents bleeding into next section)
+            if (currentNumbers.length >= 8) {
+                flushCurrent()
+            }
+        } else {
+            // No current ISIN — buffer numbers for potential "numbers-then-ISIN" pattern (Intesa)
+            if (!isSectionBreak(trimmed)) {
+                const nums = extractItalianNumbers(trimmed)
+                if (nums.length >= 2) {
+                    pendingNumbers = nums
+                    const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
+                    pendingCurrency = currMatch ? currMatch[1] : 'EUR'
+                    pendingRawLine = trimmed
+                } else {
+                    // Non-numeric line without ISIN: clear pending (prevents cross-contamination)
+                    if (nums.length === 0 && trimmed.length > 5) {
+                        pendingNumbers = []
+                        pendingCurrency = 'EUR'
+                        pendingRawLine = ''
+                    }
+                }
+            } else {
+                pendingNumbers = []
+                pendingCurrency = 'EUR'
+                pendingRawLine = ''
+            }
+        }
+    }
+
+    // Don't forget the last ISIN
+    flushCurrent()
+
+    return holdings
+}
+
+/**
+ * Given an ISIN, its currency, and the numbers found near it,
+ * determine quantity, price, marketValue using math verification.
+ *
+ * Italian bank tables typically have these columns (left to right):
+ *   quantity | price | [controv_divisa] | [exchange_rate] | controv_EUR
+ *
+ * The LAST number is always the EUR controvalore (market value).
+ * We verify by finding qty × price [× rate] ≈ last number.
+ */
+function buildHoldingFromNumbers(
+    isin: string,
+    currency: string,
+    numbers: number[]
+): TextHolding | null {
+    if (numbers.length < 2) return null
+
+    // Try each candidate as the potential market value (last number first, then others)
+    // This handles both formats:
+    // - CA format: ISIN qty price marketValue (market value IS last)
+    // - Intesa format: qty price marketValue ISIN exchangeRate (market value is NOT last when exchange rate follows)
+    const mvCandidateIndices: number[] = [numbers.length - 1]
+    // If last number looks like an exchange rate (0.3-3.0), also try the second-to-last and the largest number
+    const lastNum = numbers[numbers.length - 1]
+    if (lastNum >= 0.3 && lastNum <= 3.0 && numbers.length >= 3) {
+        mvCandidateIndices.push(numbers.length - 2)
+        // Also try the largest number in the array
+        let maxIdx = 0
+        for (let i = 1; i < numbers.length; i++) {
+            if (numbers[i] > numbers[maxIdx]) maxIdx = i
+        }
+        if (!mvCandidateIndices.includes(maxIdx)) mvCandidateIndices.push(maxIdx)
+    }
+
+    let bestQty = 0
+    let bestPrice = 0
+    let bestRate = 1
+    let bestMv = 0
+    let verified = false
+    let bestError = Infinity
+
+    for (const mvIdx of mvCandidateIndices) {
+        if (verified) break
+        const marketValue = numbers[mvIdx]
+        if (marketValue <= 0) continue
+
+        // Try all pairs (qi, pi) where qi < pi
+        for (let qi = 0; qi < numbers.length && !verified; qi++) {
+            if (qi === mvIdx) continue
+            for (let pi = qi + 1; pi < numbers.length; pi++) {
+                if (pi === mvIdx) continue
+                const qtyCandidate = numbers[qi]
+                const priceCandidate = numbers[pi]
+
+                // Direct: qty × price = marketValue (EUR holdings)
+                const product = qtyCandidate * priceCandidate
+                if (marketValue > 0) {
+                    const error = Math.abs(product - marketValue) / marketValue
+                    if (error < 0.03 && error < bestError) {
+                        bestQty = qtyCandidate
+                        bestPrice = priceCandidate
+                        bestRate = 1
+                        bestMv = marketValue
+                        bestError = error
+                        if (error < 0.01) { verified = true; break }
+                    }
+                }
+
+                // With exchange rate: qty × price / rate = marketValue (foreign currency)
+                if (currency !== 'EUR' || !verified) {
+                    for (let ei = 0; ei < numbers.length; ei++) {
+                        if (ei === qi || ei === pi || ei === mvIdx) continue
+                        const rateCandidate = numbers[ei]
+                        // Exchange rates are typically 0.5 to 2.5
+                        if (rateCandidate < 0.3 || rateCandidate > 3.0) continue
+
+                        const productWithRate = qtyCandidate * priceCandidate * rateCandidate
+                        if (marketValue > 0) {
+                            const error = Math.abs(productWithRate - marketValue) / marketValue
+                            if (error < 0.03 && error < bestError) {
+                                bestQty = qtyCandidate
+                                bestPrice = priceCandidate
+                                bestRate = rateCandidate
+                                bestMv = marketValue
+                                bestError = error
+                                if (error < 0.01) { verified = true; break }
+                            }
+                        }
+
+                        // Also try: qty × price / rate = marketValue (inverse rate)
+                        if (rateCandidate > 0) {
+                            const productInvRate = qtyCandidate * priceCandidate / rateCandidate
+                            if (marketValue > 0) {
+                                const error = Math.abs(productInvRate - marketValue) / marketValue
+                                if (error < 0.03 && error < bestError) {
+                                    bestQty = qtyCandidate
+                                    bestPrice = priceCandidate
+                                    bestRate = 1 / rateCandidate
+                                    bestMv = marketValue
+                                    bestError = error
+                                    if (error < 0.01) { verified = true; break }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // For bonds: price might be in centesimi (e.g., 98.79 = 98.79% of nominal)
+                // qty × (price / 100) = marketValue
+                if (!verified && priceCandidate > 50 && priceCandidate < 200) {
+                    const bondProduct = qtyCandidate * (priceCandidate / 100)
+                    if (marketValue > 0) {
+                        const error = Math.abs(bondProduct - marketValue) / marketValue
+                        if (error < 0.03 && error < bestError) {
+                            bestQty = qtyCandidate
+                            bestPrice = priceCandidate / 100
+                            bestRate = 1
+                            bestMv = marketValue
+                            bestError = error
+                            if (error < 0.01) { verified = true; break }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // When unverified, use the largest number as market value (not just the last)
+    // This handles Intesa format where exchange rate may come after market value
+    const finalMv = bestError < 0.03 ? bestMv : Math.max(...numbers)
+
+    return {
+        isin,
+        currency,
+        quantity: bestQty,
+        price: bestPrice,
+        marketValue: finalMv,
+        exchangeRate: bestRate,
+        verified: bestError < 0.03,
+        source: bestError < 0.03 ? 'text_verified' : 'text_unverified',
+    }
+}
+
+// ── Merge: Text Holdings + Gemini Holdings ───────────────────────────────────
+
+/**
+ * Merge text-parsed holdings (accurate numbers) with Gemini holdings (metadata).
+ *
+ * Strategy:
+ * - For ISINs in BOTH: use text numbers + Gemini metadata (name, assetType)
+ * - For ISINs only in text (verified): add them (Gemini missed them)
+ * - For ISINs only in Gemini: keep as-is (text section might not cover them)
+ *
+ * Returns the merged holdings array + count of corrections applied.
+ */
+export function mergeTextAndGeminiHoldings(
+    textHoldings: TextHolding[],
+    geminiHoldings: any[],
+    logFn?: (tag: string, msg: string) => void
+): { merged: any[]; corrections: number } {
+    if (textHoldings.length === 0) return { merged: geminiHoldings, corrections: 0 }
+
+    const log = logFn || (() => {})
+    const textMap = new Map<string, TextHolding>()
+    for (const th of textHoldings) {
+        textMap.set(th.isin, th)
+    }
+
+    let corrections = 0
+    const usedTextIsins = new Set<string>()
+    const merged: any[] = []
+
+    // Process Gemini holdings: override numbers with text data where available
+    for (const gh of geminiHoldings) {
+        if (!gh.isin) { merged.push(gh); continue }
+
+        const th = textMap.get(gh.isin)
+        if (!th) {
+            // Only in Gemini — keep as-is
+            merged.push(gh)
+            continue
+        }
+
+        usedTextIsins.add(gh.isin)
+
+        // Compare numbers
+        const mktDiff = gh.marketValue > 0
+            ? Math.abs(gh.marketValue - th.marketValue) / Math.max(gh.marketValue, th.marketValue)
+            : 1
+
+        if (th.verified) {
+            // Text is verified (qty × price = mktVal) — always prefer text numbers
+            if (mktDiff > 0.01 || gh.quantity === 0 || gh.marketValue === 0) {
+                log('MERGE', `${gh.isin}: numeri dal testo (verificato) | mktVal: ${gh.marketValue?.toFixed(2) || 0} → ${th.marketValue.toFixed(2)}€`)
+                corrections++
+            }
+            merged.push({
+                ...gh,
+                quantity: th.quantity,
+                price: th.price,
+                marketValue: th.marketValue,
+                exchangeRate: th.exchangeRate,
+                _source: 'text_verified',
+            })
+        } else if (gh.marketValue === 0 || (mktDiff > 0.5 && th.marketValue > 0)) {
+            // Gemini has zero or is way off — use text even if unverified (ISIN confirmed by Gemini)
+            if (th.marketValue > 0) {
+                log('MERGE', `${gh.isin}: marketValue da testo (ISIN confermato) | ${gh.marketValue?.toFixed(2) || 0} → ${th.marketValue.toFixed(2)}€`)
+                corrections++
+                merged.push({
+                    ...gh,
+                    quantity: th.quantity || gh.quantity,
+                    price: th.price || gh.price,
+                    marketValue: th.marketValue,
+                    exchangeRate: th.exchangeRate !== 1 ? th.exchangeRate : gh.exchangeRate,
+                    _source: 'text_unverified',
+                })
+            } else {
+                merged.push(gh)
+            }
+        } else {
+            // Both have values, text unverified, Gemini seems reasonable
+            // Check for 1000x Italian format error specifically
+            const ratio = gh.marketValue / th.marketValue
+            if (ratio > 900 && ratio < 1100) {
+                log('MERGE', `${gh.isin}: 1000x Italian fix | ${gh.marketValue.toFixed(2)} → ${th.marketValue.toFixed(2)}€`)
+                merged.push({
+                    ...gh,
+                    marketValue: th.marketValue,
+                    _source: 'text_1000x_fix',
+                })
+                corrections++
+            } else {
+                // Keep Gemini's value — not confident enough to override
+                merged.push(gh)
+            }
+        }
+    }
+
+    // Add text-only ISINs (Gemini missed them) — only if verified
+    for (const th of textHoldings) {
+        if (usedTextIsins.has(th.isin)) continue
+        if (!th.verified) continue // Don't add unverified holdings that Gemini didn't see
+
+        log('MERGE ADD', `${th.isin}: aggiunto da testo (verificato) | qty=${th.quantity} × price=${th.price.toFixed(4)} = ${th.marketValue.toFixed(2)}€`)
+        merged.push({
+            isin: th.isin,
+            name: th.isin, // Will be enriched by Phase B if needed
+            currency: th.currency,
+            exchangeRate: th.exchangeRate,
+            quantity: th.quantity,
+            price: th.price,
+            marketValue: th.marketValue,
+            _source: 'text_verified',
+        })
+        corrections++
+    }
+
+    return { merged, corrections }
+}
+
+// ── Full Pipeline Entry Point ────────────────────────────────────────────────
+
+/**
+ * Complete text-based portfolio extraction.
+ * Call this ONCE with the full PDF text, then use the result to merge with Gemini.
+ */
+export function extractPortfolioFromText(fullText: string): TextPortfolioResult {
+    const bankDetected = detectBank(fullText)
+    const consistenzaSection = extractConsistenzaSection(fullText)
+    const { total, source: totalSource } = extractPortfolioTotal(fullText)
+    const holdings = parseConsistenzaHoldings(consistenzaSection)
+
+    const holdingsSum = holdings.reduce((s, h) => s + h.marketValue, 0)
+    const verifiedCount = holdings.filter(h => h.verified).length
+
+    return {
+        holdings,
+        total,
+        totalSource,
+        holdingsSum,
+        bankDetected,
+        sectionFound: consistenzaSection.length > 50,
+    }
+}
+
+// ── Deterministic Movement Parser (Crédit Agricole format) ──────────────────
+
+// Operation types mapping: description → Acquisto/Vendita
+const BUY_PATTERNS = [
+    /SOTT\s*PAC/i, /SOTTOSCR/i, /ACQUIST/i, /ACQ\.?\s*CONT/i, /CARICO/i, /VERS\.?\s*TITOL/i,
+]
+const SELL_PATTERNS = [
+    /RIMBORSO/i, /VEN\.?\s*CONT/i, /VENDITA/i, /SCARICO/i,
+    /PRELEV/i, /GIRO\s*ALTRO/i, /SWITCH/i, /TRAS\.?\s*TITOL/i,
+]
+
+function classifyOperation(desc: string): 'Acquisto' | 'Vendita' | null {
+    for (const pat of BUY_PATTERNS) {
+        if (pat.test(desc)) return 'Acquisto'
+    }
+    for (const pat of SELL_PATTERNS) {
+        if (pat.test(desc)) return 'Vendita'
+    }
+    return null
+}
+
+/**
+ * Clean CA page headers/footers from text to get continuous movement data.
+ * Removes blocks like: "Dossier Titoli: ... Pag X di Y ... Codice Descrizione ..."
+ */
+function cleanPageBreaks(text: string): string {
+    // Remove page footer + next page header blocks
+    // Pattern: "Dossier Titoli:" ... "-- N of M --" ... "Codice Descrizione Data Consistenza"
+    let cleaned = text
+    // Remove lines that are page footers (Dossier Titoli:, Crédit Agricole, Pag, page numbers)
+    const lines = cleaned.split('\n')
+    const filtered: string[] = []
+    let skipBlock = false
+    for (const line of lines) {
+        const trimmed = line.trim()
+        // Skip CA page footer lines
+        if (/^Dossier Titoli:/i.test(trimmed)) { skipBlock = true; continue }
+        if (/^Cr[ée]dit Agricole/i.test(trimmed)) continue
+        if (/^\d+\.\d+\.\d+/i.test(trimmed) && trimmed.length < 20) continue // "50.3321.85" style codes
+        if (/^Pag\s+\d+\s+di\s+\d+/i.test(trimmed)) continue
+        if (/^Codice_filiale:/i.test(trimmed)) continue
+        if (/^--\s*\d+\s*of\s*\d+\s*--$/i.test(trimmed)) { skipBlock = false; continue }
+        if (/^Capitale Sociale/i.test(trimmed)) continue
+        // Skip repeated column headers after page break
+        if (skipBlock && /^Codice\s+Descrizione/i.test(trimmed)) { skipBlock = false; continue }
+        if (skipBlock && (/^di periodo/i.test(trimmed) || /^Carico/i.test(trimmed) || /^finale di/i.test(trimmed))) continue
+        if (skipBlock) continue
+        filtered.push(line)
+    }
+    return filtered.join('\n')
+}
+
+/**
+ * Extract MOVIMENTI section from full PDF text.
+ */
+export function extractMovimentiSection(fullText: string): string {
+    const upper = fullText.toUpperCase()
+    const movIdx = upper.indexOf('MOVIMENTI EFFETTUATI')
+    if (movIdx === -1) return ''
+    // End at the first section boundary AFTER MOVIMENTI
+    let endIdx = fullText.length
+    for (const marker of ['DIVIDENDI INCASSATI', 'CEDOLE INCASSATE', 'AVVERTENZE']) {
+        const idx = upper.indexOf(marker, movIdx + 20)
+        if (idx !== -1 && idx < endIdx) endIdx = idx
+    }
+    return fullText.substring(movIdx, endIdx)
+}
+
+/**
+ * Parse movements from CA-format MOVIMENTI section.
+ *
+ * Format per ISIN block:
+ *   ISIN NAME
+ *   DD/MM/YYYY START_QTY              ← starting quantity (no tab/operation)
+ *   Div: CURRENCY
+ *   DD/MM/YYYY QTY\tOPERATION         ← movement line (has tab + description)
+ *   ...
+ *   DD/MM/YYYY END_QTY                ← ending quantity (no tab/operation)
+ */
+export function parseMovimentiFromText(fullText: string): TextMovimentiResult {
+    const movSection = extractMovimentiSection(fullText)
+    if (!movSection) return { startQuantities: {}, endQuantities: {}, movements: [] }
+
+    const cleaned = cleanPageBreaks(movSection)
+    const lines = cleaned.split('\n')
+
+    const startQuantities: Record<string, number> = {}
+    const endQuantities: Record<string, number> = {}
+    const movements: TextMovement[] = []
+
+    const ISIN_RE = /^([A-Z]{2}[A-Z0-9]{9}\d)\s/
+    const DATE_QTY_RE = /^(\d{2}\/\d{2}\/\d{4})\s+([\d.,]+)/
+    const DATE_QTY_OP_RE = /^(\d{2}\/\d{2}\/\d{4})\s+([\d.,]+)\t(.+)/
+
+    let currentIsin = ''
+    let isinLines: string[] = [] // collect lines for current ISIN block
+
+    // All known operation patterns (for detecting standalone description lines)
+    const ALL_OP_PATTERNS = [...BUY_PATTERNS, ...SELL_PATTERNS]
+
+    function processIsinBlock(isin: string, blockLines: string[]) {
+        // Phase 1: Parse all lines into typed entries
+        const entries: { date: string; qty: number; op: string | null; lineIdx: number }[] = []
+
+        for (let i = 0; i < blockLines.length; i++) {
+            const line = blockLines[i].trim()
+            if (!line || /^Div:/i.test(line)) continue
+
+            // Line with tab = movement (date + qty + tab + operation)
+            const opMatch = line.match(DATE_QTY_OP_RE)
+            if (opMatch) {
+                const op = opMatch[3].trim()
+                // Filter out numeric false-positives (dividend tax data like "100,0000000 26,00 3,00")
+                if (/^\d/.test(op)) continue
+                entries.push({ date: opMatch[1], qty: parseItalianNumber(opMatch[2]), op, lineIdx: i })
+                continue
+            }
+
+            // Date + qty without tab = start/end quantity OR movement with description on next line
+            const qtyMatch = line.match(DATE_QTY_RE)
+            if (qtyMatch && !line.includes('\t')) {
+                // Look ahead: is the next non-empty, non-Div line an operation description?
+                let foundOp: string | null = null
+                for (let j = i + 1; j < blockLines.length && j <= i + 2; j++) {
+                    const nextLine = blockLines[j].trim()
+                    if (!nextLine || /^Div:/i.test(nextLine)) continue
+                    // If next line is a date or ISIN, this is a start/end qty
+                    if (DATE_QTY_RE.test(nextLine) || ISIN_RE.test(nextLine)) break
+                    // Check if it's a known operation description
+                    if (ALL_OP_PATTERNS.some(p => p.test(nextLine))) {
+                        foundOp = nextLine
+                        // Mark this line as consumed so we skip it in the main loop
+                        blockLines[j] = '' // consumed
+                        break
+                    }
+                    break // unknown line, don't look further
+                }
+                entries.push({
+                    date: qtyMatch[1],
+                    qty: parseItalianNumber(qtyMatch[2]),
+                    op: foundOp,
+                    lineIdx: i
+                })
+            }
+        }
+
+        if (entries.length === 0) return
+
+        // Phase 2: Determine start/end quantities and movements
+        // Start qty = first entry without operation
+        // End qty = last entry without operation
+        // Movements = entries with operation
+
+        const noOpEntries = entries.filter(e => e.op === null)
+        const opEntries = entries.filter(e => e.op !== null)
+
+        // Sort noOp entries chronologically (DD/MM/YYYY → comparable)
+        const parseDate = (d: string) => {
+            const [dd, mm, yyyy] = d.split('/')
+            return parseInt(yyyy + mm + dd)
+        }
+        noOpEntries.sort((a, b) => parseDate(a.date) - parseDate(b.date))
+
+        if (noOpEntries.length >= 2) {
+            startQuantities[isin] = noOpEntries[0].qty  // earliest date = start
+            endQuantities[isin] = noOpEntries[noOpEntries.length - 1].qty  // latest date = end
+        } else if (noOpEntries.length === 1) {
+            if (opEntries.length === 0) {
+                // Single date line, no movements → start = end
+                startQuantities[isin] = noOpEntries[0].qty
+                endQuantities[isin] = noOpEntries[0].qty
+            } else {
+                // Determine if the single noOp entry is start or end based on date:
+                // If it's AFTER all movements → it's the ending balance (new ISIN bought during period)
+                // If it's BEFORE movements → it's the starting balance (ISIN sold during period)
+                const noOpDate = parseDate(noOpEntries[0].date)
+                const lastOpDate = Math.max(...opEntries.map(e => parseDate(e.date)))
+                if (noOpDate > lastOpDate) {
+                    endQuantities[isin] = noOpEntries[0].qty
+                    // Don't set startQuantities — ISIN didn't exist at period start
+                } else {
+                    startQuantities[isin] = noOpEntries[0].qty
+                    // Don't set endQuantities — ISIN was fully sold
+                }
+            }
+        }
+
+        // Create movement records
+        const isinMovements: TextMovement[] = []
+        for (const entry of opEntries) {
+            const opType = classifyOperation(entry.op!)
+            if (opType) {
+                isinMovements.push({
+                    isin,
+                    date: entry.date,
+                    quantity: entry.qty,
+                    operationType: opType,
+                    description: entry.op!,
+                })
+            }
+        }
+
+        // Math verification: start + buys - sells = end
+        // If it doesn't match, try flipping ambiguous operations (GIRO ALTRO, SWITCH, TRAS.TITOLI)
+        const AMBIGUOUS_OPS = [/GIRO/i, /SWITCH/i, /TRAS/i]
+        const startQty = startQuantities[isin] ?? 0
+        const endQty = endQuantities[isin] ?? 0
+        if (isinMovements.length > 0) {
+            const buys = isinMovements.filter(m => m.operationType === 'Acquisto').reduce((s, m) => s + m.quantity, 0)
+            const sells = isinMovements.filter(m => m.operationType === 'Vendita').reduce((s, m) => s + m.quantity, 0)
+            const calc = startQty + buys - sells
+            const hasAmbiguous = isinMovements.some(m => AMBIGUOUS_OPS.some(p => p.test(m.description)))
+            if (hasAmbiguous && Math.abs(calc - endQty) > 0.01) {
+                // Try flipping ambiguous operations one at a time
+                for (const mov of isinMovements) {
+                    if (AMBIGUOUS_OPS.some(p => p.test(mov.description))) {
+                        const flipped = mov.operationType === 'Acquisto' ? 'Vendita' : 'Acquisto'
+                        const adjBuys = buys + (flipped === 'Acquisto' ? mov.quantity : 0) - (mov.operationType === 'Acquisto' ? mov.quantity : 0)
+                        const adjSells = sells + (flipped === 'Vendita' ? mov.quantity : 0) - (mov.operationType === 'Vendita' ? mov.quantity : 0)
+                        const adjCalc = startQty + adjBuys - adjSells
+                        if (Math.abs(adjCalc - endQty) < 0.01) {
+                            mov.operationType = flipped
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        movements.push(...isinMovements)
+    }
+
+    for (const line of lines) {
+        const isinMatch = line.match(ISIN_RE)
+        if (isinMatch) {
+            // Process previous block
+            if (currentIsin && isinLines.length > 0) {
+                processIsinBlock(currentIsin, isinLines)
+            }
+            currentIsin = isinMatch[1]
+            isinLines = []
+            continue
+        }
+        if (currentIsin) {
+            isinLines.push(line)
+        }
+    }
+    // Process last block
+    if (currentIsin && isinLines.length > 0) {
+        processIsinBlock(currentIsin, isinLines)
+    }
+
+    return { startQuantities, endQuantities, movements }
+}

@@ -3,6 +3,18 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { normalizeHolder } from '@/lib/utils'
 
+// Extract date from filename for chronological sorting
+// Handles patterns like "190331 31_03_2019_..." or "200630_..."
+function extractDateFromFilename(name: string): number {
+  // Try YYMMDD at start of filename (e.g., "190331 ...")
+  const yymmdd = name.match(/^(\d{6})/)
+  if (yymmdd) return parseInt(yymmdd[1])
+  // Try DD_MM_YYYY pattern (e.g., "31_03_2019")
+  const ddmmyyyy = name.match(/(\d{2})_(\d{2})_(\d{4})/)
+  if (ddmmyyyy) return parseInt(ddmmyyyy[3].slice(2) + ddmmyyyy[2] + ddmmyyyy[1])
+  return 999999 // unknown dates go last
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface UploadingFile {
@@ -231,7 +243,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             f.id === fileId ? { ...f, status: 'queued' as const, progress: 0, error: 'Rate limit - riprovo...' } : f
           ))
           fileQueueRef.current.push({ id: fileId, file, userId })
-          await new Promise(resolve => setTimeout(resolve, 10000))
+          await new Promise(resolve => setTimeout(resolve, 20000))
         } else {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId ? { ...f, status: 'error' as const, progress: 0, error: result.error } : f
@@ -247,13 +259,17 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Parallel with concurrency limit of 3 (matches dashboard behavior)
+    // Parallel with concurrency limit of 3 with stagger delay to spread Gemini API calls
     const PARALLEL_LIMIT = 3
     const executing = new Set<Promise<void>>()
     while (fileQueueRef.current.length > 0) {
       const item = fileQueueRef.current.shift()
       if (!item) break
       currentFileIndexRef.current++
+      // Stagger starts by 2s to spread Gemini API calls and reduce rate limit pressure
+      if (executing.size > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      }
       const p = processOneFile(item.id, item.file, item.userId).then(() => { executing.delete(p) })
       executing.add(p)
       if (executing.size >= PARALLEL_LIMIT) {
@@ -330,6 +346,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         total: combined.length
       }))
     })
+    // Sort chronologically so earlier periods are processed first
+    // This ensures predecessors exist when Phase C checks coherence
+    filesToProcess.sort((a, b) => extractDateFromFilename(a.file.name) - extractDateFromFilename(b.file.name))
     fileQueueRef.current.push(...filesToProcess)
   }, [])
 

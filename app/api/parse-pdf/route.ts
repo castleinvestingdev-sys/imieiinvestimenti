@@ -3,6 +3,12 @@ import { createClient } from '@/lib/supabase/server'
 import * as https from 'https'
 import crypto from 'crypto'
 import { PDFParse } from 'pdf-parse'
+import {
+    extractPortfolioFromText,
+    mergeTextAndGeminiHoldings,
+    parseMovimentiFromText,
+    type TextPortfolioResult,
+} from '@/lib/pdf-text-parser'
 
 // Allow up to 5 minutes for Gemini PDF processing
 export const maxDuration = 300
@@ -267,291 +273,10 @@ function validatePortfolioTotals(parsed: any, textTotal?: number): {
 }
 
 // === TEXT-BASED HOLDINGS CORRECTION ===
-// Uses pdf-parse extracted text to correct/fill holdings when Gemini returns zeros.
-// This is the "text-first" approach: raw text is deterministic and doesn't suffer from vision errors.
+// Moved to lib/pdf-text-parser.ts — deterministic parser for Italian bank PDFs
+// Uses extractPortfolioFromText() + mergeTextAndGeminiHoldings()
 
-function parseItalianNumber(s: string): number {
-    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
-}
-
-function extractHoldingsFromText(
-    consistenzaText: string
-): Map<string, { numbers: number[]; rawBlock: string }> {
-    const result = new Map<string, { numbers: number[]; rawBlock: string }>()
-    if (!consistenzaText || consistenzaText.length < 50) return result
-
-    // Find all ISINs and their positions (deduplicate: keep first occurrence)
-    const isinRegex = /\b([A-Z]{2}[A-Z0-9]{10})\b/g
-    const positions: { isin: string; pos: number }[] = []
-    const seenIsins = new Set<string>()
-    let m
-    while ((m = isinRegex.exec(consistenzaText)) !== null) {
-        if (!seenIsins.has(m[1])) {
-            positions.push({ isin: m[1], pos: m.index })
-            seenIsins.add(m[1])
-        }
-    }
-
-    for (let i = 0; i < positions.length; i++) {
-        const start = positions[i].pos
-        const end = i + 1 < positions.length
-            ? positions[i + 1].pos
-            : Math.min(start + 600, consistenzaText.length)
-        const block = consistenzaText.substring(start, end)
-
-        // Find Italian-format numbers in priority order:
-        // 1. Full Italian: "1.234,56", "679.531,68" (dot=thousands, comma=decimal)
-        // 2. Short Italian: "283,836" (comma=decimal, 3+ decimal places for quantities)
-        // 3. Short Italian: "45,20" (comma=decimal, 2 decimal places for prices/amounts)
-        // 4. Whole numbers: "1000" (no separators, only if > 0)
-        const numPattern = /(?<!\d)(\d{1,3}(?:\.\d{3})*,\d{2,})(?!\d)|(?<!\d[.,])(\d+,\d{2,})(?!\d)/g
-        const numbers: number[] = []
-        let nm
-        while ((nm = numPattern.exec(block)) !== null) {
-            const raw = nm[1] || nm[2]
-            if (!raw) continue
-            const val = parseItalianNumber(raw)
-            if (!isNaN(val) && val >= 0) numbers.push(val)
-        }
-
-        if (numbers.length > 0) {
-            result.set(positions[i].isin, { numbers, rawBlock: block.substring(0, 300) })
-        }
-    }
-
-    return result
-}
-
-function correctHoldingsFromText(
-    parsed: any,
-    consistenzaText: string,
-    logFn: (tag: string, msg: string) => void,
-    correctedIsins?: Set<string>
-): number {
-    if (!consistenzaText || consistenzaText.length < 50) return 0
-    const holdings = parsed.finalPortfolio || []
-
-    const textMap = extractHoldingsFromText(consistenzaText)
-    if (textMap.size === 0) return 0
-
-    let corrected = 0
-
-    // CASE 1: Fix holdings that have zeros or wrong values
-    for (const h of holdings) {
-        if (!h.isin) continue
-        const td = textMap.get(h.isin)
-        if (!td || td.numbers.length < 2) continue
-        const nums = td.numbers
-
-        // === FIX ZERO VALUES ===
-        if (h.marketValue === 0 && nums.length >= 3) {
-            // Try to find a verified triple: qty × price = mktVal
-            const candidateMktVal = nums[nums.length - 1]
-            if (candidateMktVal > 0) {
-                let verified = false
-                for (let qi = 0; qi < nums.length - 1; qi++) {
-                    for (let pi = qi + 1; pi < nums.length; pi++) {
-                        if (nums[qi] === candidateMktVal || nums[pi] === candidateMktVal) continue
-                        if (Math.abs(nums[qi] * nums[pi] - candidateMktVal) / candidateMktVal < 0.03) {
-                            verified = true
-                            break
-                        }
-                    }
-                    if (verified) break
-                }
-                if (verified) {
-                    h.marketValue = candidateMktVal
-                    logFn('TEXT FIX', `${h.isin}: marketValue 0 → ${candidateMktVal.toFixed(2)}€ (verificato)`)
-                    corrected++; correctedIsins?.add(h.isin)
-                } else if (nums.length >= 2) {
-                    // Can't verify with qty×price but Gemini already confirmed this ISIN exists
-                    // Accept last number as marketValue (ISIN confirmed by Gemini, only number is uncertain)
-                    h.marketValue = candidateMktVal
-                    logFn('TEXT FIX', `${h.isin}: marketValue 0 → ${candidateMktVal.toFixed(2)}€ (ISIN da Gemini)`)
-                    corrected++; correctedIsins?.add(h.isin)
-                }
-            }
-        }
-
-        // === CROSS-VALIDATE MARKET VALUE ===
-        // Even when Gemini returned a non-zero marketValue, verify it matches the text
-        if (h.marketValue > 0 && nums.length >= 1) {
-            const textMktVal = nums[nums.length - 1]
-            if (textMktVal > 0) {
-                const ratio = h.marketValue / textMktVal
-                // Only fix clear 1000x errors (Italian format: dot as thousands separator)
-                // Don't guess — if the ratio isn't clearly 1000x, leave Gemini's value
-                if (ratio > 900 && ratio < 1100) {
-                    logFn('TEXT CROSS-FIX', `${h.isin}: marketValue ${h.marketValue.toFixed(2)} → ${textMktVal.toFixed(2)}€ (÷1000 Italian format)`)
-                    h.marketValue = textMktVal
-                    corrected++; correctedIsins?.add(h.isin)
-                } else if (ratio > 0.0009 && ratio < 0.0011) {
-                    logFn('TEXT CROSS-FIX', `${h.isin}: marketValue ${h.marketValue.toFixed(2)} → ${textMktVal.toFixed(2)}€ (×1000 Italian format)`)
-                    h.marketValue = textMktVal
-                    corrected++; correctedIsins?.add(h.isin)
-                }
-            }
-        }
-
-        // === FIX QUANTITY AND PRICE ===
-        // Try to find qty and price from text numbers that satisfy qty × price ≈ marketValue
-        if ((h.quantity === 0 || h.price === 0) && nums.length >= 3 && h.marketValue > 0) {
-            const mktVal = h.marketValue
-            let found = false
-
-            // Try all pairs to find qty × price ≈ marketValue
-            for (let qi = 0; qi < nums.length - 1 && !found; qi++) {
-                for (let pi = qi + 1; pi < nums.length && !found; pi++) {
-                    if (nums[qi] === mktVal || nums[pi] === mktVal) continue
-
-                    // Direct: qty × price = mktVal
-                    if (mktVal > 0 && Math.abs(nums[qi] * nums[pi] - mktVal) / mktVal < 0.02) {
-                        if (h.quantity === 0) h.quantity = nums[qi]
-                        if (h.price === 0) h.price = nums[pi]
-                        logFn('TEXT FIX', `${h.isin}: qty=${nums[qi]}, price=${nums[pi]}`)
-                        found = true; correctedIsins?.add(h.isin)
-                    }
-
-                    // With exchange rate: qty × price × rate = mktVal
-                    if (!found) {
-                        for (let ei = 0; ei < nums.length; ei++) {
-                            if (ei === qi || ei === pi || nums[ei] === mktVal) continue
-                            if (nums[ei] >= 0.5 && nums[ei] <= 2.0) {
-                                if (Math.abs(nums[qi] * nums[pi] * nums[ei] - mktVal) / mktVal < 0.02) {
-                                    if (h.quantity === 0) h.quantity = nums[qi]
-                                    if (h.price === 0) h.price = nums[pi]
-                                    if (!h.exchangeRate || h.exchangeRate === 1) h.exchangeRate = nums[ei]
-                                    logFn('TEXT FIX', `${h.isin}: qty=${nums[qi]}, price=${nums[pi]}, rate=${nums[ei]}`)
-                                    found = true; correctedIsins?.add(h.isin)
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // === MATH VERIFICATION: qty × price × rate ≈ marketValue ===
-        if (h.quantity > 0 && h.price > 0 && h.marketValue > 0) {
-            const rate = h.exchangeRate && h.exchangeRate !== 0 ? h.exchangeRate : 1
-            const computed = h.quantity * h.price * rate
-            const err = Math.abs(computed - h.marketValue) / h.marketValue
-
-            if (err > 0.5 && nums.length >= 3) {
-                // Product is way off — try to find correct qty/price from text
-                const mktVal = h.marketValue
-                for (let qi = 0; qi < nums.length - 1; qi++) {
-                    for (let pi = qi + 1; pi < nums.length; pi++) {
-                        if (nums[qi] === mktVal || nums[pi] === mktVal) continue
-                        const product = nums[qi] * nums[pi]
-                        if (mktVal > 0 && Math.abs(product - mktVal) / mktVal < 0.05) {
-                            logFn('MATH FIX', `${h.isin}: qty ${h.quantity}→${nums[qi]}, price ${h.price}→${nums[pi]} (product was ${computed.toFixed(0)}, expected ${mktVal.toFixed(0)})`)
-                            h.quantity = nums[qi]
-                            h.price = nums[pi]
-                            corrected++; correctedIsins?.add(h.isin)
-                            break
-                        }
-                        // Try with exchange rate
-                        for (let ei = 0; ei < nums.length; ei++) {
-                            if (ei === qi || ei === pi || nums[ei] === mktVal) continue
-                            if (nums[ei] >= 0.5 && nums[ei] <= 2.0) {
-                                const productRate = nums[qi] * nums[pi] * nums[ei]
-                                if (Math.abs(productRate - mktVal) / mktVal < 0.05) {
-                                    logFn('MATH FIX', `${h.isin}: qty→${nums[qi]}, price→${nums[pi]}, rate→${nums[ei]}`)
-                                    h.quantity = nums[qi]
-                                    h.price = nums[pi]
-                                    h.exchangeRate = nums[ei]
-                                    corrected++; correctedIsins?.add(h.isin)
-                                    break
-                                }
-                            }
-                        }
-                    }
-                    if (h.quantity !== 0 && h.price !== 0) break
-                }
-            }
-        }
-    }
-
-    // CASE 2: Gemini returned empty finalPortfolio — build from text
-    // ONLY add holdings where we can VERIFY qty × price = mktVal (no guessing)
-    if (holdings.length === 0 && textMap.size > 0) {
-        logFn('TEXT BUILD', `Gemini non ha estratto holdings — verifico ${textMap.size} ISIN dal testo`)
-        for (const [isin, td] of textMap) {
-            if (td.numbers.length < 3) continue // Need at least qty, price, mktVal
-            const mktVal = td.numbers[td.numbers.length - 1]
-            if (mktVal <= 0) continue
-
-            // MUST find qty × price ≈ mktVal — otherwise we can't trust this is a holding
-            let qty = 0, price = 0
-            for (let qi = 0; qi < td.numbers.length - 1; qi++) {
-                for (let pi = qi + 1; pi < td.numbers.length; pi++) {
-                    if (td.numbers[qi] === mktVal || td.numbers[pi] === mktVal) continue
-                    if (Math.abs(td.numbers[qi] * td.numbers[pi] - mktVal) / mktVal < 0.03) {
-                        qty = td.numbers[qi]
-                        price = td.numbers[pi]
-                        break
-                    }
-                }
-                if (qty > 0) break
-            }
-            if (qty === 0 || price === 0) continue // Can't verify — skip, don't guess
-
-            holdings.push({
-                isin,
-                name: isin,
-                currency: 'EUR',
-                exchangeRate: 1,
-                quantity: qty,
-                price,
-                marketValue: mktVal,
-            })
-            logFn('TEXT BUILD', `${isin}: qty=${qty} × price=${price} = ${(qty * price).toFixed(2)} ≈ ${mktVal.toFixed(2)}€ ✓`)
-            corrected++
-        }
-        if (holdings.length > 0) parsed.finalPortfolio = holdings
-    }
-
-    // CASE 3: Gemini missed some ISINs — ONLY add if mathematically verified
-    if (holdings.length > 0 && textMap.size > holdings.length) {
-        const holdingIsins = new Set(holdings.map((h: any) => h.isin).filter(Boolean))
-        for (const [isin, td] of textMap) {
-            if (holdingIsins.has(isin)) continue
-            if (td.numbers.length < 3) continue
-            const mktVal = td.numbers[td.numbers.length - 1]
-            if (mktVal <= 0) continue
-
-            let qty = 0, price = 0
-            for (let qi = 0; qi < td.numbers.length - 1; qi++) {
-                for (let pi = qi + 1; pi < td.numbers.length; pi++) {
-                    if (td.numbers[qi] === mktVal || td.numbers[pi] === mktVal) continue
-                    if (Math.abs(td.numbers[qi] * td.numbers[pi] - mktVal) / mktVal < 0.03) {
-                        qty = td.numbers[qi]
-                        price = td.numbers[pi]
-                        break
-                    }
-                }
-                if (qty > 0) break
-            }
-            if (qty === 0 || price === 0) continue // Can't verify — skip
-
-            holdings.push({
-                isin,
-                name: isin,
-                currency: 'EUR',
-                exchangeRate: 1,
-                quantity: qty,
-                price,
-                marketValue: mktVal,
-            })
-            logFn('TEXT ADD', `${isin}: qty=${qty} × price=${price} = ${(qty * price).toFixed(2)} ≈ ${mktVal.toFixed(2)}€ ✓`)
-            corrected++
-        }
-    }
-
-    return corrected
-}
+// Old correctHoldingsFromText removed — replaced by mergeTextAndGeminiHoldings from lib/pdf-text-parser
 
 function findSuspiciousMissingIsins(
     currentHoldings: any[],
@@ -1223,13 +948,13 @@ function callGemini(
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(requestBody)
             },
-            // No timeout - let Gemini take as long as needed (maxDuration=300s is the outer boundary)
         }
 
         const req = https.request(reqOptions, (res) => {
             let data = ''
             res.on('data', (chunk: Buffer) => { data += chunk.toString() })
             res.on('end', () => {
+                clearTimeout(totalTimeout)
                 if (res.statusCode === 200) {
                     try {
                         const json = JSON.parse(data)
@@ -1244,7 +969,85 @@ function callGemini(
             })
         })
 
-        req.on('error', (e: Error) => reject(e))
+        // 120s total timeout — prevents infinite hang, leaves time for retries within maxDuration=300s
+        const totalTimeout = setTimeout(() => {
+            req.destroy(new Error('Gemini request timeout after 120s'))
+        }, 120000)
+
+        req.on('error', (e: Error) => { clearTimeout(totalTimeout); reject(e) })
+        req.write(requestBody)
+        req.end()
+    })
+}
+
+// OCR transcription variant: uses Gemini vision to transcribe scanned PDF text faithfully (plain text output, no JSON)
+function callGeminiTranscriber(apiKey: string, model: string, pdfBase64: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const isGemini3 = model.includes('gemini-3') || model.includes('gemini3')
+        // Use Flash model for OCR — much faster and cheaper, transcription doesn't need Pro reasoning
+        const ocrModel = isGemini3 ? 'gemini-2.0-flash' : model.replace('-pro-', '-flash-')
+
+        const pdfPart: any = { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
+
+        const requestBody = JSON.stringify({
+            system_instruction: {
+                parts: [{
+                    text: `Trascrivi il testo del documento. Output SOLO testo puro, NO markdown, NO asterischi, NO formattazione.
+Mantieni numeri italiani esattamente come scritti (punti=migliaia, virgola=decimali): 1.234.567,89
+Mantieni codici ISIN (es. IT0005239360), quantità, prezzi, controvalori, date.
+Per le tabelle usa TAB tra le colonne. Ogni riga su una riga nuova.
+NON aggiungere commenti, intestazioni tue, o "Pagina X". Solo il testo del documento.`
+                }]
+            },
+            contents: [{
+                parts: [
+                    { text: 'Trascrivi il testo visibile.' },
+                    pdfPart
+                ]
+            }],
+            generationConfig: {
+                responseMimeType: 'text/plain',
+                temperature: 0,
+                maxOutputTokens: 30000,
+            }
+        })
+
+        const reqOptions = {
+            hostname: 'generativelanguage.googleapis.com',
+            port: 443,
+            path: `/v1beta/models/${ocrModel}:generateContent?key=${apiKey}`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody)
+            },
+        }
+
+        const req = https.request(reqOptions, (res) => {
+            let data = ''
+            res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+            res.on('end', () => {
+                clearTimeout(totalTimeout)
+                if (res.statusCode === 200) {
+                    try {
+                        const json = JSON.parse(data)
+                        const text = json.candidates?.[0]?.content?.parts?.[0]?.text || ''
+                        resolve(text)
+                    } catch (e: any) {
+                        reject(new Error(`OCR JSON parse error: ${e.message}`))
+                    }
+                } else {
+                    reject(new Error(`OCR HTTP ${res.statusCode}: ${data.substring(0, 500)}`))
+                }
+            })
+        })
+
+        // 60s timeout for OCR (Flash model, should be fast)
+        const totalTimeout = setTimeout(() => {
+            req.destroy(new Error('OCR request timeout after 60s'))
+        }, 60000)
+
+        req.on('error', (e: Error) => { clearTimeout(totalTimeout); reject(e) })
         req.write(requestBody)
         req.end()
     })
@@ -1293,6 +1096,7 @@ function callGeminiWithText(apiKey: string, model: string, systemPrompt: string,
             let data = ''
             res.on('data', (chunk: Buffer) => { data += chunk.toString() })
             res.on('end', () => {
+                clearTimeout(totalTimeout)
                 if (res.statusCode === 200) {
                     try {
                         const json = JSON.parse(data)
@@ -1307,7 +1111,12 @@ function callGeminiWithText(apiKey: string, model: string, systemPrompt: string,
             })
         })
 
-        req.on('error', (e: Error) => reject(e))
+        // 90s timeout for text-only calls (no PDF vision, should be faster)
+        const totalTimeout = setTimeout(() => {
+            req.destroy(new Error('Gemini text request timeout after 90s'))
+        }, 90000)
+
+        req.on('error', (e: Error) => { clearTimeout(totalTimeout); reject(e) })
         req.write(requestBody)
         req.end()
     })
@@ -1419,73 +1228,89 @@ export async function POST(request: NextRequest) {
             movimentiSectionText = pdfExtractedText.substring(Math.max(0, movStart - 20), movEnd).trim()
         }
 
-        // Extract CONSISTENZA section from text for DOSSIER cross-reference
-        let consistenzaSectionText = ''
+        // === DETERMINISTIC TEXT PARSER ===
+        // Run the text-first parser on extracted PDF text — this is the primary source for numbers
         const upperText = pdfExtractedText.toUpperCase()
         const isDossierFromText = upperText.includes('DOSSIER TITOLI') || upperText.includes('ESTRATTO CONTO TITOLI')
             || upperText.includes('RENDICONTO') || upperText.includes('PORTAFOGLIO TITOLI')
-        if (isDossierFromText && pdfExtractedText.length > 0) {
-            // Search for the start of the portfolio/holdings section
-            const consistKeywords = [
-                'CONSISTENZA FINALE', 'CONSISTENZA DI FINE', 'CONSISTENZA AL',
-                'CONSISTENZA', 'PORTAFOGLIO TITOLI', 'SITUAZIONE TITOLI',
-                'COMPOSIZIONE PORTAFOGLIO', 'COMPOSIZIONE DEL PORTAFOGLIO',
-                'ELENCO TITOLI', 'DETTAGLIO TITOLI', 'SITUAZIONE AL',
-                'STRUMENTI FINANZIARI'
-            ]
-            let consStart = -1
-            for (const kw of consistKeywords) {
-                const idx = upperText.indexOf(kw)
-                if (idx !== -1 && (consStart === -1 || idx < consStart)) consStart = idx
-            }
-            if (consStart !== -1) {
-                // End at MOVIMENTI/OPERAZIONI section or end of text
-                const endKeywords = ['MOVIMENTI', 'OPERAZIONI SU TITOLI', 'RIEPILOGO OPERAZIONI', 'DIVIDENDI']
-                let consEnd = -1
-                for (const ek of endKeywords) {
-                    const idx = upperText.indexOf(ek, consStart + 50)
-                    if (idx !== -1 && (consEnd === -1 || idx < consEnd)) consEnd = idx
-                }
-                if (consEnd === -1) consEnd = Math.min(consStart + 30000, pdfExtractedText.length)
-                consistenzaSectionText = pdfExtractedText.substring(Math.max(0, consStart - 20), consEnd).trim()
+        // Save original pdf-parse text before OCR might overwrite pdfExtractedText
+        const originalPdfText = pdfExtractedText
 
-                // Strip page headers/footers that break table continuity
-                consistenzaSectionText = consistenzaSectionText
-                    .replace(/Pagina\s+\d+\s+di\s+\d+/gi, '')
-                    .replace(/Pag\.\s*\d+/gi, '')
-                    .replace(/\f/g, ' ') // form feed = page break
-            }
-        }
-
-        // Pre-extract portfolio total from text as ground truth
+        let textParserResult: TextPortfolioResult | null = null
         let textPortfolioTotal = 0
         if (isDossierFromText && pdfExtractedText.length > 0) {
-            const totalPatterns = [
-                // Standard patterns
-                /CONTROVALORE\s+TOTALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
-                /TOTALE\s+(?:APPARENTE|PORTAFOGLIO|GENERALE)[\s\S]{0,80}?([\d.]+,\d{2})/i,
-                /CONTROV\.\s*TOTALE[\s\S]{0,60}?([\d.]+,\d{2})/i,
-                // Crédit Agricole / Cariparma patterns
-                /TOTALE\s+DOSSIER[\s\S]{0,80}?([\d.]+,\d{2})/i,
-                /TOTALE\s+CONTROVALORE[\s\S]{0,80}?([\d.]+,\d{2})/i,
-                // Intesa Sanpaolo
-                /VALORE\s+COMPLESSIVO[\s\S]{0,80}?([\d.]+,\d{2})/i,
-                /CONTROV\.\s*COMPLESSIVO[\s\S]{0,60}?([\d.]+,\d{2})/i,
-                // BPM, BPER
-                /TOTALE\s+GENERALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
-                // Specific: "Totale in Euro" (not generic "Totale" which could match anything)
-                /TOTALE\s+IN\s+EURO\s*([\d.]+,\d{2})/i,
-            ]
-            for (const pat of totalPatterns) {
-                const m = pdfExtractedText.match(pat)
-                if (m) {
-                    const candidate = parseFloat(m[1].replace(/\./g, '').replace(',', '.'))
-                    if (candidate > 0) {
-                        textPortfolioTotal = candidate
-                        logProgress('TEXT PORTFOLIO TOTAL', `Estratto dal testo: ${textPortfolioTotal.toFixed(2)}€`)
-                        break
+            textParserResult = extractPortfolioFromText(pdfExtractedText)
+            textPortfolioTotal = textParserResult.total
+
+            const verifiedCount = textParserResult.holdings.filter(h => h.verified).length
+            logProgress('TEXT PARSER', [
+                `Banca: ${textParserResult.bankDetected || 'non rilevata'}`,
+                `Sezione: ${textParserResult.sectionFound ? 'trovata' : 'NON trovata'}`,
+                `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati)`,
+                `Totale: ${textParserResult.total > 0 ? textParserResult.total.toFixed(2) + '€' : 'non trovato'}`,
+                `Somma: ${textParserResult.holdingsSum.toFixed(2)}€`,
+                textParserResult.total > 0
+                    ? `Gap: ${Math.abs(textParserResult.holdingsSum - textParserResult.total).toFixed(2)}€ (${((Math.abs(textParserResult.holdingsSum - textParserResult.total) / textParserResult.total) * 100).toFixed(1)}%)`
+                    : '',
+            ].filter(Boolean).join(' | '))
+        }
+
+        // === OCR TRANSCRIPTION FOR SCANNED PDFs ===
+        // Trigger OCR when:
+        // 1. Text too short to determine document type (< 200 chars), OR
+        // 2. Text parser identified a dossier but found 0 holdings AND no ISINs in text (scanned financial pages)
+        //    If ISINs are present, it's a text-based PDF that simply has no holdings (e.g. all positions sold) — OCR won't help
+        const hasIsinsInText = /[A-Z]{2}[A-Z0-9]{9}\d/.test(pdfExtractedText)
+        const dossierWithNoHoldings = isDossierFromText && textParserResult && textParserResult.holdings.length === 0 && !hasIsinsInText
+        const textTooShort = pdfExtractedText.length < 200
+        if (textTooShort || dossierWithNoHoldings) {
+            logProgress('OCR TRASCRIZIONE', `Testo estratto troppo corto (${pdfExtractedText.length} car) — tentativo trascrizione OCR con Gemini`)
+            try {
+                const ocrModelName = process.env.GEMINI_MODEL || 'gemini-3-pro-preview'
+                const ocrText = await callGeminiTranscriber(GEMINI_API_KEY, ocrModelName, base64Data)
+                if (ocrText && ocrText.length > 200) {
+                    logProgress('OCR COMPLETATA', `${ocrText.length} car trascritti`)
+
+                    // Update pdfExtractedText with transcription for downstream use
+                    pdfExtractedText = ocrText
+                    hasMovementsSection = pdfExtractedText.toUpperCase().includes('MOVIMENTI')
+
+                    // Re-extract MOVIMENTI section from transcribed text
+                    if (hasMovementsSection) {
+                        const movStart = pdfExtractedText.toUpperCase().indexOf('MOVIMENTI')
+                        let movEnd = pdfExtractedText.toUpperCase().indexOf('DIVIDENDI', movStart > 0 ? movStart : 0)
+                        if (movEnd === -1) movEnd = pdfExtractedText.length
+                        movimentiSectionText = pdfExtractedText.substring(Math.max(0, movStart - 20), movEnd).trim()
                     }
+
+                    // Re-evaluate isDossier from transcribed text
+                    const upperOcr = pdfExtractedText.toUpperCase()
+                    const isDossierFromOcr = upperOcr.includes('DOSSIER TITOLI') || upperOcr.includes('ESTRATTO CONTO TITOLI')
+                        || upperOcr.includes('RENDICONTO') || upperOcr.includes('PORTAFOGLIO TITOLI')
+                        || upperOcr.includes('CONSISTENZA') || upperOcr.includes('SITUAZIONE DEPOSITO')
+
+                    if (isDossierFromOcr) {
+                        textParserResult = extractPortfolioFromText(pdfExtractedText)
+                        textPortfolioTotal = textParserResult.total
+
+                        const verifiedCount = textParserResult.holdings.filter(h => h.verified).length
+                        logProgress('OCR TEXT PARSER', [
+                            `Banca: ${textParserResult.bankDetected || 'non rilevata'}`,
+                            `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati)`,
+                            `Totale: ${textParserResult.total > 0 ? textParserResult.total.toFixed(2) + '€' : 'non trovato'}`,
+                            `Somma: ${textParserResult.holdingsSum.toFixed(2)}€`,
+                            textParserResult.total > 0
+                                ? `Gap: ${Math.abs(textParserResult.holdingsSum - textParserResult.total).toFixed(2)}€ (${((Math.abs(textParserResult.holdingsSum - textParserResult.total) / textParserResult.total) * 100).toFixed(1)}%)`
+                                : '',
+                        ].filter(Boolean).join(' | '))
+                    } else {
+                        logProgress('OCR TIPO', 'Testo trascritto non sembra un dossier titoli')
+                    }
+                } else {
+                    logProgress('OCR SKIP', `Trascrizione troppo corta (${ocrText?.length || 0} car)`)
                 }
+            } catch (ocrErr: any) {
+                logProgress('OCR ERRORE', `Trascrizione fallita: ${ocrErr.message?.substring(0, 100)}`)
             }
         }
 
@@ -2027,12 +1852,14 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             logProgress('CONTEXT CACHE', 'Fallback a system_instruction inline')
         }
 
-        // First pass: DOSSIER gets medium thinking (more complex extraction), LIQUIDITY gets low
+        // First pass: when text parser extracted holdings, use 'low' thinking (text = primary source for numbers,
+        // Gemini only needed for metadata/names/dates). Fall back to 'medium' for scanned PDFs or no text results.
         const maxRetries = 3
         let resText = ''
         let parseSuccess = false
         let lastParseError = ''
-        let currentThinkingLevel = isDossierFromText ? 'medium' : 'low'
+        const textParserHasGoodResults = textParserResult && textParserResult.holdings.length > 0
+        let currentThinkingLevel = isDossierFromText ? (textParserHasGoodResults ? 'low' : 'medium') : 'low'
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
@@ -2048,10 +1875,13 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     )
                 }
 
-                // CONSISTENZA section text (for DOSSIER)
-                if (consistenzaSectionText.length > 50 && consistenzaSectionText.length < 20000) {
+                // CONSISTENZA section summary from text parser (for DOSSIER)
+                if (textParserResult && textParserResult.holdings.length > 0) {
+                    const holdingsSummary = textParserResult.holdings
+                        .map(h => `${h.isin} | ${h.currency} | qty=${h.quantity} | price=${h.price} | mktVal=${h.marketValue.toFixed(2)}€ | ${h.verified ? 'VERIFIED' : 'unverified'}`)
+                        .join('\n')
                     supplementaryParts.push(
-                        `IMPORTANTE — TESTO ESTRATTO SEZIONE CONSISTENZA/PORTAFOGLIO:\nQuesto è il testo raw della sezione CONSISTENZA del PDF. Usalo come RIFERIMENTO per estrarre TUTTI i titoli in finalPortfolio. Ogni riga con un codice ISIN è un titolo da estrarre. Confronta i controvalore con i numeri nel testo per evitare errori di formato italiano.\n\n${consistenzaSectionText}`
+                        `IMPORTANTE — HOLDINGS ESTRATTI DAL TESTO (fonte primaria per numeri):\nIl parser deterministico ha estratto ${textParserResult.holdings.length} titoli dalla sezione CONSISTENZA.\nI numeri sotto sono CORRETTI (estratti dal testo raw del PDF). Usa gli stessi ISIN e quantità.\nSe trovi titoli aggiuntivi nel PDF, aggiungili. Ma NON modificare i numeri dei titoli sotto.\n\n${holdingsSummary}`
                     )
                 }
 
@@ -2101,7 +1931,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                         logProgress('QUOTA GIORNALIERA ESAURITA', 'Nessun retry possibile')
                         break
                     }
-                    const waitTime = Math.pow(2, attempt) * 30000 // 60s, 120s, 240s
+                    const waitTime = attempt * 20000 // 20s, 40s, 60s (was: 60s, 120s, 240s)
                     logProgress('RATE LIMIT', `Attendo ${waitTime / 1000}s prima del prossimo tentativo`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isServerError) {
@@ -2528,6 +2358,70 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
             }
         }
 
+        // === TEXT-BASED MOVEMENT PARSER (PRIMARY SOURCE) ===
+        // Same philosophy as holdings: text is the GUARANTEE, Gemini is supplementary.
+        // The deterministic parser extracts movements from structured CA-format text.
+        // Text-parsed quantities/movements ALWAYS override Gemini when available.
+        if (isDossier && pdfExtractedText.length > 200) {
+            const textMovResult = parseMovimentiFromText(pdfExtractedText)
+            const textStartCount = Object.keys(textMovResult.startQuantities).length
+
+            if (textStartCount > 0 || textMovResult.movements.length > 0) {
+                // startQuantities: text ALWAYS wins (deterministic > AI)
+                if (textStartCount > 0) {
+                    const geminiStartCount = Object.keys(parsed.movementsStartQuantities || {}).length
+                    parsed.movementsStartQuantities = textMovResult.startQuantities
+                    logProgress('TEXT MOVIMENTI', `startQuantities da testo: ${textStartCount} ISIN (Gemini ne aveva ${geminiStartCount})`)
+                }
+
+                // securityMovements: merge text (primary) + Gemini (supplementary for ISINs not in text)
+                if (textMovResult.movements.length > 0) {
+                    const textMovements = textMovResult.movements.map(m => ({
+                        isin: m.isin,
+                        date: m.date,
+                        name: '',
+                        operationType: m.operationType,
+                        quantity: m.quantity,
+                        price: 0,
+                        grossAmount: 0,
+                        netAmount: 0,
+                        fees: 0,
+                        taxes: 0,
+                        currency: 'EUR',
+                        exchangeRate: 1,
+                        _source: 'text' as const,
+                    }))
+
+                    const geminiMovements = parsed.securityMovements || []
+                    const textIsins = new Set(textMovResult.movements.map(m => m.isin))
+
+                    // Keep Gemini movements only for ISINs NOT covered by text parser
+                    // (text parser might miss ISINs with unusual format, Gemini can fill gaps)
+                    const geminiSupplementary = geminiMovements.filter((m: any) => !textIsins.has(m.isin))
+
+                    // For ISINs covered by BOTH: enrich text movements with Gemini's price/amount data
+                    // Match by exact ISIN + date (deterministic, no tolerance needed)
+                    for (const tm of textMovements) {
+                        const geminiMatch = geminiMovements.find((gm: any) =>
+                            gm.isin === tm.isin && gm.date === tm.date
+                        )
+                        if (geminiMatch) {
+                            if (geminiMatch.price > 0) tm.price = geminiMatch.price
+                            if (geminiMatch.grossAmount > 0) tm.grossAmount = geminiMatch.grossAmount
+                            if (geminiMatch.netAmount > 0) tm.netAmount = geminiMatch.netAmount
+                            if (geminiMatch.fees > 0) tm.fees = geminiMatch.fees
+                            if (geminiMatch.taxes > 0) tm.taxes = geminiMatch.taxes
+                            if (geminiMatch.name) tm.name = geminiMatch.name
+                        }
+                    }
+
+                    parsed.securityMovements = [...textMovements, ...geminiSupplementary]
+                    logProgress('TEXT MOVIMENTI',
+                        `${textMovements.length} movimenti da testo (primari) + ${geminiSupplementary.length} da Gemini (supplementari) = ${parsed.securityMovements.length} totali`)
+                }
+            }
+        }
+
         // === PHASE A-MOV: Self-contained Movement Validation ===
         // Compare extracted scalar_data counts/amounts against actual securityMovements array.
         // If the PDF says "3 acquisti" but we only have 1 in the array → movements are missing.
@@ -2798,16 +2692,25 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             }
         }
 
-        // === TEXT CORRECTION: Fix holdings numbers from extracted text ===
+        // === TEXT MERGE: Override Gemini numbers with deterministic text parser ===
         const textCorrectedIsins = new Set<string>()
-        if (isDossier && consistenzaSectionText.length > 50) {
+        if (isDossier && textParserResult && textParserResult.holdings.length > 0) {
             try {
-                const textCorrected = correctHoldingsFromText(parsed, consistenzaSectionText, logProgress, textCorrectedIsins)
-                if (textCorrected > 0) {
-                    logProgress('TEXT CORRECTION', `Corretti ${textCorrected} titoli con dati dal testo PDF`)
+                const { merged, corrections } = mergeTextAndGeminiHoldings(
+                    textParserResult.holdings,
+                    parsed.finalPortfolio || [],
+                    logProgress
+                )
+                if (corrections > 0) {
+                    logProgress('TEXT MERGE', `${corrections} correzioni applicate dal parser deterministico`)
                 }
-            } catch (textCorrErr: any) {
-                logProgress('TEXT CORRECTION ERROR', textCorrErr.message)
+                parsed.finalPortfolio = merged
+                // Track which ISINs were corrected by text to skip normalizeItalianQuantity later
+                for (const th of textParserResult.holdings) {
+                    if (th.verified) textCorrectedIsins.add(th.isin)
+                }
+            } catch (mergeErr: any) {
+                logProgress('TEXT MERGE ERROR', mergeErr.message)
             }
         }
 
@@ -2823,7 +2726,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                 )
 
                 const elapsedBeforePhaseA = (Date.now() - startTime) / 1000
-                if (phaseAResult.needsRetry && elapsedBeforePhaseA < 150) {
+                if (phaseAResult.needsRetry && elapsedBeforePhaseA < 100) {
                     const holdingsCount = (parsed.finalPortfolio || []).length
                     logProgress('PHASE A RETRY',
                         `Gap significativo (${phaseAResult.gap.toFixed(0)}€, ${phaseAResult.gapPercent.toFixed(1)}%). Retry con prompt rinforzato.`
@@ -2891,16 +2794,21 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                 logProgress('PHASE A SKIP', `Errore: ${phaseAOuterErr.message}`)
             }
 
-            // === POST-PHASE-A TEXT CORRECTION ===
-            // If Phase A retry replaced finalPortfolio, re-apply text correction to fix any new errors
-            if (consistenzaSectionText.length > 50) {
+            // === POST-PHASE-A TEXT MERGE ===
+            // If Phase A retry replaced finalPortfolio, re-apply text merge to fix new Gemini errors
+            if (textParserResult && textParserResult.holdings.length > 0) {
                 try {
-                    const postCorrected = correctHoldingsFromText(parsed, consistenzaSectionText, logProgress, textCorrectedIsins)
-                    if (postCorrected > 0) {
-                        logProgress('POST-PHASE-A TEXT FIX', `Corretti ${postCorrected} titoli dopo Phase A retry`)
+                    const { merged, corrections } = mergeTextAndGeminiHoldings(
+                        textParserResult.holdings,
+                        parsed.finalPortfolio || [],
+                        logProgress
+                    )
+                    if (corrections > 0) {
+                        logProgress('POST-PHASE-A TEXT MERGE', `${corrections} correzioni dopo Phase A retry`)
+                        parsed.finalPortfolio = merged
                     }
-                } catch (postCorrErr: any) {
-                    logProgress('POST-PHASE-A TEXT ERROR', postCorrErr.message)
+                } catch (postMergeErr: any) {
+                    logProgress('POST-PHASE-A MERGE ERROR', postMergeErr.message)
                 }
             }
 
@@ -2996,7 +2904,7 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
 
         // === PHASE B: Cross-period Portfolio Validation ===
         const elapsedBeforeB = (Date.now() - startTime) / 1000
-        if (isDossier && userId && periodStart && periodEnd && elapsedBeforeB < 180) {
+        if (isDossier && userId && periodStart && periodEnd && elapsedBeforeB < 120) {
             try {
                 logProgress('PHASE B', 'Verifica cross-period con periodo precedente')
 
@@ -3123,7 +3031,7 @@ Rispondi SOLO con questo JSON:
         // === SELF-VALIDATION: Verify movements using MOVIMENTI initial/final quantities ===
         // This catches missing movements WITHOUT needing the previous period
         const elapsedBeforeSV = (Date.now() - startTime) / 1000
-        if (isDossier && parsed.movementsStartQuantities && Object.keys(parsed.movementsStartQuantities).length > 0 && parsed.securityMovements?.length > 0 && elapsedBeforeSV < 120) {
+        if (isDossier && parsed.movementsStartQuantities && Object.keys(parsed.movementsStartQuantities).length > 0 && parsed.securityMovements?.length > 0 && elapsedBeforeSV < 90) {
             try {
                 const startQties = parsed.movementsStartQuantities as Record<string, number>
                 const svCurrentH: Record<string, number> = {}
@@ -3282,9 +3190,9 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                             if (movimentiSectionText.length > 50) {
                                 sv2Text = await callGeminiWithText(GEMINI_API_KEY!, modelName, retry2Prompt,
                                     `Testo estratto dalla sezione MOVIMENTI:\n\n${movimentiSectionText}`,
-                                    { thinkingLevel: 'high' })
+                                    { thinkingLevel: 'medium' })
                             } else {
-                                sv2Text = await callGemini(GEMINI_API_KEY!, modelName, retry2Prompt, base64Data, { thinkingLevel: 'high' })
+                                sv2Text = await callGemini(GEMINI_API_KEY!, modelName, retry2Prompt, base64Data, { thinkingLevel: 'medium' })
                             }
                             const sv2Json = sv2Text.match(/\{[\s\S]*\}/)
                             if (sv2Json) {
@@ -3341,7 +3249,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
         // This catches ISINs the model missed entirely (e.g. bottom of page) WITHOUT needing previous period
         const elapsedBeforeXC = (Date.now() - startTime) / 1000
         if (isDossier && parsed.movementsStartQuantities && Object.keys(parsed.movementsStartQuantities).length > 0
-            && parsed.finalPortfolio?.length > 0 && elapsedBeforeXC < 150) {
+            && parsed.finalPortfolio?.length > 0 && elapsedBeforeXC < 100) {
             try {
                 const startQties = parsed.movementsStartQuantities as Record<string, number>
                 const movIsins = new Set([
@@ -3374,9 +3282,9 @@ Rispondi con JSON: { "found": { "ISIN": { "startQty": 0, "movements": [{ "isin":
                     if (movimentiSectionText.length > 50) {
                         xcText = await callGeminiWithText(GEMINI_API_KEY!, modelName, xcPrompt,
                             `Testo estratto dalla sezione MOVIMENTI:\n\n${movimentiSectionText}`,
-                            { thinkingLevel: 'high' })
+                            { thinkingLevel: 'medium' })
                     } else {
-                        xcText = await callGemini(GEMINI_API_KEY!, modelName, xcPrompt, base64Data, { thinkingLevel: 'high' })
+                        xcText = await callGemini(GEMINI_API_KEY!, modelName, xcPrompt, base64Data, { thinkingLevel: 'medium' })
                     }
                     const xcJson = xcText.match(/\{[\s\S]*\}/)
                     if (xcJson) {
@@ -3425,7 +3333,7 @@ Rispondi con JSON: { "found": { "ISIN": { "startQty": 0, "movements": [{ "isin":
         // If mismatch → ask Gemini to search for the specific missing movements in the PDF.
         // SKIP if we've already used > 240s to avoid 5min timeout
         const elapsedBeforeC = (Date.now() - startTime) / 1000
-        if (isDossier && userId && periodStart && periodEnd && elapsedBeforeC < 240) {
+        if (isDossier && userId && periodStart && periodEnd && elapsedBeforeC < 160) {
             try {
                 const normalizedAccC = normalizeAccountNumber(accountNumber || '')
                 const { data: prevAnalysesC } = await supabase
@@ -4126,19 +4034,36 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
         }
 
         // === FINAL GUARD: reject DOSSIER with clearly wrong data ===
-        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length === 0) {
+        // Allow genuinely empty dossiers (e.g. "consistenza finale uguale a zero", "dossier estinto")
+        // Check both original pdf-parse text and current pdfExtractedText (which may be OCR-updated)
+        const guardText = (originalPdfText + ' ' + pdfExtractedText).toUpperCase()
+        const hasMovementsButNoHoldings = guardText.includes('MOVIMENTI DI PERIODO') && guardText.includes('SALDO FINALE')
+        const isConfirmedEmptyDossier = guardText.includes('UGUALE A ZERO')
+            || guardText.includes('CONSISTENZA ZERO')
+            || guardText.includes('NESSUN TITOLO')
+            || guardText.includes('DOSSIER ESTINTO')
+            || (textPortfolioTotal === 0 && textParserResult?.sectionFound && textParserResult.holdings.length === 0)
+            || hasMovementsButNoHoldings
+        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length === 0 && !isConfirmedEmptyDossier) {
             logProgress('❌ ESTRAZIONE FALLITA', 'DOSSIER senza holdings estratti — rifiutato')
             return NextResponse.json({
                 success: false,
                 error: 'Estrazione portafoglio fallita: nessun titolo estratto dal PDF. Riprova o verifica il documento.'
             }, { status: 500 })
         }
-        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length > 0) {
+        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length === 0 && isConfirmedEmptyDossier) {
+            logProgress('✅ DOSSIER VUOTO', 'Consistenza confermata a zero dal documento — accettato')
+        }
+        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length > 0 && !isConfirmedEmptyDossier) {
             logProgress('❌ ESTRAZIONE FALLITA', `DOSSIER con ${normalizedHoldings.length} holdings ma controvalore totale = 0 — rifiutato`)
             return NextResponse.json({
                 success: false,
                 error: `Estrazione portafoglio incompleta: ${normalizedHoldings.length} titoli trovati ma tutti con controvalore 0€. Riprova.`
             }, { status: 500 })
+        }
+        if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length > 0 && isConfirmedEmptyDossier) {
+            logProgress('✅ DOSSIER VUOTO', `Rimossi ${normalizedHoldings.length} holdings residui (da movimenti) — consistenza zero confermata`)
+            normalizedHoldings.splice(0)
         }
         // Guard: if we have a text-extracted total AND the portfolio value is way off, reject
         if (isDossier && textPortfolioTotal > 100 && analysisFields.portfolio_value > 0) {
@@ -4178,10 +4103,10 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             }
             if (mathErrors > 0) { qualityScore -= mathErrors * 5; qualityIssues.push(`${mathErrors} titoli con qty×price≠controvalore`) }
             // Check text ISINs vs extracted ISINs
-            if (consistenzaSectionText.length > 50) {
-                const textIsins = extractHoldingsFromText(consistenzaSectionText)
+            if (textParserResult && textParserResult.holdings.length > 0) {
                 const holdingIsins = new Set(normalizedHoldings.map((h: any) => h.isin).filter(Boolean))
-                const missingFromExtraction = [...textIsins.keys()].filter(isin => !holdingIsins.has(isin))
+                const missingFromExtraction = textParserResult.holdings
+                    .filter(th => th.verified && !holdingIsins.has(th.isin))
                 if (missingFromExtraction.length > 0) {
                     qualityScore -= missingFromExtraction.length * 10
                     qualityIssues.push(`${missingFromExtraction.length} ISIN nel testo ma non estratti`)
@@ -4224,6 +4149,19 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                 .single()
             data = result.data
             error = result.error
+        }
+
+        // Retry once on transient fetch errors (e.g. timeout after long processing)
+        if (error && (error.message?.includes('fetch failed') || error.message?.includes('ETIMEDOUT'))) {
+            logProgress('⚠️ DB fetch failed, retrying...', error.message)
+            await new Promise(r => setTimeout(r, 2000))
+            if (isReanalysis && reanalyzeId) {
+                const retry = await supabase.from('analyses').update(analysisFields).eq('id', reanalyzeId).select().single()
+                data = retry.data; error = retry.error
+            } else {
+                const retry = await supabase.from('analyses').insert({ ...analysisFields, document_id: crypto.randomUUID(), user_id: userId || null }).select().single()
+                data = retry.data; error = retry.error
+            }
         }
 
         if (error) {
