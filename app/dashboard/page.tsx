@@ -1159,6 +1159,7 @@ function DashboardContent() {
     let matchCount = 0
     let totalCount = 0
     const mismatchIsinsB: string[] = []
+    const isIncomplete = doc.costs_breakdown?.incompleteMovements === true
     allIsins.forEach(isin => {
       totalCount++
       if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) {
@@ -1169,6 +1170,12 @@ function DashboardContent() {
         const fullyDisappeared = (prevH[isin] || 0) > 0 && (currH[isin] || 0) === 0
         const fullyAppeared = (prevH[isin] || 0) === 0 && (currH[isin] || 0) > 0
         if (hasNoNetMovement && (fullyDisappeared || fullyAppeared)) {
+          matchCount++
+          return
+        }
+        // Intesa incomplete movements: movements don't cover all portfolio changes
+        // (fund switches, conversions, GPM conferimenti are not in the MOVIMENTI section)
+        if (isIncomplete) {
           matchCount++
           return
         }
@@ -2513,8 +2520,11 @@ function DashboardContent() {
                 // Separate corporate action ISINs and full disappearance/appearance from real mismatches
                 const currHoldingsI: Record<string, number> = {}
                 ;(inspectorData.holdings || []).forEach((h: any) => { if (h.isin) currHoldingsI[h.isin] = h.quantity || 0 })
+                const isIncompleteI = inspectorData.costs_breakdown?.incompleteMovements === true
                 const allMismatches = rows.filter(r => {
                   if (r.match) return false
+                  // Intesa incomplete movements: forgive all mismatches
+                  if (isIncompleteI) return false
                   // Skip holdings that fully disappeared or appeared without any movements
                   const mov = movDeltas[r.isin]
                   const hasNoNetMovement = !mov || (mov.buys === 0 && mov.sells === 0) || (mov.buys === mov.sells)

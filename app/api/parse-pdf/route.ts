@@ -1207,6 +1207,7 @@ export async function POST(request: NextRequest) {
         // Extract text from PDF for reliable text-based retries (bypasses Gemini vision issues at page boundaries)
         let pdfExtractedText = ''
         let hasMovementsSection = false
+        let incompleteMovements = false  // Intesa: movements exist but don't cover all portfolio changes
         try {
             const pdfParser = new PDFParse(new Uint8Array(pdfBuffer))
             const textResult = await pdfParser.getText()
@@ -2369,12 +2370,13 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
             const textStartCount = Object.keys(textMovResult.startQuantities).length
             const textEndCount = Object.keys(textMovResult.endQuantities).length
 
-            // If text parser found movements but NO start/end quantities, the movements
-            // can't be self-validated (Intesa format: movements list is incomplete, doesn't
-            // cover fund switches, corporate actions, etc.). Mark as unverifiable for coherence.
+            // Intesa format: movements exist but no explicit start/end quantities in MOVIMENTI section.
+            // Start/end quantities come from CONSISTENZA holdings (current period) and DB (previous period).
+            // Keep hasMovementsSection = true so dashboard shows coherence check.
+            // The coherence check will use prevDoc.holdings as startQuantities and current holdings as endQuantities.
             if (textMovResult.movements.length > 0 && textStartCount === 0 && textEndCount === 0) {
-                hasMovementsSection = false
-                logProgress('TEXT MOVIMENTI', `${textMovResult.movements.length} movimenti trovati ma senza start/end quantities → coherence skip (movimenti non verificabili)`)
+                incompleteMovements = true
+                logProgress('TEXT MOVIMENTI', `${textMovResult.movements.length} movimenti trovati (formato Intesa: start/end da CONSISTENZA, movimenti parziali)`)
             }
 
             if (textStartCount > 0 || textMovResult.movements.length > 0) {
@@ -2393,12 +2395,12 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
                         name: '',
                         operationType: m.operationType,
                         quantity: m.quantity,
-                        price: 0,
-                        grossAmount: 0,
-                        netAmount: 0,
+                        price: m.price || 0,
+                        grossAmount: m.grossAmount || 0,
+                        netAmount: m.netAmount || 0,
                         fees: 0,
                         taxes: 0,
-                        currency: 'EUR',
+                        currency: m.currency || 'EUR',
                         exchangeRate: 1,
                         _source: 'text' as const,
                     }))
@@ -2410,16 +2412,17 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
                     // (text parser might miss ISINs with unusual format, Gemini can fill gaps)
                     const geminiSupplementary = geminiMovements.filter((m: any) => !textIsins.has(m.isin))
 
-                    // For ISINs covered by BOTH: enrich text movements with Gemini's price/amount data
-                    // Match by exact ISIN + date (deterministic, no tolerance needed)
+                    // For ISINs covered by BOTH: enrich text movements with Gemini data
+                    // Text values (deterministic) ALWAYS win over Gemini for price/amount
+                    // Gemini only fills gaps (when text didn't extract a value)
                     for (const tm of textMovements) {
                         const geminiMatch = geminiMovements.find((gm: any) =>
                             gm.isin === tm.isin && gm.date === tm.date
                         )
                         if (geminiMatch) {
-                            if (geminiMatch.price > 0) tm.price = geminiMatch.price
-                            if (geminiMatch.grossAmount > 0) tm.grossAmount = geminiMatch.grossAmount
-                            if (geminiMatch.netAmount > 0) tm.netAmount = geminiMatch.netAmount
+                            if (!tm.price && geminiMatch.price > 0) tm.price = geminiMatch.price
+                            if (!tm.grossAmount && geminiMatch.grossAmount > 0) tm.grossAmount = geminiMatch.grossAmount
+                            if (!tm.netAmount && geminiMatch.netAmount > 0) tm.netAmount = geminiMatch.netAmount
                             if (geminiMatch.fees > 0) tm.fees = geminiMatch.fees
                             if (geminiMatch.taxes > 0) tm.taxes = geminiMatch.taxes
                             if (geminiMatch.name) tm.name = geminiMatch.name
@@ -4014,6 +4017,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                 settlementAccount: parsed.info?.settlementAccount || null,
                 holder: parsed.info?.holder || null,
                 hasMovementsSection,
+                incompleteMovements,
                 original_ai_data: { ...(parsed.summary || {}) } // Backup for restore
             },
             benchmark_comparison: parsed.info?.accountNumber || 'N/D',

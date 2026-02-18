@@ -193,6 +193,7 @@ function checkCoherenceFromDB(analyses: any[], bankLabel: string): { errors: str
         })
 
         const allIsins = new Set([...Object.keys(prevH), ...Object.keys(calcInit)])
+        const isIncomplete = doc.costs_breakdown?.incompleteMovements === true
         const mismatches: string[] = []
         allIsins.forEach(isin => {
             if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.01) {
@@ -201,6 +202,8 @@ function checkCoherenceFromDB(analyses: any[], bankLabel: string): { errors: str
                 const fullyGone = (prevH[isin] || 0) > 0 && (currH[isin] || 0) === 0
                 const fullyNew = (prevH[isin] || 0) === 0 && (currH[isin] || 0) > 0
                 if (hasNoNetMov && (fullyGone || fullyNew)) return
+                // Intesa incomplete movements: movements don't cover all portfolio changes
+                if (isIncomplete) return
                 const CA_KW = ['RAGGR', 'DIRITTO', 'DIRITTI', 'FRAZION', 'CONCAMBIO', 'CONVERSIONE', 'SPLIT AZ']
                 const name = (doc.holdings || []).find((h: any) => h.isin === isin)?.name ||
                              (prevDoc.holdings || []).find((h: any) => h.isin === isin)?.name || ''

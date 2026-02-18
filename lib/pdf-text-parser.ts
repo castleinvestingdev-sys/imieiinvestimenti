@@ -38,6 +38,10 @@ export interface TextMovement {
     quantity: number
     operationType: 'Acquisto' | 'Vendita'
     description: string       // raw operation description (e.g. "FONDI: SOTT PAC")
+    price?: number            // unit price (from text, when available)
+    grossAmount?: number      // gross amount (from text, when available)
+    netAmount?: number        // net amount (from text, when available)
+    currency?: string         // currency (from text, when available)
 }
 
 export interface TextMovimentiResult {
@@ -933,22 +937,61 @@ function parseIntesaMovimenti(movSection: string): TextMovimentiResult {
     const endQuantities: Record<string, number> = {}
     const movements: TextMovement[] = []
 
-    // Intesa movement lines (tab-separated, with optional spaces around tabs):
+    // Intesa movement lines are tab-separated:
     //   CODE \t NAME \t OPERATION \t DD.MM.YYYY \t [+/-]QTY \t PRICE CURRENCY \t AMOUNT CURRENCY
     //   ISIN (on next line)
-    const INTESA_MOV_RE = /\s*\t\s*(Sottoscrizione|Rimborso|Acquisto|Vendita|Disinvestimento)\s*\t\s*(\d{2}\.\d{2}\.\d{4})\s*\t\s*([+-]?[\d.,]+)/i
+    // Some operations merge date into operation field (e.g. "Conferimento a GPM 29.06.2022")
+    // \u0019 is used as thousands separator instead of dot
+    const INTESA_MOV_RE = /\s*\t\s*(Sottoscrizione|Rimborso|Acquisto|Vendita|Disinvestimento|Conferimento[^\t]*|Versamento[^\t]*|Raggruppamento)\s*(?:\t\s*)?(\d{2}\.\d{2}\.\d{4})\s*\t\s*([+-]?[\d.,\u0019]+)/i
     const ISIN_LINE_RE = /^([A-Z]{2}[A-Z0-9]{9}\d)\s*$/
 
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
+        const line = lines[i].replace(/\u0019/g, '') // normalize invisible thousands separator
 
         const movMatch = line.match(INTESA_MOV_RE)
         if (movMatch) {
-            const operation = movMatch[1]
+            const operation = movMatch[1].trim()
             const dateRaw = movMatch[2] // DD.MM.YYYY
             const date = dateRaw.replace(/\./g, '/') // convert to DD/MM/YYYY
-            const qtyRaw = movMatch[3].replace(/^[+-]/, '')
+            const qtyRaw = movMatch[3].replace(/^[+-]/, '').replace(/\s*EUR\s*$/i, '')
             const qty = parseItalianNumber(qtyRaw)
+
+            // Extract price and amount from remaining tab fields after quantity
+            // Full line: CODE \t NAME \t OP \t DATE \t QTY \t PRICE CCY \t AMOUNT CCY
+            const afterQtyMatch = line.match(INTESA_MOV_RE)
+            let price = 0
+            let netAmount = 0
+            let currency = 'EUR'
+            if (afterQtyMatch) {
+                // Split the full line by tabs to get remaining fields
+                const fields = line.split('\t').map(f => f.trim().replace(/\u0019/g, ''))
+                // Find the field index after the quantity
+                // Fields: [code, name, operation, date, qty, price+ccy, amount+ccy]
+                // Or: [code, name, operation+date, qty, price+ccy, amount+ccy]
+                let qtyFieldIdx = -1
+                for (let fi = 2; fi < fields.length; fi++) {
+                    if (fields[fi].match(/^[+-]?[\d.,]+(\s*(EUR|USD|GBP|CHF))?$/i)) {
+                        qtyFieldIdx = fi
+                        break
+                    }
+                }
+                if (qtyFieldIdx >= 0) {
+                    // Price field is next
+                    const priceField = fields[qtyFieldIdx + 1] || ''
+                    const priceMatch = priceField.match(/([\d.,]+)\s*(EUR|USD|GBP|CHF)?/i)
+                    if (priceMatch) {
+                        price = parseItalianNumber(priceMatch[1])
+                        if (priceMatch[2]) currency = priceMatch[2]
+                    }
+                    // Amount field is the one after price
+                    const amountField = fields[qtyFieldIdx + 2] || ''
+                    const amountMatch = amountField.match(/([+-]?[\d.,]+)\s*(EUR|USD|GBP|CHF)?/i)
+                    if (amountMatch) {
+                        netAmount = parseItalianNumber(amountMatch[1].replace(/^[+-]/, ''))
+                        if (amountMatch[2]) currency = amountMatch[2]
+                    }
+                }
+            }
 
             // Look for ISIN on next line
             let isin = ''
@@ -980,6 +1023,10 @@ function parseIntesaMovimenti(movSection: string): TextMovimentiResult {
                         quantity: qty,
                         operationType: opType,
                         description: operation,
+                        price: price > 0 ? price : undefined,
+                        netAmount: netAmount > 0 ? netAmount : undefined,
+                        grossAmount: netAmount > 0 ? netAmount : undefined,
+                        currency,
                     })
                 }
             }
