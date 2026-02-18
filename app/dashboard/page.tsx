@@ -271,7 +271,9 @@ function DashboardContent() {
 
           // Apply security movements from current period
           const securityMovements = curr.costs_breakdown?.securityMovements || []
-          // Skip if movements exist but none have valid operationType (scanned PDFs with garbled OCR)
+          // Skip coherence if no MOVIMENTI section in text (scanned PDFs, CA without movements)
+          if (curr.costs_breakdown?.hasMovementsSection === false) continue
+          // Skip if movements exist but none have valid operationType (garbled OCR)
           const hasTypedMov = securityMovements.some((m: any) => m.operationType === 'Acquisto' || m.operationType === 'Vendita')
           if (securityMovements.length > 0 && !hasTypedMov) continue
           securityMovements.forEach((m: any) => {
@@ -1111,13 +1113,15 @@ function DashboardContent() {
       // Per trimestrali: prevDoc deve finire nel trimestre precedente
       coherenceMap[doc.id] = 'missing'; return
     }
-    // Skip coherence check if the PDF has no MOVIMENTI section (e.g. some quarterly statements only have portfolio)
-    // With 0 movements, calcInit = currentQty for all ISINs, so any mismatch is just portfolio change without explanatory movements
+    // Skip coherence check if the PDF has no MOVIMENTI section in the extracted text.
+    // This covers: (1) CA statements with only CONSISTENZA+DIVIDENDI, (2) scanned PDFs (Intesa)
+    // where text extraction is empty. Even if Gemini found movements from OCR, the data is too
+    // unreliable for coherence verification on scanned documents.
     const secMovements = doc.costs_breakdown?.securityMovements || []
-    if (secMovements.length === 0 && doc.costs_breakdown?.hasMovementsSection === false) {
+    if (doc.costs_breakdown?.hasMovementsSection === false) {
       coherenceMap[doc.id] = true; return
     }
-    // Skip coherence if movements exist but NONE have valid operationType (scanned PDFs with garbled OCR data)
+    // Skip coherence if movements exist but NONE have valid operationType (garbled OCR data)
     const hasTypedMovements = secMovements.some((m: any) => m.operationType === 'Acquisto' || m.operationType === 'Vendita')
     if (secMovements.length > 0 && !hasTypedMovements) {
       coherenceMap[doc.id] = true; return
@@ -1161,10 +1165,10 @@ function DashboardContent() {
         // Skip holdings that fully disappeared or appeared without any movements
         // (DOSSIER has no MOVIMENTAZIONE section — only CONSISTENZA)
         const mov = movD[isin]
-        const hasNoMovements = !mov || (mov.b === 0 && mov.s === 0)
+        const hasNoNetMovement = !mov || (mov.b === 0 && mov.s === 0) || (mov.b === mov.s)
         const fullyDisappeared = (prevH[isin] || 0) > 0 && (currH[isin] || 0) === 0
         const fullyAppeared = (prevH[isin] || 0) === 0 && (currH[isin] || 0) > 0
-        if (hasNoMovements && (fullyDisappeared || fullyAppeared)) {
+        if (hasNoNetMovement && (fullyDisappeared || fullyAppeared)) {
           matchCount++
           return
         }
@@ -2446,10 +2450,10 @@ function DashboardContent() {
                   prevHoldings[isin] = { name: h.name || h.description || isin, qty: h.quantity || 0, value: h.marketValue || 0 }
                 })
 
-                // Skip coherence check if PDF has no MOVIMENTI section
+                // Skip coherence check if PDF has no MOVIMENTI section in text (scanned PDFs, CA without movements)
                 const movements = inspectorData.costs_breakdown?.securityMovements || []
                 const hasTypedInspMov = movements.some((m: any) => m.operationType === 'Acquisto' || m.operationType === 'Vendita')
-                if ((movements.length === 0 && inspectorData.costs_breakdown?.hasMovementsSection === false) ||
+                if (inspectorData.costs_breakdown?.hasMovementsSection === false ||
                     (movements.length > 0 && !hasTypedInspMov)) {
                   return (
                     <div style={{ margin: '0.75rem 0', padding: '0.75rem 1rem', borderRadius: '12px', border: '2px solid #94a3b8', background: '#f8fafc' }}>
@@ -2513,10 +2517,10 @@ function DashboardContent() {
                   if (r.match) return false
                   // Skip holdings that fully disappeared or appeared without any movements
                   const mov = movDeltas[r.isin]
-                  const hasNoMovements = !mov || (mov.buys === 0 && mov.sells === 0)
+                  const hasNoNetMovement = !mov || (mov.buys === 0 && mov.sells === 0) || (mov.buys === mov.sells)
                   const fullyDisappeared = (prevHoldings[r.isin]?.qty || 0) > 0 && (currHoldingsI[r.isin] || 0) === 0
                   const fullyAppeared = (prevHoldings[r.isin]?.qty || 0) === 0 && (currHoldingsI[r.isin] || 0) > 0
-                  if (hasNoMovements && (fullyDisappeared || fullyAppeared)) return false
+                  if (hasNoNetMovement && (fullyDisappeared || fullyAppeared)) return false
                   return true
                 })
                 const nameMapC: Record<string, string> = {}

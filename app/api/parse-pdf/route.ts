@@ -1211,6 +1211,8 @@ export async function POST(request: NextRequest) {
             const pdfParser = new PDFParse(new Uint8Array(pdfBuffer))
             const textResult = await pdfParser.getText()
             pdfExtractedText = textResult.text || ''
+            // Normalize invisible chars used as thousands separators (Intesa uses \u0019)
+            pdfExtractedText = pdfExtractedText.replace(/(\d)[\u0019\u001a\u001b\u001c\u001d\u001e\u001f](\d)/g, '$1$2')
             hasMovementsSection = pdfExtractedText.toUpperCase().includes('MOVIMENTI')
             if (pdfExtractedText.length > 100) {
                 logProgress('PDF TEXT', `${pdfExtractedText.length} car, MOVIMENTI: ${hasMovementsSection ? 'sì' : 'no'}`)
@@ -1273,7 +1275,7 @@ export async function POST(request: NextRequest) {
 
                     // Update pdfExtractedText with transcription for downstream use
                     pdfExtractedText = ocrText
-                    hasMovementsSection = pdfExtractedText.toUpperCase().includes('MOVIMENTI')
+                    // Do NOT update hasMovementsSection for scanned PDFs — OCR movements are unreliable for coherence
 
                     // Re-extract MOVIMENTI section from transcribed text
                     if (hasMovementsSection) {
@@ -2365,6 +2367,15 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
         if (isDossier && pdfExtractedText.length > 200) {
             const textMovResult = parseMovimentiFromText(pdfExtractedText)
             const textStartCount = Object.keys(textMovResult.startQuantities).length
+            const textEndCount = Object.keys(textMovResult.endQuantities).length
+
+            // If text parser found movements but NO start/end quantities, the movements
+            // can't be self-validated (Intesa format: movements list is incomplete, doesn't
+            // cover fund switches, corporate actions, etc.). Mark as unverifiable for coherence.
+            if (textMovResult.movements.length > 0 && textStartCount === 0 && textEndCount === 0) {
+                hasMovementsSection = false
+                logProgress('TEXT MOVIMENTI', `${textMovResult.movements.length} movimenti trovati ma senza start/end quantities → coherence skip (movimenti non verificabili)`)
+            }
 
             if (textStartCount > 0 || textMovResult.movements.length > 0) {
                 // startQuantities: text ALWAYS wins (deterministic > AI)
@@ -3757,8 +3768,14 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             const marketValue = h.marketValue || 0
             let quantity = h.quantity || 0
 
-            if (phaseCFixedIsins.has(h.isin) || textCorrectedIsins.has(h.isin)) {
-                // Text or Phase C already corrected this quantity — skip normalizeItalianQuantity to preserve
+            if (textCorrectedIsins.has(h.isin)) {
+                // Text parser already verified qty × price × rate ≈ marketValue (< 3% error).
+                // Do NOT touch price or quantity — the text parser found the correct values,
+                // including the correct interpretation of bond prices and exchange rates.
+                // Applying normalizeBondPrice here would break the math for bonds priced
+                // per-unit (e.g., structured notes like XS ISINs at 854.93 USD/unit ≠ centesimi).
+            } else if (phaseCFixedIsins.has(h.isin)) {
+                // Phase C corrected this quantity — skip normalizeItalianQuantity but normalize bond price
                 if (isBondQuotedInCentesimi(h.name, h.isin) && price > 1) {
                     price = normalizeBondPrice(price)
                 }
@@ -3769,6 +3786,21 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             } else {
                 // Non-bond: only fix Italian number format in quantity (skip Phase C-corrected ISINs)
                 quantity = normalizeItalianQuantity(quantity, price, marketValue, exchangeRate)
+            }
+
+            // Final safety net: if qty × price × fx doesn't match marketValue (>15% error),
+            // recalculate quantity from marketValue / (price × fx).
+            // This catches Gemini OCR errors on scanned PDFs (e.g. Intesa) where columns get mixed up.
+            // SKIP for text-verified holdings — the text parser already validated the math.
+            if (!textCorrectedIsins.has(h.isin) && quantity > 0 && price > 0 && marketValue > 0) {
+                const fx = exchangeRate || 1
+                const computed = quantity * price * fx
+                const relError = Math.abs(computed - marketValue) / marketValue
+                if (relError > 0.15) {
+                    const correctedQty = marketValue / (price * fx)
+                    logProgress('FIX QTY', `${h.isin}: qty×price=${computed.toFixed(2)} vs mv=${marketValue.toFixed(2)} (${(relError * 100).toFixed(0)}% off) → qty=${correctedQty.toFixed(4)}`)
+                    quantity = correctedQty
+                }
             }
 
             return {
@@ -4055,11 +4087,21 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             logProgress('✅ DOSSIER VUOTO', 'Consistenza confermata a zero dal documento — accettato')
         }
         if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length > 0 && !isConfirmedEmptyDossier) {
-            logProgress('❌ ESTRAZIONE FALLITA', `DOSSIER con ${normalizedHoldings.length} holdings ma controvalore totale = 0 — rifiutato`)
-            return NextResponse.json({
-                success: false,
-                error: `Estrazione portafoglio incompleta: ${normalizedHoldings.length} titoli trovati ma tutti con controvalore 0€. Riprova.`
-            }, { status: 500 })
+            // For scanned PDFs (very short original text), Gemini OCR sometimes finds holdings
+            // but can't read their market values. In this case, accept as empty dossier rather
+            // than hard-failing, since the alternative is complete data loss for this period.
+            if (originalPdfText.length < 2000) {
+                logProgress('⚠️ OCR PARZIALE', `DOSSIER con ${normalizedHoldings.length} holdings ma tutti a 0€ — testo originale troppo corto (${originalPdfText.length} car), accettato come dossier con dati parziali`)
+                // Keep the holdings (they have ISINs) but mark portfolio_value as sum of what we have
+                const holdingsSum = normalizedHoldings.reduce((s: number, h: any) => s + (h.marketValue || 0), 0)
+                analysisFields.portfolio_value = holdingsSum
+            } else {
+                logProgress('❌ ESTRAZIONE FALLITA', `DOSSIER con ${normalizedHoldings.length} holdings ma controvalore totale = 0 — rifiutato`)
+                return NextResponse.json({
+                    success: false,
+                    error: `Estrazione portafoglio incompleta: ${normalizedHoldings.length} titoli trovati ma tutti con controvalore 0€. Riprova.`
+                }, { status: 500 })
+            }
         }
         if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length > 0 && isConfirmedEmptyDossier) {
             logProgress('✅ DOSSIER VUOTO', `Rimossi ${normalizedHoldings.length} holdings residui (da movimenti) — consistenza zero confermata`)
@@ -4165,8 +4207,8 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
         }
 
         if (error) {
-            logProgress('❌ ERRORE DATABASE', error.message)
-            return NextResponse.json({ success: false, error: 'Errore salvataggio database' }, { status: 500 })
+            logProgress('❌ ERRORE DATABASE', `${error.message} (code: ${error.code}, details: ${error.details})`)
+            return NextResponse.json({ success: false, error: `Errore salvataggio database: ${error.message}` }, { status: 500 })
         }
 
         // Store PDF in Supabase Storage for future re-analysis

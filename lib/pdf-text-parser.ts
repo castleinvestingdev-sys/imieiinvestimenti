@@ -88,6 +88,17 @@ const ITALIAN_WORDS_12 = new Set([
     'COMPOSIZION', 'LIQUIDAZION', 'CAPITALIZZA', 'ACCREDITAME',
 ])
 
+// ── Text Normalization ──────────────────────────────────────────────────────
+
+/** Strip invisible characters used as thousands separators in some PDFs.
+ *  Intesa Sanpaolo uses \u0019 (End of Medium) between digit groups: "261\u0019166,62" → "261166,62"
+ *  Also strips other control characters that might appear between digits.
+ */
+function normalizeInvisibleChars(text: string): string {
+    // Replace \u0019 and other invisible chars between digits with nothing
+    return text.replace(/(\d)[\u0019\u001a\u001b\u001c\u001d\u001e\u001f](\d)/g, '$1$2')
+}
+
 // ── Number Parsing ───────────────────────────────────────────────────────────
 
 /** Parse Italian-format number: "1.234,56" → 1234.56, "283,836" → 283.836 */
@@ -95,13 +106,23 @@ export function parseItalianNumber(s: string): number {
     return parseFloat(s.replace(/\./g, '').replace(',', '.'))
 }
 
-/** Extract all Italian-format numbers from a string */
+/** Extract all Italian-format numbers from a string.
+ *  Handles both formats:
+ *  - With thousand separators: "1.234,56" → 1234.56 (Crédit Agricole)
+ *  - Without thousand separators: "2589,294" → 2589.294 (Intesa Sanpaolo)
+ *  - With +/- prefix: "+21333,19" → 21333.19 (Intesa)
+ */
 function extractItalianNumbers(text: string): number[] {
-    const pattern = /(\d{1,3}(?:\.\d{3})*,\d{2,})/g
+    // Two patterns:
+    // 1. With thousands separators: 1-3 digits, then groups of .XXX, then ,decimals
+    // 2. Without thousands separators: 4+ digits directly followed by ,decimals
+    // Combined with alternation, using a negative lookbehind to avoid partial matches
+    const pattern = /(?<!\d)(\d{1,3}(?:\.\d{3})+,\d{2,})|(?<!\d[.,])(\d+,\d{2,})/g
     const numbers: number[] = []
     let m
     while ((m = pattern.exec(text)) !== null) {
-        const val = parseItalianNumber(m[1])
+        const matched = m[1] || m[2]
+        const val = parseItalianNumber(matched)
         if (!isNaN(val) && val >= 0) numbers.push(val)
     }
     return numbers
@@ -167,6 +188,10 @@ const TOTAL_PATTERNS = [
     /CONTROV\.\s*COMPLESSIVO[\s\S]{0,60}?([\d.]+,\d{2})/i,
     /TOTALE\s+GENERALE[\s\S]{0,80}?([\d.]+,\d{2})/i,
     /TOTALE\s+IN\s+EURO\s*([\d.]+,\d{2})/i,
+    // Intesa Sanpaolo: "Controvalore titoli e fondi al DDMMYYYY +261166,62 €"
+    /CONTROVALORE\s+TITOLI\s+E\s+FONDI\s+AL\s+\d+[\s\S]{0,30}?\+?([\d.]+,\d{2})/i,
+    // Intesa alternative: "Controvalore titoli e fondi \t+261166,62 €"
+    /CONTROVALORE\s+TITOLI\s+E\s+FONDI[\s\t]+\+?([\d.]+,\d{2})/i,
 ]
 
 export function extractPortfolioTotal(fullText: string): { total: number; source: 'keyword' | 'none' } {
@@ -620,6 +645,9 @@ export function mergeTextAndGeminiHoldings(
  * Call this ONCE with the full PDF text, then use the result to merge with Gemini.
  */
 export function extractPortfolioFromText(fullText: string): TextPortfolioResult {
+    // Normalize: strip invisible separators (Intesa uses \u0019 as thousands separator)
+    fullText = normalizeInvisibleChars(fullText)
+
     const bankDetected = detectBank(fullText)
     const consistenzaSection = extractConsistenzaSection(fullText)
     const { total, source: totalSource } = extractPortfolioTotal(fullText)
@@ -692,14 +720,44 @@ function cleanPageBreaks(text: string): string {
 
 /**
  * Extract MOVIMENTI section from full PDF text.
+ * Handles multiple bank formats:
+ * - Crédit Agricole: "MOVIMENTI EFFETTUATI"
+ * - Intesa Sanpaolo: "Movimenti." (standalone section header)
+ * - Banca Generali: "MOVIMENTI DI PERIODO"
  */
 export function extractMovimentiSection(fullText: string): string {
     const upper = fullText.toUpperCase()
-    const movIdx = upper.indexOf('MOVIMENTI EFFETTUATI')
+
+    // Try each marker in priority order
+    const markers = [
+        'MOVIMENTI EFFETTUATI',    // Crédit Agricole
+        'MOVIMENTI DI PERIODO',    // Banca Generali
+    ]
+
+    let movIdx = -1
+    for (const marker of markers) {
+        const idx = upper.indexOf(marker)
+        if (idx !== -1) { movIdx = idx; break }
+    }
+
+    // Intesa: "Movimenti." as standalone line (not part of "Movimenti di periodo" etc.)
+    if (movIdx === -1) {
+        const intesaMatch = fullText.match(/^Movimenti\.\s*$/m)
+        if (intesaMatch && intesaMatch.index !== undefined) {
+            movIdx = intesaMatch.index
+        }
+    }
+
     if (movIdx === -1) return ''
+
     // End at the first section boundary AFTER MOVIMENTI
     let endIdx = fullText.length
-    for (const marker of ['DIVIDENDI INCASSATI', 'CEDOLE INCASSATE', 'AVVERTENZE']) {
+    const endMarkers = [
+        'DIVIDENDI INCASSATI', 'CEDOLE INCASSATE', 'AVVERTENZE',
+        'RIEPILOGO DATI FISCALI', // Banca Generali
+        'DIVIDENDI INCASSATI',    // Intesa
+    ]
+    for (const marker of endMarkers) {
         const idx = upper.indexOf(marker, movIdx + 20)
         if (idx !== -1 && idx < endIdx) endIdx = idx
     }
@@ -707,20 +765,31 @@ export function extractMovimentiSection(fullText: string): string {
 }
 
 /**
- * Parse movements from CA-format MOVIMENTI section.
- *
- * Format per ISIN block:
- *   ISIN NAME
- *   DD/MM/YYYY START_QTY              ← starting quantity (no tab/operation)
- *   Div: CURRENCY
- *   DD/MM/YYYY QTY\tOPERATION         ← movement line (has tab + description)
- *   ...
- *   DD/MM/YYYY END_QTY                ← ending quantity (no tab/operation)
+ * Parse movements from PDF text. Auto-detects bank format:
+ * - Crédit Agricole: ISIN on its own line, DD/MM/YYYY dates, tab-separated operations
+ * - Intesa Sanpaolo: CODE NAME OPERATION DD.MM.YYYY QTY on one line, ISIN on next line
+ * - Banca Generali: ISIN - NAME on header, "Saldo Iniziale/Finale", DD.MM.YYYY dates
  */
 export function parseMovimentiFromText(fullText: string): TextMovimentiResult {
+    // Normalize: strip invisible separators (Intesa uses \u0019 as thousands separator)
+    fullText = normalizeInvisibleChars(fullText)
     const movSection = extractMovimentiSection(fullText)
     if (!movSection) return { startQuantities: {}, endQuantities: {}, movements: [] }
 
+    // Auto-detect format
+    if (/Saldo\s+Iniziale/i.test(movSection)) {
+        return parseGeneraliMovimenti(movSection)
+    }
+    if (/Sottoscrizione|Rimborso/i.test(movSection) && /^\d+\s+\S+.*\d{2}\.\d{2}\.\d{4}/m.test(movSection)) {
+        return parseIntesaMovimenti(movSection)
+    }
+    // Default: CA format
+    return parseCAMovimenti(movSection)
+}
+
+// ── Crédit Agricole Movement Parser ─────────────────────────────────────────
+
+function parseCAMovimenti(movSection: string): TextMovimentiResult {
     const cleaned = cleanPageBreaks(movSection)
     const lines = cleaned.split('\n')
 
@@ -733,68 +802,48 @@ export function parseMovimentiFromText(fullText: string): TextMovimentiResult {
     const DATE_QTY_OP_RE = /^(\d{2}\/\d{2}\/\d{4})\s+([\d.,]+)\t(.+)/
 
     let currentIsin = ''
-    let isinLines: string[] = [] // collect lines for current ISIN block
+    let isinLines: string[] = []
 
-    // All known operation patterns (for detecting standalone description lines)
     const ALL_OP_PATTERNS = [...BUY_PATTERNS, ...SELL_PATTERNS]
 
     function processIsinBlock(isin: string, blockLines: string[]) {
-        // Phase 1: Parse all lines into typed entries
         const entries: { date: string; qty: number; op: string | null; lineIdx: number }[] = []
 
         for (let i = 0; i < blockLines.length; i++) {
             const line = blockLines[i].trim()
             if (!line || /^Div:/i.test(line)) continue
 
-            // Line with tab = movement (date + qty + tab + operation)
             const opMatch = line.match(DATE_QTY_OP_RE)
             if (opMatch) {
                 const op = opMatch[3].trim()
-                // Filter out numeric false-positives (dividend tax data like "100,0000000 26,00 3,00")
                 if (/^\d/.test(op)) continue
                 entries.push({ date: opMatch[1], qty: parseItalianNumber(opMatch[2]), op, lineIdx: i })
                 continue
             }
 
-            // Date + qty without tab = start/end quantity OR movement with description on next line
             const qtyMatch = line.match(DATE_QTY_RE)
             if (qtyMatch && !line.includes('\t')) {
-                // Look ahead: is the next non-empty, non-Div line an operation description?
                 let foundOp: string | null = null
                 for (let j = i + 1; j < blockLines.length && j <= i + 2; j++) {
                     const nextLine = blockLines[j].trim()
                     if (!nextLine || /^Div:/i.test(nextLine)) continue
-                    // If next line is a date or ISIN, this is a start/end qty
                     if (DATE_QTY_RE.test(nextLine) || ISIN_RE.test(nextLine)) break
-                    // Check if it's a known operation description
                     if (ALL_OP_PATTERNS.some(p => p.test(nextLine))) {
                         foundOp = nextLine
-                        // Mark this line as consumed so we skip it in the main loop
-                        blockLines[j] = '' // consumed
+                        blockLines[j] = ''
                         break
                     }
-                    break // unknown line, don't look further
+                    break
                 }
-                entries.push({
-                    date: qtyMatch[1],
-                    qty: parseItalianNumber(qtyMatch[2]),
-                    op: foundOp,
-                    lineIdx: i
-                })
+                entries.push({ date: qtyMatch[1], qty: parseItalianNumber(qtyMatch[2]), op: foundOp, lineIdx: i })
             }
         }
 
         if (entries.length === 0) return
 
-        // Phase 2: Determine start/end quantities and movements
-        // Start qty = first entry without operation
-        // End qty = last entry without operation
-        // Movements = entries with operation
-
         const noOpEntries = entries.filter(e => e.op === null)
         const opEntries = entries.filter(e => e.op !== null)
 
-        // Sort noOp entries chronologically (DD/MM/YYYY → comparable)
         const parseDate = (d: string) => {
             const [dd, mm, yyyy] = d.split('/')
             return parseInt(yyyy + mm + dd)
@@ -802,46 +851,31 @@ export function parseMovimentiFromText(fullText: string): TextMovimentiResult {
         noOpEntries.sort((a, b) => parseDate(a.date) - parseDate(b.date))
 
         if (noOpEntries.length >= 2) {
-            startQuantities[isin] = noOpEntries[0].qty  // earliest date = start
-            endQuantities[isin] = noOpEntries[noOpEntries.length - 1].qty  // latest date = end
+            startQuantities[isin] = noOpEntries[0].qty
+            endQuantities[isin] = noOpEntries[noOpEntries.length - 1].qty
         } else if (noOpEntries.length === 1) {
             if (opEntries.length === 0) {
-                // Single date line, no movements → start = end
                 startQuantities[isin] = noOpEntries[0].qty
                 endQuantities[isin] = noOpEntries[0].qty
             } else {
-                // Determine if the single noOp entry is start or end based on date:
-                // If it's AFTER all movements → it's the ending balance (new ISIN bought during period)
-                // If it's BEFORE movements → it's the starting balance (ISIN sold during period)
                 const noOpDate = parseDate(noOpEntries[0].date)
                 const lastOpDate = Math.max(...opEntries.map(e => parseDate(e.date)))
                 if (noOpDate > lastOpDate) {
                     endQuantities[isin] = noOpEntries[0].qty
-                    // Don't set startQuantities — ISIN didn't exist at period start
                 } else {
                     startQuantities[isin] = noOpEntries[0].qty
-                    // Don't set endQuantities — ISIN was fully sold
                 }
             }
         }
 
-        // Create movement records
         const isinMovements: TextMovement[] = []
         for (const entry of opEntries) {
             const opType = classifyOperation(entry.op!)
             if (opType) {
-                isinMovements.push({
-                    isin,
-                    date: entry.date,
-                    quantity: entry.qty,
-                    operationType: opType,
-                    description: entry.op!,
-                })
+                isinMovements.push({ isin, date: entry.date, quantity: entry.qty, operationType: opType, description: entry.op! })
             }
         }
 
-        // Math verification: start + buys - sells = end
-        // If it doesn't match, try flipping ambiguous operations (GIRO ALTRO, SWITCH, TRAS.TITOLI)
         const AMBIGUOUS_OPS = [/GIRO/i, /SWITCH/i, /TRAS/i]
         const startQty = startQuantities[isin] ?? 0
         const endQty = endQuantities[isin] ?? 0
@@ -851,17 +885,12 @@ export function parseMovimentiFromText(fullText: string): TextMovimentiResult {
             const calc = startQty + buys - sells
             const hasAmbiguous = isinMovements.some(m => AMBIGUOUS_OPS.some(p => p.test(m.description)))
             if (hasAmbiguous && Math.abs(calc - endQty) > 0.01) {
-                // Try flipping ambiguous operations one at a time
                 for (const mov of isinMovements) {
                     if (AMBIGUOUS_OPS.some(p => p.test(mov.description))) {
                         const flipped = mov.operationType === 'Acquisto' ? 'Vendita' : 'Acquisto'
                         const adjBuys = buys + (flipped === 'Acquisto' ? mov.quantity : 0) - (mov.operationType === 'Acquisto' ? mov.quantity : 0)
                         const adjSells = sells + (flipped === 'Vendita' ? mov.quantity : 0) - (mov.operationType === 'Vendita' ? mov.quantity : 0)
-                        const adjCalc = startQty + adjBuys - adjSells
-                        if (Math.abs(adjCalc - endQty) < 0.01) {
-                            mov.operationType = flipped
-                            break
-                        }
+                        if (Math.abs(startQty + adjBuys - adjSells - endQty) < 0.01) { mov.operationType = flipped; break }
                     }
                 }
             }
@@ -873,21 +902,175 @@ export function parseMovimentiFromText(fullText: string): TextMovimentiResult {
     for (const line of lines) {
         const isinMatch = line.match(ISIN_RE)
         if (isinMatch) {
-            // Process previous block
-            if (currentIsin && isinLines.length > 0) {
-                processIsinBlock(currentIsin, isinLines)
-            }
+            if (currentIsin && isinLines.length > 0) processIsinBlock(currentIsin, isinLines)
             currentIsin = isinMatch[1]
             isinLines = []
             continue
         }
-        if (currentIsin) {
-            isinLines.push(line)
+        if (currentIsin) isinLines.push(line)
+    }
+    if (currentIsin && isinLines.length > 0) processIsinBlock(currentIsin, isinLines)
+
+    return { startQuantities, endQuantities, movements }
+}
+
+// ── Intesa Sanpaolo Movement Parser ─────────────────────────────────────────
+// Format: CODE NAME OPERATION DD.MM.YYYY [+/-]QTY PRICE CURRENCY AMOUNT CURRENCY
+//         ISIN (on next line)
+
+const INTESA_BUY_OPS = [/Sottoscrizione/i, /Acquisto/i, /Carico/i]
+const INTESA_SELL_OPS = [/Rimborso/i, /Vendita/i, /Scarico/i, /Disinvestimento/i]
+
+function classifyIntesaOperation(desc: string): 'Acquisto' | 'Vendita' | null {
+    for (const p of INTESA_BUY_OPS) { if (p.test(desc)) return 'Acquisto' }
+    for (const p of INTESA_SELL_OPS) { if (p.test(desc)) return 'Vendita' }
+    return null
+}
+
+function parseIntesaMovimenti(movSection: string): TextMovimentiResult {
+    const lines = movSection.split('\n')
+    const startQuantities: Record<string, number> = {}
+    const endQuantities: Record<string, number> = {}
+    const movements: TextMovement[] = []
+
+    // Intesa movement lines (tab-separated, with optional spaces around tabs):
+    //   CODE \t NAME \t OPERATION \t DD.MM.YYYY \t [+/-]QTY \t PRICE CURRENCY \t AMOUNT CURRENCY
+    //   ISIN (on next line)
+    const INTESA_MOV_RE = /\s*\t\s*(Sottoscrizione|Rimborso|Acquisto|Vendita|Disinvestimento)\s*\t\s*(\d{2}\.\d{2}\.\d{4})\s*\t\s*([+-]?[\d.,]+)/i
+    const ISIN_LINE_RE = /^([A-Z]{2}[A-Z0-9]{9}\d)\s*$/
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+
+        const movMatch = line.match(INTESA_MOV_RE)
+        if (movMatch) {
+            const operation = movMatch[1]
+            const dateRaw = movMatch[2] // DD.MM.YYYY
+            const date = dateRaw.replace(/\./g, '/') // convert to DD/MM/YYYY
+            const qtyRaw = movMatch[3].replace(/^[+-]/, '')
+            const qty = parseItalianNumber(qtyRaw)
+
+            // Look for ISIN on next line
+            let isin = ''
+            for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+                const nextTrimmed = lines[j].trim()
+                if (!nextTrimmed) continue
+                const isinMatch = nextTrimmed.match(ISIN_LINE_RE)
+                if (isinMatch) {
+                    isin = isinMatch[1]
+                    break
+                }
+                // Skip CAMBIO lines
+                if (/^CAMBIO:/i.test(nextTrimmed)) continue
+                // Also check for ISIN at start of line (not necessarily alone)
+                const isinStart = nextTrimmed.match(/^([A-Z]{2}[A-Z0-9]{9}\d)\b/)
+                if (isinStart) {
+                    isin = isinStart[1]
+                    break
+                }
+                break
+            }
+
+            if (isin && qty > 0) {
+                const opType = classifyIntesaOperation(operation)
+                if (opType) {
+                    movements.push({
+                        isin,
+                        date,
+                        quantity: qty,
+                        operationType: opType,
+                        description: operation,
+                    })
+                }
+            }
         }
     }
-    // Process last block
-    if (currentIsin && isinLines.length > 0) {
-        processIsinBlock(currentIsin, isinLines)
+
+    // Intesa doesn't have explicit start/end quantities in movements section.
+    // They come from the CONSISTENZA section (previous and current period holdings).
+    return { startQuantities, endQuantities, movements }
+}
+
+// ── Banca Generali Movement Parser ──────────────────────────────────────────
+// Format: ISIN - NAME - Depositario: ...
+//         DD.MM.YYYY Saldo Iniziale QTY
+//         DD.MM.YYYY Acquisto/Vendita titoli - Op. N° ... QTY PRICE RATE FEES CURRENCY AMOUNT
+//         DD.MM.YYYY Saldo Finale QTY
+
+function parseGeneraliMovimenti(movSection: string): TextMovimentiResult {
+    const lines = movSection.split('\n')
+    const startQuantities: Record<string, number> = {}
+    const endQuantities: Record<string, number> = {}
+    const movements: TextMovement[] = []
+
+    const ISIN_HEADER_RE = /^([A-Z]{2}[A-Z0-9]{9}\d)\s*-\s*/
+    const SALDO_INIZIALE_RE = /^(\d{2}\.\d{2}\.\d{4})\s+Saldo\s+Iniziale\s+(\d+)/i
+    const SALDO_FINALE_RE = /^(\d{2}\.\d{2}\.\d{4})\s+Saldo\s+Finale\s+(\d+)/i
+    const GENERALI_MOV_RE = /^(\d{2}\.\d{2}\.\d{4})\s+(Acquisto|Vendita)\s+titoli/i
+
+    let currentIsin = ''
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim()
+
+        const isinMatch = trimmed.match(ISIN_HEADER_RE)
+        if (isinMatch) {
+            currentIsin = isinMatch[1]
+            continue
+        }
+
+        if (!currentIsin) continue
+
+        const siMatch = trimmed.match(SALDO_INIZIALE_RE)
+        if (siMatch) {
+            startQuantities[currentIsin] = parseInt(siMatch[2])
+            continue
+        }
+
+        const sfMatch = trimmed.match(SALDO_FINALE_RE)
+        if (sfMatch) {
+            endQuantities[currentIsin] = parseInt(sfMatch[2])
+            continue
+        }
+
+        // Movement line: "DD.MM.YYYY Acquisto/Vendita titoli - Op. N° ... del"
+        // Data on continuation lines: "DD.MM.YYYY" (ref date), then "QTY PRICE RATE FEES CURRENCY AMOUNT"
+        const movMatch = trimmed.match(GENERALI_MOV_RE)
+        if (movMatch) {
+            const dateRaw = movMatch[1]
+            const date = dateRaw.replace(/\./g, '/')
+            const opType = movMatch[2].toLowerCase() === 'acquisto' ? 'Acquisto' as const : 'Vendita' as const
+
+            // Look ahead for the data line with quantity (up to 3 lines after the operation line)
+            // The data line starts with a number (quantity) followed by price and other numbers
+            let qty = 0
+            for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+                const dataLine = lines[j].trim()
+                if (!dataLine) continue
+                // Skip reference date line (just a date)
+                if (/^\d{2}\.\d{2}\.\d{4}\s*$/.test(dataLine)) continue
+                // Skip "del DD.MM.YYYY" continuation
+                if (/^del\s+\d{2}\.\d{2}\.\d{4}/i.test(dataLine)) continue
+                // Data line starts with quantity: "100 44,30000 1,00000 ..."
+                // or "-60 120,00000 ..." (negative for sells)
+                const qtyMatch = dataLine.match(/^-?(\d+(?:,\d+)?)\s/)
+                if (qtyMatch) {
+                    qty = parseItalianNumber(qtyMatch[1])
+                    break
+                }
+                break
+            }
+
+            if (qty > 0) {
+                movements.push({
+                    isin: currentIsin,
+                    date,
+                    quantity: qty,
+                    operationType: opType,
+                    description: movMatch[2] + ' titoli',
+                })
+            }
+        }
     }
 
     return { startQuantities, endQuantities, movements }
