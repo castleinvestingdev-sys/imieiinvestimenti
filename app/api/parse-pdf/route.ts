@@ -2443,10 +2443,10 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
             // Intesa format: movements exist but no explicit start/end quantities in MOVIMENTI section.
             // Start/end quantities come from CONSISTENZA holdings (current period) and DB (previous period).
             // Keep hasMovementsSection = true so dashboard shows coherence check.
-            // The coherence check will use prevDoc.holdings as startQuantities and current holdings as endQuantities.
+            // Movements ARE complete (Sottoscrizione/Rimborso/etc. all classified as Acquisto/Vendita).
+            // Do NOT set incompleteMovements — coherence check should be strict.
             if (textMovResult.movements.length > 0 && textStartCount === 0 && textEndCount === 0) {
-                incompleteMovements = true
-                logProgress('TEXT MOVIMENTI', `${textMovResult.movements.length} movimenti trovati (formato Intesa: start/end da CONSISTENZA, movimenti parziali)`)
+                logProgress('TEXT MOVIMENTI', `${textMovResult.movements.length} movimenti trovati (formato Intesa: start/end da CONSISTENZA)`)
             }
 
             if (textStartCount > 0 || textMovResult.movements.length > 0) {
@@ -2762,15 +2762,15 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
         }
 
         // Track if text parser provided a reliable period_start
-        // Only trust text period_start for longer periods (semiannual/annual). For Intesa, the PDF text
-        // shows quarterly "PERIODO RENDICONTATO" dates but the actual document is semiannual (sfasati 3 mesi).
-        // Short text periods (< 120 days) likely need frequency-based correction.
+        // The text parser extracts "PERIODO RENDICONTATO" from the PDF, which gives the actual
+        // reporting period. This is deterministic and always correct when present.
+        // Trust any text-parsed period >= 25 days (monthly = ~30 days, quarterly = ~90 days).
         let textParserPeriodStartReliable = false
         if (textParserResult?.metadata?.periodStart && parsed.info?.period_end) {
             const [td, tm, ty] = textParserResult.metadata.periodStart.split('/')
             const textStart = new Date(`${ty}-${tm}-${td}`)
             const textDays = (new Date(parsed.info.period_end).getTime() - textStart.getTime()) / 86400000
-            textParserPeriodStartReliable = textDays >= 120 // trust semiannual/annual, not quarterly
+            textParserPeriodStartReliable = textDays >= 25 // trust any reasonable period length
         }
 
         // === LAYER 1: DOSSIER period_start computed from detected frequency + period_end ===

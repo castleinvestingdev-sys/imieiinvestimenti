@@ -1159,7 +1159,6 @@ function DashboardContent() {
     let matchCount = 0
     let totalCount = 0
     const mismatchIsinsB: string[] = []
-    const isIncomplete = doc.costs_breakdown?.incompleteMovements === true
     allIsins.forEach(isin => {
       totalCount++
       if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) {
@@ -1170,12 +1169,6 @@ function DashboardContent() {
         const fullyDisappeared = (prevH[isin] || 0) > 0 && (currH[isin] || 0) === 0
         const fullyAppeared = (prevH[isin] || 0) === 0 && (currH[isin] || 0) > 0
         if (hasNoNetMovement && (fullyDisappeared || fullyAppeared)) {
-          matchCount++
-          return
-        }
-        // Intesa incomplete movements: movements don't cover all portfolio changes
-        // (fund switches, conversions, GPM conferimenti are not in the MOVIMENTI section)
-        if (isIncomplete) {
           matchCount++
           return
         }
@@ -2475,19 +2468,14 @@ function DashboardContent() {
                   )
                 }
 
-                const isIncompleteI = inspectorData.costs_breakdown?.incompleteMovements === true
-
-                // For Intesa (incompleteMovements): direct comparison prev vs current, no movement adjustment
-                // For normal: movement-based calculation of initial portfolio
+                // Movement-based calculation of initial portfolio
                 const movDeltas: Record<string, { buys: number; sells: number }> = {}
-                if (!isIncompleteI) {
-                  movements.forEach((m: any) => {
-                    const isin = m.isin || 'UNKNOWN'
-                    if (!movDeltas[isin]) movDeltas[isin] = { buys: 0, sells: 0 }
-                    if (m.operationType === 'Acquisto') movDeltas[isin].buys += m.quantity || 0
-                    else if (m.operationType === 'Vendita') movDeltas[isin].sells += m.quantity || 0
-                  })
-                }
+                movements.forEach((m: any) => {
+                  const isin = m.isin || 'UNKNOWN'
+                  if (!movDeltas[isin]) movDeltas[isin] = { buys: 0, sells: 0 }
+                  if (m.operationType === 'Acquisto') movDeltas[isin].buys += m.quantity || 0
+                  else if (m.operationType === 'Vendita') movDeltas[isin].sells += m.quantity || 0
+                })
 
                 // Current holdings by ISIN (deduplicated)
                 const currHoldingsI: Record<string, number> = {}
@@ -2496,75 +2484,43 @@ function DashboardContent() {
                 let rows: { isin: string; name: string; prevQty: number; prevVal: number; calcQty: number; qtyDiff: number; match: boolean }[]
                 type CompRow = typeof rows[number]
 
-                if (isIncompleteI) {
-                  // Intesa: movements don't have start/end quantities, so we can't calculate initial portfolio from movements.
-                  // Compare prev final holdings vs current final holdings directly.
-                  // Use prevHoldings ISINs as the base (= initial portfolio of current period).
-                  const prevIsins = Object.keys(prevHoldings)
-                  rows = prevIsins.map(isin => {
-                    const prev = prevHoldings[isin]
-                    const currQty = currHoldingsI[isin] || 0
-                    const currName = (inspectorData.holdings || []).find((h: any) => h.isin === isin)?.name || ''
-                    const qtyDiff = currQty - prev.qty
-                    return {
-                      isin,
-                      name: prev.name || currName || isin,
-                      prevQty: prev.qty,
-                      prevVal: prev.value,
-                      calcQty: currQty,
-                      qtyDiff,
-                      match: Math.abs(qtyDiff) < 0.0001
+                const calcInitial: Record<string, { name: string; qty: number; value: number }> = {}
+                ;(inspectorData.holdings || []).forEach((h: any) => {
+                  const isin = h.isin || 'UNKNOWN'
+                  const delta = movDeltas[isin] || { buys: 0, sells: 0 }
+                  const initQty = (h.quantity || 0) - delta.buys + delta.sells
+                  if (initQty !== 0 || prevHoldings[isin]) {
+                    calcInitial[isin] = { name: h.name || h.description || isin, qty: initQty, value: 0 }
+                  }
+                })
+                // Titoli venduti completamente (in prevDoc ma non nel finale corrente)
+                Object.entries(movDeltas).forEach(([isin, delta]) => {
+                  if (!calcInitial[isin] && (prevHoldings[isin] || delta.sells > 0)) {
+                    const initQty = 0 - delta.buys + delta.sells
+                    if (initQty !== 0) {
+                      calcInitial[isin] = { name: prevHoldings[isin]?.name || isin, qty: initQty, value: 0 }
                     }
-                  })
-                } else {
-                  const calcInitial: Record<string, { name: string; qty: number; value: number }> = {}
-                  ;(inspectorData.holdings || []).forEach((h: any) => {
-                    const isin = h.isin || 'UNKNOWN'
-                    const delta = movDeltas[isin] || { buys: 0, sells: 0 }
-                    const initQty = (h.quantity || 0) - delta.buys + delta.sells
-                    if (initQty !== 0 || prevHoldings[isin]) {
-                      calcInitial[isin] = { name: h.name || h.description || isin, qty: initQty, value: 0 }
-                    }
-                  })
-                  // Titoli venduti completamente (in prevDoc ma non nel finale corrente)
-                  Object.entries(movDeltas).forEach(([isin, delta]) => {
-                    if (!calcInitial[isin] && (prevHoldings[isin] || delta.sells > 0)) {
-                      const initQty = 0 - delta.buys + delta.sells
-                      if (initQty !== 0) {
-                        calcInitial[isin] = { name: prevHoldings[isin]?.name || isin, qty: initQty, value: 0 }
-                      }
-                    }
-                  })
-                  const allIsins = [...new Set([...Object.keys(prevHoldings), ...Object.keys(calcInitial)])]
-                  rows = allIsins.map(isin => {
-                    const prev = prevHoldings[isin] || { name: '', qty: 0, value: 0 }
-                    const calc = calcInitial[isin] || { name: '', qty: 0, value: 0 }
-                    const qtyDiff = calc.qty - prev.qty
-                    return {
-                      isin,
-                      name: prev.name || calc.name,
-                      prevQty: prev.qty,
-                      prevVal: prev.value,
-                      calcQty: calc.qty,
-                      qtyDiff,
-                      match: Math.abs(qtyDiff) < 0.0001
-                    }
-                  })
-                }
-
-                // For Intesa: count ISINs present in both prev and current for accurate "stessi in entrambi"
-                const inBothCount = isIncompleteI ? rows.filter(r => prevHoldings[r.isin] && currHoldingsI[r.isin]).length : 0
-                const matchingInBoth = isIncompleteI ? rows.filter(r => r.match && prevHoldings[r.isin] && currHoldingsI[r.isin]).length : 0
+                  }
+                })
+                const allIsins = [...new Set([...Object.keys(prevHoldings), ...Object.keys(calcInitial)])]
+                rows = allIsins.map(isin => {
+                  const prev = prevHoldings[isin] || { name: '', qty: 0, value: 0 }
+                  const calc = calcInitial[isin] || { name: '', qty: 0, value: 0 }
+                  const qtyDiff = calc.qty - prev.qty
+                  return {
+                    isin,
+                    name: prev.name || calc.name,
+                    prevQty: prev.qty,
+                    prevVal: prev.value,
+                    calcQty: calc.qty,
+                    qtyDiff,
+                    match: Math.abs(qtyDiff) < 0.0001
+                  }
+                })
 
                 // Separate corporate action ISINs and full disappearance/appearance from real mismatches
                 const allMismatches = rows.filter(r => {
                   if (r.match) return false
-                  if (isIncompleteI) {
-                    // Intesa: only flag as mismatch if ISIN exists in BOTH prev and current with different qty
-                    // New/disappeared ISINs are expected (no movement data to verify)
-                    if (!prevHoldings[r.isin] || !currHoldingsI[r.isin]) return false
-                    return true
-                  }
                   // Skip holdings that fully disappeared or appeared without any movements
                   const mov = movDeltas[r.isin]
                   const hasNoNetMovement = !mov || (mov.buys === 0 && mov.sells === 0) || (mov.buys === mov.sells)
@@ -2594,9 +2550,7 @@ function DashboardContent() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                       <div style={{ fontWeight: 700, fontSize: '0.8rem', color: allOk ? '#047857' : '#b91c1c' }}>
                         {allOk
-                          ? (isIncompleteI
-                            ? '✅ Portafoglio verificato (movimenti parziali)'
-                            : caMismatches.length > 0
+                          ? (caMismatches.length > 0
                               ? `✅ Portafoglio Iniziale verificato (${caMismatches.length} corporate action)`
                               : '✅ Portafoglio Iniziale verificato')
                           : `❌ ${realMismatches.length} strument${realMismatches.length === 1 ? 'o' : 'i'} non quadra${realMismatches.length === 1 ? '' : 'no'}`}
@@ -2608,21 +2562,12 @@ function DashboardContent() {
 
                     {/* Riepilogo quote */}
                     <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569', flexWrap: 'wrap' }}>
-                      {isIncompleteI ? (
-                        <>
-                          <span>Finale Prec.: <strong>{rows.length}</strong></span>
-                          <span>Presenti in entrambi: <strong>{inBothCount}</strong></span>
-                          <span>Stessa quantità: <strong style={{ color: '#047857' }}>{matchingInBoth}</strong></span>
-                          {allMismatches.length > 0 && <span>Quantità diversa: <strong style={{ color: '#b91c1c' }}>{allMismatches.length}</strong></span>}
-                        </>
-                      ) : (
                         <>
                           <span>Strumenti confrontati: <strong>{rows.length}</strong></span>
                           <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.length - allMismatches.length}</strong></span>
                           {caMismatches.length > 0 && <span>Corporate Action: <strong style={{ color: '#d97706' }}>{caMismatches.length}</strong></span>}
                           {realMismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{realMismatches.length}</strong></span>}
                         </>
-                      )}
                     </div>
 
                     {/* Corporate Action table (yellow) */}
@@ -2686,9 +2631,7 @@ function DashboardContent() {
 
                     {allOk && caMismatches.length === 0 && (
                       <div style={{ fontSize: '0.65rem', color: '#047857' }}>
-                        {isIncompleteI
-                          ? `${rows.filter(r => r.match).length} strumenti con stesse quantità in entrambi i periodi. Movimenti parziali — verifica completa non possibile.`
-                          : `Tutti i ${rows.length} strumenti hanno le stesse quantità nel ptf. finale precedente e nel ptf. iniziale calcolato.`}
+                        {`Tutti i ${rows.length} strumenti hanno le stesse quantità nel ptf. finale precedente e nel ptf. iniziale calcolato.`}
                       </div>
                     )}
                   </div>
@@ -2804,7 +2747,6 @@ function DashboardContent() {
                       return candidate
                     })()
 
-                    const badgeIncomplete = inspectorData.costs_breakdown?.incompleteMovements === true;
                     let initialCount = 0;
                     if (badgePrevDoc) {
                       // When previous doc exists, initial portfolio = previous doc's final holdings

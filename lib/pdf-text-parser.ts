@@ -145,6 +145,47 @@ function extractItalianNumbers(text: string): number[] {
     return numbers
 }
 
+/**
+ * Extract numbers from an Intesa CONSISTENZA tab-separated line.
+ * Intesa format for stocks/bonds: CODE \t NAME \t QTY [CCY] \t PRICE [CCY] \t +CONTROVALORE
+ * Unlike extractItalianNumbers, this also captures integer quantities (e.g., "6000", "24000")
+ * by looking at specific tab positions where quantities are expected.
+ */
+function extractIntesaConsistenzaNumbers(text: string): number[] {
+    if (!text.includes('\t')) return extractItalianNumbers(text)
+    const fields = text.split('\t').map(f => f.trim())
+    if (fields.length < 3) return extractItalianNumbers(text)
+
+    const numbers: number[] = []
+    // Skip first field (internal code) and second field (name)
+    // Process fields 2+ for numbers
+    for (let i = 2; i < fields.length; i++) {
+        const field = fields[i]
+        if (!field) continue
+        // Strip leading +/-, trailing currency codes, and "EUR"/"USD" etc.
+        const cleaned = field.replace(/^[+-]/, '').replace(/\s*(EUR|USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\s*/gi, '').trim()
+        if (!cleaned) continue
+
+        // Try Italian number format first (with comma decimals)
+        const italianNums = extractItalianNumbers(field)
+        if (italianNums.length > 0) {
+            numbers.push(...italianNums)
+            continue
+        }
+
+        // Try pure integer (no comma) — common for bond nominal/stock qty in Intesa
+        // Must be purely numeric (possibly with dot thousand separators)
+        const intMatch = cleaned.match(/^(\d{1,3}(?:\.\d{3})*|\d+)$/)
+        if (intMatch) {
+            const val = parseItalianNumber(intMatch[1])
+            if (!isNaN(val) && val > 0) {
+                numbers.push(val)
+            }
+        }
+    }
+    return numbers
+}
+
 // ── CONSISTENZA Section Extraction ───────────────────────────────────────────
 
 const SECTION_START_KEYWORDS = [
@@ -340,7 +381,8 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
             }
 
             // Extract numbers from this line
-            const nums = extractItalianNumbers(trimmed)
+            // For Intesa tab-separated lines, also capture integer quantities (e.g., "6000", "24000")
+            const nums = trimmed.includes('\t') ? extractIntesaConsistenzaNumbers(trimmed) : extractItalianNumbers(trimmed)
 
             // Intesa format: if this line has 2+ numbers and looks like a data line for
             // a DIFFERENT holding, buffer it as pending for the next ISIN.
@@ -382,7 +424,8 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
         } else {
             // No current ISIN — buffer numbers for potential "numbers-then-ISIN" pattern (Intesa)
             if (!isSectionBreak(trimmed)) {
-                const nums = extractItalianNumbers(trimmed)
+                // For Intesa tab-separated lines, also capture integer quantities (e.g., "6000", "24000")
+                const nums = trimmed.includes('\t') ? extractIntesaConsistenzaNumbers(trimmed) : extractItalianNumbers(trimmed)
                 if (nums.length >= 2) {
                     pendingNumbers = nums
                     const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
@@ -535,6 +578,28 @@ function buildHoldingFromNumbers(
                             bestMv = marketValue
                             bestError = error
                             if (error < 0.01) { verified = true; break }
+                        }
+                    }
+
+                    // For foreign currency bonds: qty × (price / 100) / exchangeRate = marketValue
+                    if (!verified && (currency !== 'EUR' || !verified)) {
+                        for (let ei = 0; ei < numbers.length; ei++) {
+                            if (ei === qi || ei === pi || ei === mvIdx) continue
+                            const rateCandidate = numbers[ei]
+                            if (rateCandidate < 0.3 || rateCandidate > 3.0) continue
+
+                            const bondWithRate = bondProduct / rateCandidate
+                            if (marketValue > 0) {
+                                const error = Math.abs(bondWithRate - marketValue) / marketValue
+                                if (error < 0.03 && error < bestError) {
+                                    bestQty = qtyCandidate
+                                    bestPrice = priceCandidate / 100
+                                    bestRate = 1 / rateCandidate
+                                    bestMv = marketValue
+                                    bestError = error
+                                    if (error < 0.01) { verified = true; break }
+                                }
+                            }
                         }
                     }
                 }
