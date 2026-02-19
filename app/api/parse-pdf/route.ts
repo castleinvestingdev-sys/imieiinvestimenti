@@ -963,6 +963,41 @@ function callGemini(
                     } catch (e: any) {
                         reject(new Error(`JSON parse error: ${e.message}`))
                     }
+                } else if (res.statusCode === 403 && data.includes('CachedContent') && options?.cachedContent) {
+                    // CachedContent expired or was invalidated — invalidate local cache and retry without it
+                    console.log(`[CACHE] CachedContent expired, invalidating and retrying without cache`)
+                    cachedContentName = null
+                    cachedContentExpiry = 0
+                    // Rebuild body without cachedContent, using inline system_instruction instead
+                    const retryBody = { ...body }
+                    delete retryBody.cachedContent
+                    retryBody.system_instruction = { parts: [{ text: systemPrompt }] }
+                    const retryRequestBody = JSON.stringify(retryBody)
+                    const retryReqOptions = { ...reqOptions, headers: { ...reqOptions.headers, 'Content-Length': Buffer.byteLength(retryRequestBody) } }
+                    const retryReq = https.request(retryReqOptions, (retryRes) => {
+                        let retryData = ''
+                        retryRes.on('data', (chunk: Buffer) => { retryData += chunk.toString() })
+                        retryRes.on('end', () => {
+                            clearTimeout(retryTimeout)
+                            if (retryRes.statusCode === 200) {
+                                try {
+                                    const json = JSON.parse(retryData)
+                                    const text = json.candidates?.[0]?.content?.parts?.[0]?.text || ''
+                                    resolve(text)
+                                } catch (e: any) {
+                                    reject(new Error(`JSON parse error on retry: ${e.message}`))
+                                }
+                            } else {
+                                reject(new Error(`HTTP ${retryRes.statusCode}: ${retryData.substring(0, 500)}`))
+                            }
+                        })
+                    })
+                    const retryTimeout = setTimeout(() => {
+                        retryReq.destroy(new Error(`Gemini retry request timeout after ${callTimeoutMs / 1000}s`))
+                    }, callTimeoutMs)
+                    retryReq.on('error', (e: Error) => { clearTimeout(retryTimeout); reject(e) })
+                    retryReq.write(retryRequestBody)
+                    retryReq.end()
                 } else {
                     reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 500)}`))
                 }
@@ -1858,12 +1893,17 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
         // First pass: when text parser extracted holdings, use 'low' thinking (text = primary source for numbers,
         // Gemini only needed for metadata/names/dates). Fall back to 'medium' for scanned PDFs or no text results.
-        const maxRetries = 3
+        const maxRetries = 2
         let resText = ''
         let parseSuccess = false
         let lastParseError = ''
         const textParserHasGoodResults = textParserResult && textParserResult.holdings.length > 0
-        let currentThinkingLevel = isDossierFromText ? (textParserHasGoodResults ? 'low' : 'medium') : 'low'
+        // LIQUIDITY PDFs (Estratto Conto, Liquidità) have no holdings — use 'low' thinking
+        const isLikelyLiquidity = !textParserHasGoodResults && (
+            upperText.includes('ESTRATTO CONTO') || upperText.includes('LIQUIDIT') ||
+            upperText.includes('CONTO CORRENTE') || upperText.includes('E/C ')
+        )
+        let currentThinkingLevel = isLikelyLiquidity ? 'low' : (isDossierFromText ? (textParserHasGoodResults ? 'low' : 'medium') : 'low')
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             // Skip retry if time budget exhausted (keep 60s for post-processing)
@@ -1955,7 +1995,9 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     logProgress('SERVER ERROR', `${errMsg.substring(0, 80)}, riprovo tra ${waitTime / 1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else if (isNetworkError) {
-                    const waitTime = attempt * 15000
+                    // For timeouts, retry immediately (no point waiting — the API was just slow)
+                    const isTimeout = errMsg.includes('timeout')
+                    const waitTime = isTimeout ? 2000 : attempt * 15000
                     logProgress('ERRORE RETE', `Riprovo tra ${waitTime / 1000}s`)
                     await new Promise(resolve => setTimeout(resolve, waitTime))
                 } else {
