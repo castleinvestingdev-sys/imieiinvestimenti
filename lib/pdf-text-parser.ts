@@ -14,6 +14,7 @@
 
 export interface TextHolding {
     isin: string
+    name?: string             // holding name extracted from text (line before ISIN)
     currency: string
     quantity: number
     price: number
@@ -23,6 +24,16 @@ export interface TextHolding {
     source: 'text_verified' | 'text_unverified'
 }
 
+export interface TextMetadata {
+    bankName?: string
+    periodStart?: string      // DD/MM/YYYY
+    periodEnd?: string        // DD/MM/YYYY
+    accountNumber?: string
+    holder?: string
+    accountType?: string      // 'DOSSIER' | 'CC' | 'LIQUIDITA'
+    settlementAccount?: string // IBAN
+}
+
 export interface TextPortfolioResult {
     holdings: TextHolding[]
     total: number             // extracted "CONTROVALORE TOTALE" from text (0 if not found)
@@ -30,6 +41,7 @@ export interface TextPortfolioResult {
     holdingsSum: number       // sum of holdings marketValues
     bankDetected: string | null
     sectionFound: boolean
+    metadata?: TextMetadata
 }
 
 export interface TextMovement {
@@ -121,7 +133,8 @@ function extractItalianNumbers(text: string): number[] {
     // 1. With thousands separators: 1-3 digits, then groups of .XXX, then ,decimals
     // 2. Without thousands separators: 4+ digits directly followed by ,decimals
     // Combined with alternation, using a negative lookbehind to avoid partial matches
-    const pattern = /(?<!\d)(\d{1,3}(?:\.\d{3})+,\d{2,})|(?<!\d[.,])(\d+,\d{2,})/g
+    // Negative lookahead (?![A-Za-z]) prevents matching numbers embedded in names (e.g., "1,40CUM")
+    const pattern = /(?<!\d)(\d{1,3}(?:\.\d{3})+,\d{2,})(?![A-Za-z])|(?<!\d[.,])(\d+,\d{2,})(?![A-Za-z])/g
     const numbers: number[] = []
     let m
     while ((m = pattern.exec(text)) !== null) {
@@ -229,6 +242,7 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
 
     // Accumulate data per ISIN
     let currentIsin = ''
+    let currentName = ''
     let currentCurrency = 'EUR'
     let currentNumbers: number[] = []
     let currentRawLines: string[] = []
@@ -237,16 +251,19 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
     let pendingNumbers: number[] = []
     let pendingCurrency = 'EUR'
     let pendingRawLine = ''
+    let pendingName = ''
 
     const flushCurrent = () => {
         if (currentIsin && currentNumbers.length >= 2 && !seenIsins.has(currentIsin)) {
             const h = buildHoldingFromNumbers(currentIsin, currentCurrency, currentNumbers)
             if (h) {
+                if (currentName) h.name = currentName
                 holdings.push(h)
                 seenIsins.add(currentIsin)
             }
         }
         currentIsin = ''
+        currentName = ''
         currentCurrency = 'EUR'
         currentNumbers = []
         currentRawLines = []
@@ -307,10 +324,13 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
                 currentNumbers = [...pendingNumbers, ...currentNumbers]
                 currentCurrency = pendingCurrency
                 currentRawLines.unshift(pendingRawLine)
+                // Extract holding name from pending line (Intesa: "CODE \t NAME \t QTY \t PRICE ...")
+                if (pendingName) currentName = pendingName
             }
             pendingNumbers = []
             pendingCurrency = 'EUR'
             pendingRawLine = ''
+            pendingName = ''
         } else if (currentIsin) {
             // Continuation line for current ISIN (description, more numbers)
             // Stop accumulating if we hit a section break, total line, header, or page footer
@@ -322,16 +342,25 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
             // Extract numbers from this line
             const nums = extractItalianNumbers(trimmed)
 
-            // Intesa format: if current holding already has 2+ numbers and this new line
-            // also has 2+ numbers, it's likely a NEW holding's data line (not a continuation)
+            // Intesa format: if this line has 2+ numbers and looks like a data line for
+            // a DIFFERENT holding, buffer it as pending for the next ISIN.
+            // This triggers when:
+            //   a) Current holding already has 2+ numbers (normal case), OR
+            //   b) Current holding has <2 numbers AND the line is tab-separated (Intesa format)
+            //      — meaning the current ISIN had no data of its own, and this data line
+            //        belongs to the NEXT ISIN (numbers-then-ISIN pattern)
             // (Continuation lines like "CAMBIO: 1,105000" only have 1 number, so this is safe)
-            if (currentNumbers.length >= 2 && nums.length >= 2) {
+            const isIntesaDataLine = nums.length >= 2 && trimmed.includes('\t')
+            if (nums.length >= 2 && (currentNumbers.length >= 2 || isIntesaDataLine)) {
                 flushCurrent()
                 // Buffer these numbers as pending for the next ISIN
                 pendingNumbers = nums
                 const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
                 pendingCurrency = currMatch ? currMatch[1] : 'EUR'
                 pendingRawLine = trimmed
+                // Extract name: second tab-separated field (Intesa: "CODE \t NAME \t QTY \t ...")
+                const tabFields = trimmed.split('\t').map(f => f.trim())
+                pendingName = tabFields.length >= 3 && /^[A-Z]/.test(tabFields[1]) ? tabFields[1] : ''
                 continue
             }
 
@@ -359,18 +388,23 @@ export function parseConsistenzaHoldings(consistenzaText: string): TextHolding[]
                     const currMatch = trimmed.match(/\b(USD|GBP|CHF|JPY|SEK|NOK|DKK|AUD|CAD|HKD|SGD|NZD|ZAR|TRY|PLN|CZK|HUF)\b/)
                     pendingCurrency = currMatch ? currMatch[1] : 'EUR'
                     pendingRawLine = trimmed
+                    // Extract name: second tab-separated field
+                    const tabFields = trimmed.split('\t').map(f => f.trim())
+                    pendingName = tabFields.length >= 3 && /^[A-Z]/.test(tabFields[1]) ? tabFields[1] : ''
                 } else {
                     // Non-numeric line without ISIN: clear pending (prevents cross-contamination)
                     if (nums.length === 0 && trimmed.length > 5) {
                         pendingNumbers = []
                         pendingCurrency = 'EUR'
                         pendingRawLine = ''
+                        pendingName = ''
                     }
                 }
             } else {
                 pendingNumbers = []
                 pendingCurrency = 'EUR'
                 pendingRawLine = ''
+                pendingName = ''
             }
         }
     }
@@ -539,7 +573,8 @@ function buildHoldingFromNumbers(
 export function mergeTextAndGeminiHoldings(
     textHoldings: TextHolding[],
     geminiHoldings: any[],
-    logFn?: (tag: string, msg: string) => void
+    logFn?: (tag: string, msg: string) => void,
+    textTotal?: number
 ): { merged: any[]; corrections: number } {
     if (textHoldings.length === 0) return { merged: geminiHoldings, corrections: 0 }
 
@@ -548,6 +583,16 @@ export function mergeTextAndGeminiHoldings(
     for (const th of textHoldings) {
         textMap.set(th.isin, th)
     }
+
+    // If text parser has a complete extraction (sum ≈ total), Gemini-only holdings are unreliable
+    const verifiedSum = textHoldings.filter(h => h.verified).reduce((s, h) => s + h.marketValue, 0)
+    const allSum = textHoldings.reduce((s, h) => s + h.marketValue, 0)
+    // Complete if verified sum matches total, OR if all holdings sum matches total (some may fail qty×price check but have correct marketValue)
+    const textIsComplete = textTotal != null && textTotal > 0
+        && (
+            (verifiedSum > 0 && Math.abs(verifiedSum - textTotal) / textTotal < 0.03) ||
+            (allSum > 0 && Math.abs(allSum - textTotal) / textTotal < 0.03)
+        )
 
     let corrections = 0
     const usedTextIsins = new Set<string>()
@@ -559,6 +604,11 @@ export function mergeTextAndGeminiHoldings(
 
         const th = textMap.get(gh.isin)
         if (!th) {
+            if (textIsComplete) {
+                // Text extraction is complete — Gemini-only holdings are unreliable (hallucinations/duplicates)
+                log('MERGE SKIP', `${gh.isin}: scartato (solo Gemini, testo completo)`)
+                continue
+            }
             // Only in Gemini — keep as-is
             merged.push(gh)
             continue
@@ -579,11 +629,27 @@ export function mergeTextAndGeminiHoldings(
             }
             merged.push({
                 ...gh,
+                ...(th.name ? { name: th.name } : {}),
                 quantity: th.quantity,
                 price: th.price,
                 marketValue: th.marketValue,
                 exchangeRate: th.exchangeRate,
                 _source: 'text_verified',
+            })
+        } else if (textIsComplete && th.marketValue > 0) {
+            // Text extraction is complete (sum ≈ total) — trust text marketValue even if unverified
+            // The text parser's sum matches the PDF total, so individual values are correct
+            if (mktDiff > 0.01) {
+                log('MERGE', `${gh.isin}: marketValue da testo (estrazione completa) | ${gh.marketValue?.toFixed(2) || 0} → ${th.marketValue.toFixed(2)}€`)
+                corrections++
+            }
+            merged.push({
+                ...gh,
+                quantity: th.quantity || gh.quantity,
+                price: th.price || gh.price,
+                marketValue: th.marketValue,
+                exchangeRate: th.exchangeRate !== 1 ? th.exchangeRate : gh.exchangeRate,
+                _source: 'text_unverified',
             })
         } else if (gh.marketValue === 0 || (mktDiff > 0.5 && th.marketValue > 0)) {
             // Gemini has zero or is way off — use text even if unverified (ISIN confirmed by Gemini)
@@ -620,21 +686,23 @@ export function mergeTextAndGeminiHoldings(
         }
     }
 
-    // Add text-only ISINs (Gemini missed them) — only if verified
+    // Add text-only ISINs (Gemini missed them)
+    // When textIsComplete, also add unverified holdings (their marketValue is validated by the total sum)
     for (const th of textHoldings) {
         if (usedTextIsins.has(th.isin)) continue
-        if (!th.verified) continue // Don't add unverified holdings that Gemini didn't see
+        if (!th.verified && !textIsComplete) continue // Don't add unverified holdings unless text extraction is complete
 
-        log('MERGE ADD', `${th.isin}: aggiunto da testo (verificato) | qty=${th.quantity} × price=${th.price.toFixed(4)} = ${th.marketValue.toFixed(2)}€`)
+        const srcLabel = th.verified ? 'verificato' : 'non verificato, estrazione completa'
+        log('MERGE ADD', `${th.isin}: aggiunto da testo (${srcLabel}) | qty=${th.quantity} × price=${th.price.toFixed(4)} = ${th.marketValue.toFixed(2)}€`)
         merged.push({
             isin: th.isin,
-            name: th.isin, // Will be enriched by Phase B if needed
+            name: th.name || th.isin, // Use text-extracted name, fallback to ISIN
             currency: th.currency,
             exchangeRate: th.exchangeRate,
             quantity: th.quantity,
             price: th.price,
             marketValue: th.marketValue,
-            _source: 'text_verified',
+            _source: th.verified ? 'text_verified' : 'text_unverified',
         })
         corrections++
     }
@@ -643,6 +711,91 @@ export function mergeTextAndGeminiHoldings(
 }
 
 // ── Full Pipeline Entry Point ────────────────────────────────────────────────
+
+// ── Metadata Extraction ─────────────────────────────────────────────────────
+// Extract period dates, account number, holder, bank, doc type from PDF text
+
+function extractMetadataFromText(text: string, bankDetected: string | null): TextMetadata | undefined {
+    const meta: TextMetadata = {}
+    let found = false
+
+    // Bank name (already detected)
+    if (bankDetected) { meta.bankName = bankDetected; found = true }
+    // Also detect from BIC codes
+    if (!meta.bankName) {
+        if (/BCITITMM/i.test(text)) { meta.bankName = 'Intesa Sanpaolo'; found = true }
+        else if (/CRPPIT2P/i.test(text)) { meta.bankName = 'Crédit Agricole'; found = true }
+    }
+
+    // Period dates: "PERIODO RENDICONTATO: 1.07.2015 - 31.12.2015" or "PERIODO DAL 30/06/2020 AL 31/12/2020"
+    const periodRe1 = /PERIODO\s+RENDICONTAT[OA]:\s*(\d{1,2})\.(\d{2})\.(\d{4})\s*[-–]\s*(\d{1,2})\.(\d{2})\.(\d{4})/i
+    const periodRe2 = /PERIODO\s+(?:DAL\s+)?(\d{1,2})[.\/](\d{2})[.\/](\d{4})\s*(?:[-–]|AL)\s*(\d{1,2})[.\/](\d{2})[.\/](\d{4})/i
+    const pm1 = text.match(periodRe1) || text.match(periodRe2)
+    if (pm1) {
+        meta.periodStart = `${pm1[1].padStart(2, '0')}/${pm1[2]}/${pm1[3]}`
+        meta.periodEnd = `${pm1[4].padStart(2, '0')}/${pm1[5]}/${pm1[6]}`
+        found = true
+    }
+    // Fallback: "AL DD.MM.YYYY" for period_end
+    if (!meta.periodEnd) {
+        const alMatch = text.match(/\bAL\s+(\d{1,2})\.(\d{2})\.(\d{4})\b/)
+        if (alMatch) {
+            meta.periodEnd = `${alMatch[1].padStart(2, '0')}/${alMatch[2]}/${alMatch[3]}`
+            found = true
+        }
+    }
+
+    // Account number: "DEPOSITO AMMINISTRATO N. 3100/1000811" or "N. 19812/3100/01000811"
+    const accRe = /DEPOSITO\s+AMMINISTRATO\s+N\.\s*([\d/]+)/i
+    const accMatch = text.match(accRe)
+    if (accMatch) { meta.accountNumber = accMatch[1].trim(); found = true }
+
+    // Doc type: RENDICONTO TITOLI = DOSSIER, CONTO CORRENTE = CC
+    if (/RENDICONTO\s+TITOLI/i.test(text) || /DEPOSITO\s+AMMINISTRATO/i.test(text) || /DOSSIER\s+TITOLI/i.test(text)) {
+        meta.accountType = 'DOSSIER'; found = true
+    } else if (/CONTO\s+CORRENTE/i.test(text) || /ESTRATTO\s+CONTO/i.test(text)) {
+        meta.accountType = 'CC'; found = true
+    } else if (/LIQUIDIT[AÀ]/i.test(text)) {
+        meta.accountType = 'LIQUIDITA'; found = true
+    }
+
+    // IBAN
+    const ibanMatch = text.match(/IBAN\s+(IT\d{2}\s*[A-Z0-9\s]{20,30})/i)
+    if (ibanMatch) { meta.settlementAccount = ibanMatch[1].replace(/\s+/g, ''); found = true }
+
+    // Holder: for Intesa, appears after "01 NNNNN" line, may have spaced characters
+    if (meta.bankName === 'Intesa Sanpaolo') {
+        const lines = text.split('\n')
+        for (let i = 0; i < Math.min(lines.length, 10); i++) {
+            if (/^\d{2}\s+\d{4,6}\s*$/.test(lines[i].trim()) && i + 1 < lines.length) {
+                // Next line(s) are the holder name — may be spaced like "F R IG E R I"
+                let raw = lines[i + 1].trim()
+                // Un-space: if >60% of tokens are 1-2 chars, it's spaced text
+                // e.g. "F R IG E R I M A R IA C R IS T IN A" → "FRIGERIMARIACRISTINA"
+                // All inter-char spaces are single, so word boundaries are indistinguishable.
+                // Just collapse all spaces for spaced text — produces a single identifier string.
+                const tokens = raw.split(/\s+/)
+                const shortCount = tokens.filter(t => t.length <= 2).length
+                if (tokens.length >= 3 && shortCount / tokens.length > 0.6) {
+                    raw = tokens.join('')
+                }
+                if (raw.length >= 3 && !/^\d/.test(raw)) {
+                    meta.holder = raw; found = true
+                }
+                break
+            }
+        }
+    }
+
+    // Crédit Agricole holder: "Intestatario: NOME COGNOME" or similar
+    if (!meta.holder) {
+        const holderRe = /(?:Intestatari?o|INTESTATARI?O|Titolare|TITOLARE)[:\s]+([A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s]{3,40})/
+        const hm = text.match(holderRe)
+        if (hm) { meta.holder = hm[1].trim(); found = true }
+    }
+
+    return found ? meta : undefined
+}
 
 /**
  * Complete text-based portfolio extraction.
@@ -656,9 +809,9 @@ export function extractPortfolioFromText(fullText: string): TextPortfolioResult 
     const consistenzaSection = extractConsistenzaSection(fullText)
     const { total, source: totalSource } = extractPortfolioTotal(fullText)
     const holdings = parseConsistenzaHoldings(consistenzaSection)
+    const metadata = extractMetadataFromText(fullText, bankDetected)
 
     const holdingsSum = holdings.reduce((s, h) => s + h.marketValue, 0)
-    const verifiedCount = holdings.filter(h => h.verified).length
 
     return {
         holdings,
@@ -667,6 +820,7 @@ export function extractPortfolioFromText(fullText: string): TextPortfolioResult 
         holdingsSum,
         bankDetected,
         sectionFound: consistenzaSection.length > 50,
+        metadata,
     }
 }
 

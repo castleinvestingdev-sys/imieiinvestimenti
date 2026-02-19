@@ -1072,12 +1072,12 @@ function DashboardContent() {
     const docEnd = new Date(doc.period_end)
     const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
     // Trova il documento immediatamente precedente (stesso conto)
-    // Usa period_end < docEnd (non <= docStart) per gestire periodi con date sovrapposte
+    // Usa period_end <= docStart per gestire periodi sovrapposti (es. Intesa semestrali sfasati 3 mesi)
     const prevDoc = analyses
       .filter((a: any) => a.id !== doc.id && a.account_type === 'DOSSIER'
         && normalizeAcc(a.benchmark_comparison || '') === normAcc
         && a.period_end && a.period_start
-        && new Date(a.period_end) < docEnd)
+        && new Date(a.period_end) <= docStart)
       .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
     if (!prevDoc) { coherenceMap[doc.id] = 'missing'; return }
     // Verifica che il periodo precedente non sia troppo lontano (max 200gg tra period_end)
@@ -1664,7 +1664,7 @@ function DashboardContent() {
                   <div className={styles.bankInfo}>
                     <h3 className={styles.bankName}>{group.bankName}</h3>
                     <div className={styles.bankSubtitle}>
-                      {group.dossiers.length} Dossier Titoli | {group.liquidityAccounts.length} Conti Correnti
+                      {group.dossiers.length} Dossier Titoli ({group.dossiers.reduce((s, d) => s + d.analyses.length, 0)} PDF) | {group.liquidityAccounts.length} Conti Correnti ({group.liquidityAccounts.reduce((s, l) => s + l.analyses.length, 0)} PDF)
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1706,6 +1706,7 @@ function DashboardContent() {
                         <div className={styles.dualLabelInfo}>
                           <span className={styles.dualBadgeDos}>Dossier Titoli</span>
                           {dossier.identifier && dossier.identifier !== 'N/D' && <span className={styles.dualAccNum}>{dossier.identifier}</span>}
+                          <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginLeft: '0.25rem' }}>({dossier.analyses.length} PDF)</span>
                         </div>
                         <button
                           className={styles.dualDeleteBtn}
@@ -1726,6 +1727,7 @@ function DashboardContent() {
                         <div className={styles.dualLabelInfo}>
                           <span className={styles.dualBadgeLiq}>Liquidit&agrave;</span>
                           {liq.identifier && liq.identifier !== 'N/D' && <span className={styles.dualAccNum}>{liq.identifier}</span>}
+                          <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginLeft: '0.25rem' }}>({liq.analyses.length} PDF)</span>
                         </div>
                         <button
                           className={styles.dualDeleteBtn}
@@ -2420,7 +2422,7 @@ function DashboardContent() {
                       a.account_type === 'DOSSIER' &&
                       normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
                       a.period_end && a.period_start &&
-                      new Date(a.period_end) < new Date(inspectorData.period_end)
+                      new Date(a.period_end) <= new Date(inspectorData.period_start)
                     )
                     .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
                   if (!candidate) return null
@@ -2473,58 +2475,96 @@ function DashboardContent() {
                   )
                 }
 
-                // Portafoglio iniziale calcolato del periodo corrente (finale - acquisti + vendite)
-                const movDeltas: Record<string, { buys: number; sells: number }> = {}
-                movements.forEach((m: any) => {
-                  const isin = m.isin || 'UNKNOWN'
-                  if (!movDeltas[isin]) movDeltas[isin] = { buys: 0, sells: 0 }
-                  if (m.operationType === 'Acquisto') movDeltas[isin].buys += m.quantity || 0
-                  else if (m.operationType === 'Vendita') movDeltas[isin].sells += m.quantity || 0
-                })
-                const calcInitial: Record<string, { name: string; qty: number; value: number }> = {}
-                ;(inspectorData.holdings || []).forEach((h: any) => {
-                  const isin = h.isin || 'UNKNOWN'
-                  const delta = movDeltas[isin] || { buys: 0, sells: 0 }
-                  const initQty = (h.quantity || 0) - delta.buys + delta.sells
-                  if (initQty !== 0 || prevHoldings[isin]) {
-                    calcInitial[isin] = { name: h.name || h.description || isin, qty: initQty, value: 0 }
-                  }
-                })
-                // Titoli venduti completamente (in prevDoc ma non nel finale corrente)
-                Object.entries(movDeltas).forEach(([isin, delta]) => {
-                  if (!calcInitial[isin] && (prevHoldings[isin] || delta.sells > 0)) {
-                    const initQty = 0 - delta.buys + delta.sells
-                    if (initQty !== 0) {
-                      calcInitial[isin] = { name: prevHoldings[isin]?.name || isin, qty: initQty, value: 0 }
-                    }
-                  }
-                })
-
-                // Confronto per ISIN
-                const allIsins = [...new Set([...Object.keys(prevHoldings), ...Object.keys(calcInitial)])]
-                type CompRow = { isin: string; name: string; prevQty: number; prevVal: number; calcQty: number; qtyDiff: number; match: boolean }
-                const rows: CompRow[] = allIsins.map(isin => {
-                  const prev = prevHoldings[isin] || { name: '', qty: 0, value: 0 }
-                  const calc = calcInitial[isin] || { name: '', qty: 0, value: 0 }
-                  const qtyDiff = calc.qty - prev.qty
-                  return {
-                    isin,
-                    name: prev.name || calc.name,
-                    prevQty: prev.qty,
-                    prevVal: prev.value,
-                    calcQty: calc.qty,
-                    qtyDiff,
-                    match: Math.abs(qtyDiff) < 0.0001
-                  }
-                })
-                // Separate corporate action ISINs and full disappearance/appearance from real mismatches
-                const currHoldingsI: Record<string, number> = {}
-                ;(inspectorData.holdings || []).forEach((h: any) => { if (h.isin) currHoldingsI[h.isin] = h.quantity || 0 })
                 const isIncompleteI = inspectorData.costs_breakdown?.incompleteMovements === true
+
+                // For Intesa (incompleteMovements): direct comparison prev vs current, no movement adjustment
+                // For normal: movement-based calculation of initial portfolio
+                const movDeltas: Record<string, { buys: number; sells: number }> = {}
+                if (!isIncompleteI) {
+                  movements.forEach((m: any) => {
+                    const isin = m.isin || 'UNKNOWN'
+                    if (!movDeltas[isin]) movDeltas[isin] = { buys: 0, sells: 0 }
+                    if (m.operationType === 'Acquisto') movDeltas[isin].buys += m.quantity || 0
+                    else if (m.operationType === 'Vendita') movDeltas[isin].sells += m.quantity || 0
+                  })
+                }
+
+                // Current holdings by ISIN (deduplicated)
+                const currHoldingsI: Record<string, number> = {}
+                ;(inspectorData.holdings || []).forEach((h: any) => { if (h.isin) currHoldingsI[h.isin] = (currHoldingsI[h.isin] || 0) + (h.quantity || 0) })
+
+                let rows: { isin: string; name: string; prevQty: number; prevVal: number; calcQty: number; qtyDiff: number; match: boolean }[]
+                type CompRow = typeof rows[number]
+
+                if (isIncompleteI) {
+                  // Intesa: movements don't have start/end quantities, so we can't calculate initial portfolio from movements.
+                  // Compare prev final holdings vs current final holdings directly.
+                  // Use prevHoldings ISINs as the base (= initial portfolio of current period).
+                  const prevIsins = Object.keys(prevHoldings)
+                  rows = prevIsins.map(isin => {
+                    const prev = prevHoldings[isin]
+                    const currQty = currHoldingsI[isin] || 0
+                    const currName = (inspectorData.holdings || []).find((h: any) => h.isin === isin)?.name || ''
+                    const qtyDiff = currQty - prev.qty
+                    return {
+                      isin,
+                      name: prev.name || currName || isin,
+                      prevQty: prev.qty,
+                      prevVal: prev.value,
+                      calcQty: currQty,
+                      qtyDiff,
+                      match: Math.abs(qtyDiff) < 0.0001
+                    }
+                  })
+                } else {
+                  const calcInitial: Record<string, { name: string; qty: number; value: number }> = {}
+                  ;(inspectorData.holdings || []).forEach((h: any) => {
+                    const isin = h.isin || 'UNKNOWN'
+                    const delta = movDeltas[isin] || { buys: 0, sells: 0 }
+                    const initQty = (h.quantity || 0) - delta.buys + delta.sells
+                    if (initQty !== 0 || prevHoldings[isin]) {
+                      calcInitial[isin] = { name: h.name || h.description || isin, qty: initQty, value: 0 }
+                    }
+                  })
+                  // Titoli venduti completamente (in prevDoc ma non nel finale corrente)
+                  Object.entries(movDeltas).forEach(([isin, delta]) => {
+                    if (!calcInitial[isin] && (prevHoldings[isin] || delta.sells > 0)) {
+                      const initQty = 0 - delta.buys + delta.sells
+                      if (initQty !== 0) {
+                        calcInitial[isin] = { name: prevHoldings[isin]?.name || isin, qty: initQty, value: 0 }
+                      }
+                    }
+                  })
+                  const allIsins = [...new Set([...Object.keys(prevHoldings), ...Object.keys(calcInitial)])]
+                  rows = allIsins.map(isin => {
+                    const prev = prevHoldings[isin] || { name: '', qty: 0, value: 0 }
+                    const calc = calcInitial[isin] || { name: '', qty: 0, value: 0 }
+                    const qtyDiff = calc.qty - prev.qty
+                    return {
+                      isin,
+                      name: prev.name || calc.name,
+                      prevQty: prev.qty,
+                      prevVal: prev.value,
+                      calcQty: calc.qty,
+                      qtyDiff,
+                      match: Math.abs(qtyDiff) < 0.0001
+                    }
+                  })
+                }
+
+                // For Intesa: count ISINs present in both prev and current for accurate "stessi in entrambi"
+                const inBothCount = isIncompleteI ? rows.filter(r => prevHoldings[r.isin] && currHoldingsI[r.isin]).length : 0
+                const matchingInBoth = isIncompleteI ? rows.filter(r => r.match && prevHoldings[r.isin] && currHoldingsI[r.isin]).length : 0
+
+                // Separate corporate action ISINs and full disappearance/appearance from real mismatches
                 const allMismatches = rows.filter(r => {
                   if (r.match) return false
-                  // Intesa incomplete movements: forgive all mismatches
-                  if (isIncompleteI) return false
+                  if (isIncompleteI) {
+                    // Intesa: only flag as mismatch if ISIN exists in BOTH prev and current with different qty
+                    // New/disappeared ISINs are expected (no movement data to verify)
+                    if (!prevHoldings[r.isin] || !currHoldingsI[r.isin]) return false
+                    return true
+                  }
                   // Skip holdings that fully disappeared or appeared without any movements
                   const mov = movDeltas[r.isin]
                   const hasNoNetMovement = !mov || (mov.buys === 0 && mov.sells === 0) || (mov.buys === mov.sells)
@@ -2554,9 +2594,11 @@ function DashboardContent() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                       <div style={{ fontWeight: 700, fontSize: '0.8rem', color: allOk ? '#047857' : '#b91c1c' }}>
                         {allOk
-                          ? (caMismatches.length > 0
-                            ? `✅ Portafoglio Iniziale verificato (${caMismatches.length} corporate action)`
-                            : '✅ Portafoglio Iniziale verificato')
+                          ? (isIncompleteI
+                            ? '✅ Portafoglio verificato (movimenti parziali)'
+                            : caMismatches.length > 0
+                              ? `✅ Portafoglio Iniziale verificato (${caMismatches.length} corporate action)`
+                              : '✅ Portafoglio Iniziale verificato')
                           : `❌ ${realMismatches.length} strument${realMismatches.length === 1 ? 'o' : 'i'} non quadra${realMismatches.length === 1 ? '' : 'no'}`}
                       </div>
                       <span style={{ fontSize: '0.6rem', color: '#94a3b8' }}>
@@ -2566,10 +2608,21 @@ function DashboardContent() {
 
                     {/* Riepilogo quote */}
                     <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.7rem', marginBottom: '0.5rem', color: '#475569', flexWrap: 'wrap' }}>
-                      <span>Strumenti confrontati: <strong>{rows.length}</strong></span>
-                      <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.length - allMismatches.length}</strong></span>
-                      {caMismatches.length > 0 && <span>Corporate Action: <strong style={{ color: '#d97706' }}>{caMismatches.length}</strong></span>}
-                      {realMismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{realMismatches.length}</strong></span>}
+                      {isIncompleteI ? (
+                        <>
+                          <span>Finale Prec.: <strong>{rows.length}</strong></span>
+                          <span>Presenti in entrambi: <strong>{inBothCount}</strong></span>
+                          <span>Stessa quantità: <strong style={{ color: '#047857' }}>{matchingInBoth}</strong></span>
+                          {allMismatches.length > 0 && <span>Quantità diversa: <strong style={{ color: '#b91c1c' }}>{allMismatches.length}</strong></span>}
+                        </>
+                      ) : (
+                        <>
+                          <span>Strumenti confrontati: <strong>{rows.length}</strong></span>
+                          <span>Corrispondono: <strong style={{ color: '#047857' }}>{rows.length - allMismatches.length}</strong></span>
+                          {caMismatches.length > 0 && <span>Corporate Action: <strong style={{ color: '#d97706' }}>{caMismatches.length}</strong></span>}
+                          {realMismatches.length > 0 && <span>Non quadrano: <strong style={{ color: '#b91c1c' }}>{realMismatches.length}</strong></span>}
+                        </>
+                      )}
                     </div>
 
                     {/* Corporate Action table (yellow) */}
@@ -2633,7 +2686,9 @@ function DashboardContent() {
 
                     {allOk && caMismatches.length === 0 && (
                       <div style={{ fontSize: '0.65rem', color: '#047857' }}>
-                        Tutti i {rows.length} strumenti hanno le stesse quantit&agrave; nel ptf. finale precedente e nel ptf. iniziale calcolato.
+                        {isIncompleteI
+                          ? `${rows.filter(r => r.match).length} strumenti con stesse quantità in entrambi i periodi. Movimenti parziali — verifica completa non possibile.`
+                          : `Tutti i ${rows.length} strumenti hanno le stesse quantità nel ptf. finale precedente e nel ptf. iniziale calcolato.`}
                       </div>
                     )}
                   </div>
@@ -2701,7 +2756,7 @@ function DashboardContent() {
                 <div className={styles.inspectorSection}>
                   {/* Tab Navigation */}
                   {(() => {
-                    // Calculate initial portfolio count
+                    // Calculate initial portfolio count — must match "Strumenti confrontati" in coherence section
                     const movements = inspectorData.costs_breakdown?.securityMovements || [];
                     const finalHoldings = inspectorData.holdings || [];
                     const movementDeltas: Record<string, { buys: number; sells: number }> = {};
@@ -2711,21 +2766,68 @@ function DashboardContent() {
                       if (m.operationType === 'Acquisto') movementDeltas[isin].buys += m.quantity || 0;
                       else if (m.operationType === 'Vendita') movementDeltas[isin].sells += m.quantity || 0;
                     });
-                    let initialCount = 0;
-                    const processedIsins = new Set<string>();
-                    finalHoldings.forEach((h: any) => {
-                      const isin = h.isin || 'UNKNOWN';
-                      processedIsins.add(isin);
-                      const delta = movementDeltas[isin] || { buys: 0, sells: 0 };
-                      const initialQty = (h.quantity || 0) - delta.buys + delta.sells;
-                      if (initialQty !== 0) initialCount++;
-                    });
-                    Object.entries(movementDeltas).forEach(([isin, delta]) => {
-                      if (!processedIsins.has(isin) && isin !== 'UNKNOWN') {
-                        const initialQty = 0 - delta.buys + delta.sells;
-                        if (initialQty !== 0) initialCount++;
+
+                    // Find prevDoc to compute coherence-consistent count
+                    const badgeAccNorm = inspectorData.account_type === 'DOSSIER' ? normalizeAcc(inspectorData.benchmark_comparison || '') : ''
+                    const badgePrevDoc = (() => {
+                      if (!badgeAccNorm || !inspectorData.period_start || !inspectorData.period_end) return null
+                      const candidate = analyses
+                        .filter((a: any) =>
+                          a.id !== inspectorData.id &&
+                          a.account_type === inspectorData.account_type &&
+                          normalizeAcc(a.benchmark_comparison || '') === badgeAccNorm &&
+                          a.period_end && a.period_start &&
+                          new Date(a.period_end) <= new Date(inspectorData.period_start))
+                        .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
+                      if (!candidate) return null
+                      const docEnd = new Date(inspectorData.period_end)
+                      const prevEnd = new Date(candidate.period_end!)
+                      const endGapDays = (docEnd.getTime() - prevEnd.getTime()) / 86400000
+                      if (endGapDays > 200 || endGapDays <= 0) return null
+                      const docStart = new Date(inspectorData.period_start)
+                      const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
+                      const getQ = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
+                      const dQ = getQ(docEnd), pQ = getQ(prevEnd)
+                      if (docDays < 45) {
+                        const eM = docEnd.getMonth() === 0 ? 11 : docEnd.getMonth() - 1
+                        const eY = docEnd.getMonth() === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+                        if (prevEnd.getMonth() !== eM || prevEnd.getFullYear() !== eY) return null
+                      } else if (docDays > 150) {
+                        const dH = docEnd.getMonth() < 6 ? 0 : 1, pH = prevEnd.getMonth() < 6 ? 0 : 1
+                        const expH = dH === 0 ? 1 : 0, expHY = dH === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
+                        if (pH !== expH || prevEnd.getFullYear() !== expHY) return null
+                      } else {
+                        const eQ = dQ.q === 0 ? 3 : dQ.q - 1
+                        const eY = dQ.q === 0 ? dQ.y - 1 : dQ.y
+                        if (pQ.q !== eQ || pQ.y !== eY) return null
                       }
-                    });
+                      return candidate
+                    })()
+
+                    const badgeIncomplete = inspectorData.costs_breakdown?.incompleteMovements === true;
+                    let initialCount = 0;
+                    if (badgePrevDoc) {
+                      // When previous doc exists, initial portfolio = previous doc's final holdings
+                      // This must match what the "Portafoglio Iniziale" tab actually shows
+                      // and must equal the "Portafoglio Finale" badge of the previous period
+                      initialCount = new Set((badgePrevDoc.holdings || []).map((h: any) => h.isin || 'UNKNOWN')).size;
+                    } else {
+                      // No prevDoc: count holdings with non-zero initial qty
+                      const processedIsins = new Set<string>();
+                      finalHoldings.forEach((h: any) => {
+                        const isin = h.isin || 'UNKNOWN';
+                        processedIsins.add(isin);
+                        const delta = movementDeltas[isin] || { buys: 0, sells: 0 };
+                        const initialQty = (h.quantity || 0) - delta.buys + delta.sells;
+                        if (initialQty !== 0) initialCount++;
+                      });
+                      Object.entries(movementDeltas).forEach(([isin, delta]) => {
+                        if (!processedIsins.has(isin) && isin !== 'UNKNOWN') {
+                          const initialQty = 0 - delta.buys + delta.sells;
+                          if (initialQty !== 0) initialCount++;
+                        }
+                      });
+                    }
 
                     return (
                   <div style={{ display: 'flex', gap: '0', marginBottom: '1rem', borderBottom: '2px solid #e2e8f0' }}>
@@ -2799,7 +2901,7 @@ function DashboardContent() {
                         borderRadius: '10px',
                         background: '#10b981',
                         color: '#fff'
-                      }}>{finalHoldings.length}</span>
+                      }}>{new Set(finalHoldings.map((h: any) => h.isin || 'UNKNOWN')).size}</span>
                     </button>
                   </div>
                     );
@@ -2818,7 +2920,7 @@ function DashboardContent() {
                           a.account_type === inspectorData.account_type &&
                           normalizeAcc(a.benchmark_comparison || '') === currentAccNorm &&
                           a.period_end && a.period_start &&
-                          new Date(a.period_end) < new Date(inspectorData.period_end))
+                          new Date(a.period_end) <= new Date(inspectorData.period_start))
                         .sort((a, b) => new Date(b.period_end!).getTime() - new Date(a.period_end!).getTime())[0]
                       if (!candidate) return null
                       const docEnd = new Date(inspectorData.period_end)

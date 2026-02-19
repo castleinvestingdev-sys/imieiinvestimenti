@@ -2723,10 +2723,61 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
         logProgress('✅ ANALISI COMPLETATA', fileName)
         console.log(`📋 Tipo: ${parsed.type} | 🏦 Banca: ${parsed.info?.bankName} | 💳 Conto: ${parsed.info?.accountNumber}`)
 
+        // === TEXT METADATA OVERRIDE: Replace Gemini metadata with deterministic text-extracted values ===
+        if (textParserResult?.metadata) {
+            const tm = textParserResult.metadata
+            if (!parsed.info) parsed.info = {}
+            if (tm.bankName) {
+                if (parsed.info.bankName !== tm.bankName) logProgress('TEXT META', `Banca: ${parsed.info.bankName} → ${tm.bankName}`)
+                parsed.info.bankName = tm.bankName
+            }
+            if (tm.periodStart) {
+                // Convert DD/MM/YYYY to YYYY-MM-DD for consistency with Gemini format
+                const [d, m, y] = tm.periodStart.split('/')
+                const isoStart = `${y}-${m}-${d}`
+                if (parsed.info.period_start !== isoStart) logProgress('TEXT META', `period_start: ${parsed.info.period_start} → ${isoStart}`)
+                parsed.info.period_start = isoStart
+            }
+            if (tm.periodEnd) {
+                const [d, m, y] = tm.periodEnd.split('/')
+                const isoEnd = `${y}-${m}-${d}`
+                if (parsed.info.period_end !== isoEnd) logProgress('TEXT META', `period_end: ${parsed.info.period_end} → ${isoEnd}`)
+                parsed.info.period_end = isoEnd
+            }
+            if (tm.accountNumber) {
+                if (parsed.info.accountNumber !== tm.accountNumber) logProgress('TEXT META', `Conto: ${parsed.info.accountNumber} → ${tm.accountNumber}`)
+                parsed.info.accountNumber = tm.accountNumber
+            }
+            if (tm.holder && tm.holder.includes(' ')) {
+                // Only override Gemini's holder if text parser has proper spacing
+                // Collapsed names like "FRIGERIMARIACRISTINA" are worse than Gemini's "FRIGERI MARIA CRISTINA"
+                parsed.info.holder = tm.holder
+            }
+            if (tm.accountType && !parsed.type) {
+                parsed.type = tm.accountType
+            }
+            if (tm.settlementAccount) {
+                parsed.info.settlementAccount = tm.settlementAccount
+            }
+        }
+
+        // Track if text parser provided a reliable period_start
+        // Only trust text period_start for longer periods (semiannual/annual). For Intesa, the PDF text
+        // shows quarterly "PERIODO RENDICONTATO" dates but the actual document is semiannual (sfasati 3 mesi).
+        // Short text periods (< 120 days) likely need frequency-based correction.
+        let textParserPeriodStartReliable = false
+        if (textParserResult?.metadata?.periodStart && parsed.info?.period_end) {
+            const [td, tm, ty] = textParserResult.metadata.periodStart.split('/')
+            const textStart = new Date(`${ty}-${tm}-${td}`)
+            const textDays = (new Date(parsed.info.period_end).getTime() - textStart.getTime()) / 86400000
+            textParserPeriodStartReliable = textDays >= 120 // trust semiannual/annual, not quarterly
+        }
+
         // === LAYER 1: DOSSIER period_start computed from detected frequency + period_end ===
         // For DOSSIER: Gemini's period_start is unreliable. We determine frequency from multiple
         // signals (movement dates, Gemini frequency, period_start hint) and compute period_start ourselves.
-        if (isDossier && parsed.info?.period_end) {
+        // SKIP if text parser already provided a reliable period_start (deterministic > heuristic)
+        if (isDossier && parsed.info?.period_end && !textParserPeriodStartReliable) {
             const detectedFreq = determineDossierFrequency(parsed)
             if (detectedFreq) {
                 const freqMonths: Record<string, number> = { monthly: 1, quarterly: 3, semiannual: 6, annual: 12 }
@@ -2749,7 +2800,8 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
 
         // === LAYER 3: Fallback for non-standard periods (LIQUIDITY or missing frequency) ===
         // If after Layer 1 the period is still non-standard, normalize to closest standard
-        if (parsed.info?.period_start && parsed.info?.period_end) {
+        // SKIP if text parser provided period_start (deterministic > heuristic)
+        if (parsed.info?.period_start && parsed.info?.period_end && !textParserPeriodStartReliable) {
             const pEnd = new Date(parsed.info.period_end)
             const diffDays = Math.round((pEnd.getTime() - new Date(parsed.info.period_start).getTime()) / (1000 * 60 * 60 * 24))
 
@@ -2783,7 +2835,8 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                 const { merged, corrections } = mergeTextAndGeminiHoldings(
                     textParserResult.holdings,
                     parsed.finalPortfolio || [],
-                    logProgress
+                    logProgress,
+                    textPortfolioTotal
                 )
                 if (corrections > 0) {
                     logProgress('TEXT MERGE', `${corrections} correzioni applicate dal parser deterministico`)
@@ -2879,24 +2932,51 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
             }
 
             // === POST-PHASE-A TEXT MERGE ===
-            // If Phase A retry replaced finalPortfolio, re-apply text merge to fix new Gemini errors
+            // Always re-apply text merge: even with 0 corrections, merge may remove Gemini-only holdings
             if (textParserResult && textParserResult.holdings.length > 0) {
                 try {
                     const { merged, corrections } = mergeTextAndGeminiHoldings(
                         textParserResult.holdings,
                         parsed.finalPortfolio || [],
-                        logProgress
+                        logProgress,
+                        textPortfolioTotal
                     )
-                    if (corrections > 0) {
-                        logProgress('POST-PHASE-A TEXT MERGE', `${corrections} correzioni dopo Phase A retry`)
-                        parsed.finalPortfolio = merged
+                    const removedCount = (parsed.finalPortfolio || []).length - merged.length
+                    if (corrections > 0 || removedCount > 0) {
+                        logProgress('POST-PHASE-A TEXT MERGE', `${corrections} correzioni, ${removedCount} rimossi dopo Phase A`)
                     }
+                    parsed.finalPortfolio = merged
                 } catch (postMergeErr: any) {
                     logProgress('POST-PHASE-A MERGE ERROR', postMergeErr.message)
                 }
             }
 
             // === FINAL PORTFOLIO TOTAL CHECK ===
+            // If text extraction is complete (sum ≈ total), strip any non-text holdings (Gemini hallucinations)
+            if (textPortfolioTotal > 0 && textParserResult && textParserResult.holdings.length > 0) {
+                const textIsins = new Set(textParserResult.holdings.map(h => h.isin))
+                const allHoldingsSum = textParserResult.holdings.reduce((s, h) => s + h.marketValue, 0)
+                const verifiedSum = textParserResult.holdings.filter(h => h.verified).reduce((s, h) => s + h.marketValue, 0)
+                const textExtractionComplete = (
+                    (verifiedSum > 0 && Math.abs(verifiedSum - textPortfolioTotal) / textPortfolioTotal < 0.03) ||
+                    (allHoldingsSum > 0 && Math.abs(allHoldingsSum - textPortfolioTotal) / textPortfolioTotal < 0.03)
+                )
+
+                if (textExtractionComplete) {
+                    const before = (parsed.finalPortfolio || []).length
+                    parsed.finalPortfolio = (parsed.finalPortfolio || []).filter((h: any) => {
+                        if (!h.isin) return true
+                        if (textIsins.has(h.isin)) return true
+                        logProgress('STRIP GEMINI', `${h.isin}: rimosso (non nel text parser, estrazione completa) | mv=${(h.marketValue || 0).toFixed(2)}€`)
+                        return false
+                    })
+                    const removed = before - (parsed.finalPortfolio || []).length
+                    if (removed > 0) {
+                        logProgress('TEXT GUARD', `${removed} holdings Gemini-only rimossi (text extraction completa)`)
+                    }
+                }
+            }
+
             // Compare sum of holdings against text-extracted total — last chance to catch errors
             if (textPortfolioTotal > 0) {
                 const finalSum = (parsed.finalPortfolio || []).reduce((s: number, h: any) => s + (h.marketValue || 0), 0)
@@ -2937,7 +3017,8 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
             // If this account already has docs, use their frequency to validate/correct period_start.
             // This fixes Gemini errors where period_start is read from the wrong place in the PDF.
             // period_end is always reliable; period_start is recomputed if it doesn't match account frequency.
-            if (sameAccountDocs.length >= 2) {
+            // SKIP if text parser provided reliable period_start (deterministic > heuristic)
+            if (sameAccountDocs.length >= 2 && !textParserPeriodStartReliable) {
                 const durations = sameAccountDocs.map(a =>
                     a.period_start && a.period_end
                         ? Math.round((new Date(a.period_end).getTime() - new Date(a.period_start).getTime()) / 86400000)
@@ -4075,6 +4156,8 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             dividends: parsed.dividends || [],
             costs_breakdown: {
                 ...(parsed.summary || {}),
+                // Override Gemini's total with text parser total (more accurate for non-scanned PDFs)
+                ...(textPortfolioTotal > 0 ? { portfolio_total_extracted: textPortfolioTotal } : {}),
                 scalar_data: parsed.scalar_data || {},
                 securityMovements: normalizedSecurityMovements,
                 // Map scalar_data fields to dashboard-expected keys
@@ -4150,6 +4233,9 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             || guardText.includes('DOSSIER ESTINTO')
             || (textPortfolioTotal === 0 && textParserResult?.sectionFound && textParserResult.holdings.length === 0)
             || hasMovementsButNoHoldings
+            // Empty dossier with very short text (no CONSISTENZA section, no total keyword found)
+            // e.g. Intesa closed accounts with only header page + boilerplate
+            || (textPortfolioTotal === 0 && originalPdfText.length < 2000 && textParserResult?.holdings.length === 0 && textParserResult?.totalSource === 'none')
         if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length === 0 && !isConfirmedEmptyDossier) {
             logProgress('❌ ESTRAZIONE FALLITA', 'DOSSIER senza holdings estratti — rifiutato')
             return NextResponse.json({

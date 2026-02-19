@@ -270,6 +270,50 @@ async function cleanupAll() {
     console.log(`✅ ${result.totalSoftDeleted || 0} soft-deleted, ${result.totalCleaned || 0} stripped\n`)
 }
 
+// Bank-name mapping for DB queries (bankKey → possible bank_name values in DB)
+const BANK_DB_NAMES: Record<string, string[]> = {
+    INTESA: ['Intesa Sanpaolo', 'Banca Intesa'],
+    CA115: ['Crédit Agricole', 'Credit Agricole'],
+    CA591: ['Crédit Agricole', 'Credit Agricole'],
+    CA990: ['Crédit Agricole', 'Credit Agricole'],
+    GENERALI: ['Banca Generali'],
+    GEN_CONDORELLI_DT: ['Banca Generali'],
+    GEN_CONDORELLI_CC: ['Banca Generali'],
+    GEN_ZANACCA_DT: ['Banca Generali'],
+    GEN_ZANACCA_CC: ['Banca Generali'],
+    GEN_UGHETTI_DT: ['Banca Generali'],
+    GEN_UGHETTI_LIQ: ['Banca Generali'],
+}
+
+async function cleanupBank(bankKey: string) {
+    const dbNames = BANK_DB_NAMES[bankKey]
+    if (!dbNames) {
+        console.log(`⚠️  No DB name mapping for ${bankKey}, skipping bank-specific cleanup`)
+        return
+    }
+    console.log(`🗑️  Pulizia ${bankKey} dal database...`)
+    let totalDeleted = 0
+    for (const bankName of dbNames) {
+        while (true) {
+            const { data } = await supabase
+                .from('analyses')
+                .select('id')
+                .eq('user_id', userId)
+                .eq('bank_name', bankName)
+                .is('deleted_at', null)
+                .limit(200)
+            if (!data || data.length === 0) break
+            const now = new Date().toISOString()
+            await supabase
+                .from('analyses')
+                .update({ deleted_at: now })
+                .in('id', data.map(a => a.id))
+            totalDeleted += data.length
+        }
+    }
+    console.log(`✅ ${totalDeleted} ${bankKey} records soft-deleted\n`)
+}
+
 async function testBank(bankKey: string, bank: typeof BANKS[string]) {
     console.log(`\n${'='.repeat(70)}`)
     console.log(`🏦 ${bank.label} (${bankKey})`)
@@ -341,10 +385,14 @@ async function main() {
 
     await init()
 
-    // Always clean first — soft-delete active rows + strip JSONB from old rows to free DB space
-    await cleanupAll()
-
     const bankKeys = bankArg === 'ALL' || !bankArg ? Object.keys(BANKS) : [bankArg]
+
+    // Bank-specific cleanup when testing a single bank; full cleanup for ALL
+    if (bankArg && bankArg !== 'ALL') {
+        for (const key of bankKeys) await cleanupBank(key)
+    } else {
+        await cleanupAll()
+    }
     const results: Record<string, boolean> = {}
 
     for (const key of bankKeys) {
