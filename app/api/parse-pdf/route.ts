@@ -10,8 +10,8 @@ import {
     type TextPortfolioResult,
 } from '@/lib/pdf-text-parser'
 
-// Allow up to 5 minutes for Gemini PDF processing
-export const maxDuration = 300
+// Allow up to 10 minutes for Gemini PDF processing (CC/Liquidità PDFs can be large)
+export const maxDuration = 600
 
 // Module-level cache for Gemini system instruction (persists across warm invocations)
 let cachedContentName: string | null = null
@@ -884,7 +884,7 @@ function callGemini(
     model: string,
     systemPrompt: string,
     pdfBase64: string,
-    options?: { thinkingLevel?: string; jsonSchema?: any; cachedContent?: string; supplementaryText?: string }
+    options?: { thinkingLevel?: string; jsonSchema?: any; cachedContent?: string; supplementaryText?: string; timeoutMs?: number }
 ): Promise<string> {
     return new Promise((resolve, reject) => {
         const thinkingLevel = options?.thinkingLevel || 'low'
@@ -969,10 +969,11 @@ function callGemini(
             })
         })
 
-        // 120s total timeout — prevents infinite hang, leaves time for retries within maxDuration=300s
+        // Per-call timeout — prevents infinite hang, leaves time for retries within maxDuration
+        const callTimeoutMs = options?.timeoutMs || 120000
         const totalTimeout = setTimeout(() => {
-            req.destroy(new Error('Gemini request timeout after 120s'))
-        }, 120000)
+            req.destroy(new Error(`Gemini request timeout after ${callTimeoutMs / 1000}s`))
+        }, callTimeoutMs)
 
         req.on('error', (e: Error) => { clearTimeout(totalTimeout); reject(e) })
         req.write(requestBody)
@@ -1865,6 +1866,12 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         let currentThinkingLevel = isDossierFromText ? (textParserHasGoodResults ? 'low' : 'medium') : 'low'
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            // Skip retry if time budget exhausted (keep 60s for post-processing)
+            const retryElapsed = (Date.now() - startTime) / 1000
+            if (attempt > 1 && retryElapsed >= 200) {
+                logProgress('RETRY SKIP', `Budget tempo esaurito (${retryElapsed.toFixed(0)}s), salto tentativo ${attempt}`)
+                break
+            }
             try {
                 logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName} (thinking: ${currentThinkingLevel}, dossier: ${isDossierFromText})`)
 
@@ -1899,11 +1906,17 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     ? '\n\n' + supplementaryParts.join('\n\n')
                     : undefined
 
+                // Dynamic timeout: cap per-call at 180s, but respect overall 280s budget
+                const elapsedSoFar = (Date.now() - startTime) / 1000
+                const remainingBudget = Math.max(30000, (280 - elapsedSoFar) * 1000)
+                const callTimeout = Math.min(180000, remainingBudget)
+
                 resText = await callGemini(GEMINI_API_KEY!, modelName, systemPrompt, base64Data, {
                     thinkingLevel: currentThinkingLevel,
                     jsonSchema: PARSE_PDF_JSON_SCHEMA,
                     cachedContent: cachedContent || undefined,
-                    supplementaryText
+                    supplementaryText,
+                    timeoutMs: callTimeout,
                 })
                 logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da Gemini`)
 
@@ -2017,10 +2030,17 @@ Restituisci SOLO il JSON, nessun altro testo.`;
               (validationInitial !== 0 && validationFinal !== 0 && validationError > 5) ||
               (validationInitial === 0 && validationFinal === 0 && validationMovements.length > 0)
 
-        if (needsValidationRetry && currentThinkingLevel === 'low') {
+        // Time budget check: skip validation retry if we've already used > 160s
+        // (validation retry needs up to 120s, total must stay under 280s)
+        const elapsedBeforeValidation = (Date.now() - startTime) / 1000
+        if (needsValidationRetry && elapsedBeforeValidation >= 160) {
+            logProgress('VALIDATION RETRY SKIP', `Budget tempo esaurito (${elapsedBeforeValidation.toFixed(0)}s), salto validation retry`)
+        }
+
+        if (needsValidationRetry && currentThinkingLevel === 'low' && elapsedBeforeValidation < 160) {
             logProgress('VALIDATION RETRY',
                 `Errore matematico: ${validationError.toFixed(2)}€ (atteso: ${validationExpected.toFixed(2)}, ottenuto: ${validationSum.toFixed(2)}). ` +
-                `Retry con thinking: high`
+                `Retry con thinking: medium (${elapsedBeforeValidation.toFixed(0)}s trascorsi)`
             )
 
             try {
@@ -2029,9 +2049,12 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     `La somma dei movimenti (${validationSum.toFixed(2)}) non corrisponde a Saldo Finale (${validationFinal.toFixed(2)}) - Saldo Iniziale (${validationInitial.toFixed(2)}) = ${validationExpected.toFixed(2)}. ` +
                     `Verifica attentamente i segni di ogni movimento e assicurati di estrarre TUTTI i movimenti.` : '')
 
+                // Dynamic timeout: cap at remaining budget (max 280s total)
+                const retryTimeoutMs = Math.max(30000, (280 - elapsedBeforeValidation) * 1000)
                 const retryText = await callGemini(GEMINI_API_KEY!, modelName, retryPrompt, base64Data, {
                     thinkingLevel: 'medium',
-                    jsonSchema: PARSE_PDF_JSON_SCHEMA
+                    jsonSchema: PARSE_PDF_JSON_SCHEMA,
+                    timeoutMs: Math.min(120000, retryTimeoutMs),
                 })
 
                 if (retryText && retryText.length > 10) {
@@ -2109,9 +2132,10 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 i.includes('Errore matematico') || i.includes('Somma holdings')
             ).length + cfv.holdingIssues.filter(h => h.issue.includes('≠ marketValue')).length
 
-            if (significantIssues > 0) {
+            const elapsedBeforeSV = (Date.now() - startTime) / 1000
+            if (significantIssues > 0 && elapsedBeforeSV < 160) {
                 logProgress('SELF-VERIFICATION',
-                    `${significantIssues} problemi significativi, invio JSON + PDF a Gemini per verifica`
+                    `${significantIssues} problemi significativi, invio JSON + PDF a Gemini per verifica (${elapsedBeforeSV.toFixed(0)}s trascorsi)`
                 )
 
                 const issuesSummary = [
@@ -2137,9 +2161,11 @@ ISTRUZIONI:
 Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
 
                 try {
+                    const svTimeoutMs = Math.max(30000, (280 - elapsedBeforeSV) * 1000)
                     const verifyText = await callGemini(GEMINI_API_KEY!, modelName, verifyPrompt, base64Data, {
                         thinkingLevel: 'medium',
-                        jsonSchema: PARSE_PDF_JSON_SCHEMA
+                        jsonSchema: PARSE_PDF_JSON_SCHEMA,
+                        timeoutMs: Math.min(120000, svTimeoutMs),
                     })
 
                     if (verifyText && verifyText.length > 10) {
@@ -2176,6 +2202,8 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
                 } catch (verifyErr: any) {
                     logProgress('SELF-VERIFICATION ERROR', `${verifyErr.message}. Proseguo con originale.`)
                 }
+            } else if (significantIssues > 0) {
+                logProgress('SELF-VERIFICATION SKIP', `Budget tempo esaurito (${elapsedBeforeSV.toFixed(0)}s), salto verifica`)
             }
         } else {
             logProgress('CROSS-FIELD VALIDATION', 'Nessun problema trovato')

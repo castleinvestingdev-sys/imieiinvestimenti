@@ -2,7 +2,7 @@
  * Full end-to-end test: uploads PDFs to the real API (saves to DB),
  * then fetches the dashboard data and verifies coherence.
  *
- * Usage: npx tsx scripts/test-upload-all.ts [--bank=CA115|CA591|CA990|INTESA|GENERALI|ALL]
+ * Usage: npx tsx scripts/test-upload-all.ts [--bank=CA115|CA591|CA990|INTESA|GENERALI|GEN_CONDORELLI_DT|GEN_CONDORELLI_CC|GEN_ZANACCA_DT|GEN_ZANACCA_CC|GEN_UGHETTI_DT|GEN_UGHETTI_LIQ|ALL]
  */
 import { readFileSync, readdirSync } from 'fs'
 import path from 'path'
@@ -18,6 +18,13 @@ const BANKS: Record<string, { dir: string; label: string }> = {
     CA990: { dir: '/Users/leon/Desktop/banche EC/Credit Agricole/Dossier Titoli/990', label: 'Crédit Agricole 990' },
     INTESA: { dir: '/Users/leon/Desktop/banche EC/BANCA INTESA/BANCA INTESA/Dossier titoli', label: 'Banca Intesa' },
     GENERALI: { dir: '/Users/leon/Desktop/banche EC/banca generali', label: 'Banca Generali' },
+    // Nuovi clienti Banca Generali
+    GEN_CONDORELLI_DT: { dir: '/Users/leon/Desktop/Banca Generali/Banca Generali (Condorelli Zanacca Zanacca)/DT', label: 'Generali Condorelli DT' },
+    GEN_CONDORELLI_CC: { dir: '/Users/leon/Desktop/Banca Generali/Banca Generali (Condorelli Zanacca Zanacca)/CC', label: 'Generali Condorelli CC' },
+    GEN_ZANACCA_DT: { dir: '/Users/leon/Desktop/Banca Generali/Banca Generali (Zanacca)/DT', label: 'Generali Zanacca DT' },
+    GEN_ZANACCA_CC: { dir: '/Users/leon/Desktop/Banca Generali/Banca Generali (Zanacca)/CC', label: 'Generali Zanacca CC' },
+    GEN_UGHETTI_DT: { dir: '/Users/leon/Desktop/Banca Generali/Banca generali (ughetti)/Dossier Titoli', label: 'Generali Ughetti DT' },
+    GEN_UGHETTI_LIQ: { dir: '/Users/leon/Desktop/Banca Generali/Banca generali (ughetti)/Liquidità', label: 'Generali Ughetti Liquidità' },
 }
 
 let supabase: ReturnType<typeof createClient>

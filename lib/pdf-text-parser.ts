@@ -956,40 +956,39 @@ function parseIntesaMovimenti(movSection: string): TextMovimentiResult {
             const qtyRaw = movMatch[3].replace(/^[+-]/, '').replace(/\s*EUR\s*$/i, '')
             const qty = parseItalianNumber(qtyRaw)
 
-            // Extract price and amount from remaining tab fields after quantity
-            // Full line: CODE \t NAME \t OP \t DATE \t QTY \t PRICE CCY \t AMOUNT CCY
-            const afterQtyMatch = line.match(INTESA_MOV_RE)
+            // Extract price and amount from tab-separated fields.
+            // Intesa format is fixed: CODE[0] \t NAME[1] \t OP[2] \t DATE[3] \t QTY[4] \t PRICE CCY[5] \t AMOUNT CCY[6]
+            // Sometimes OP+DATE merge: CODE[0] \t NAME[1] \t OP+DATE[2] \t QTY[3] \t PRICE CCY[4] \t AMOUNT CCY[5]
             let price = 0
             let netAmount = 0
             let currency = 'EUR'
-            if (afterQtyMatch) {
-                // Split the full line by tabs to get remaining fields
-                const fields = line.split('\t').map(f => f.trim().replace(/\u0019/g, ''))
-                // Find the field index after the quantity
-                // Fields: [code, name, operation, date, qty, price+ccy, amount+ccy]
-                // Or: [code, name, operation+date, qty, price+ccy, amount+ccy]
-                let qtyFieldIdx = -1
-                for (let fi = 2; fi < fields.length; fi++) {
-                    if (fields[fi].match(/^[+-]?[\d.,]+(\s*(EUR|USD|GBP|CHF))?$/i)) {
-                        qtyFieldIdx = fi
-                        break
-                    }
+            const fields = line.split('\t').map(f => f.trim().replace(/\u0019/g, ''))
+            // Find the date field to anchor our position (DD.MM.YYYY pattern)
+            let dateFieldIdx = -1
+            for (let fi = 2; fi < fields.length; fi++) {
+                if (/^\d{2}\.\d{2}\.\d{4}$/.test(fields[fi])) {
+                    dateFieldIdx = fi
+                    break
                 }
-                if (qtyFieldIdx >= 0) {
-                    // Price field is next
-                    const priceField = fields[qtyFieldIdx + 1] || ''
-                    const priceMatch = priceField.match(/([\d.,]+)\s*(EUR|USD|GBP|CHF)?/i)
-                    if (priceMatch) {
-                        price = parseItalianNumber(priceMatch[1])
-                        if (priceMatch[2]) currency = priceMatch[2]
-                    }
-                    // Amount field is the one after price
-                    const amountField = fields[qtyFieldIdx + 2] || ''
-                    const amountMatch = amountField.match(/([+-]?[\d.,]+)\s*(EUR|USD|GBP|CHF)?/i)
-                    if (amountMatch) {
-                        netAmount = parseItalianNumber(amountMatch[1].replace(/^[+-]/, ''))
-                        if (amountMatch[2]) currency = amountMatch[2]
-                    }
+            }
+            // qty is the field after date, price after qty, amount after price
+            const priceFieldIdx = dateFieldIdx >= 0 ? dateFieldIdx + 2 : -1
+            const amountFieldIdx = dateFieldIdx >= 0 ? dateFieldIdx + 3 : -1
+            if (priceFieldIdx >= 0 && priceFieldIdx < fields.length) {
+                const priceField = fields[priceFieldIdx]
+                const priceMatch = priceField.match(/([\d.,]+)\s*(EUR|USD|GBP|CHF)?/i)
+                if (priceMatch) {
+                    price = parseItalianNumber(priceMatch[1])
+                    if (priceMatch[2]) currency = priceMatch[2]
+                }
+            }
+            if (amountFieldIdx >= 0 && amountFieldIdx < fields.length) {
+                const amountField = fields[amountFieldIdx]
+                const amountMatch = amountField.match(/([+-]?[\d.,]+)\s*(EUR|USD|GBP|CHF)?/i)
+                if (amountMatch) {
+                    netAmount = parseItalianNumber(amountMatch[1].replace(/^[+-]/, ''))
+                    // Amount currency is the settlement currency (always the last field)
+                    if (amountMatch[2]) currency = amountMatch[2]
                 }
             }
 
@@ -1017,6 +1016,10 @@ function parseIntesaMovimenti(movSection: string): TextMovimentiResult {
             if (isin && qty > 0) {
                 const opType = classifyIntesaOperation(operation)
                 if (opType) {
+                    // grossAmount = qty × price (the "valore lordo" of the transaction)
+                    // netAmount = "Importo netto in valuta di regolamento" (from PDF)
+                    // spese/imposte = |netAmount - grossAmount| (calculated by dashboard)
+                    const grossAmount = (price > 0 && qty > 0) ? qty * price : 0
                     movements.push({
                         isin,
                         date,
@@ -1025,7 +1028,7 @@ function parseIntesaMovimenti(movSection: string): TextMovimentiResult {
                         description: operation,
                         price: price > 0 ? price : undefined,
                         netAmount: netAmount > 0 ? netAmount : undefined,
-                        grossAmount: netAmount > 0 ? netAmount : undefined,
+                        grossAmount: grossAmount > 0 ? grossAmount : undefined,
                         currency,
                     })
                 }
