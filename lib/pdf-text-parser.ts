@@ -872,6 +872,33 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
         }
     }
 
+    // Banca Generali holder: prefer "Dettaglio Cointestatari" (DT, full names) over "Intestato a" (truncated)
+    // DT format has "Dettaglio Cointestatari\nNAME1\nNAME2\n..." with full names on separate lines
+    if (!meta.holder) {
+        const coinIdx = text.search(/Dettaglio\s+Cointestatari/i)
+        if (coinIdx !== -1) {
+            const afterCoin = text.substring(coinIdx).split('\n').slice(1) // skip "Dettaglio Cointestatari" line
+            const nameLines: string[] = []
+            for (const line of afterCoin) {
+                const trimmed = line.trim()
+                if (trimmed && trimmed.length >= 3 && trimmed.length <= 60
+                    && /^[A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s]+$/.test(trimmed)) {
+                    nameLines.push(trimmed)
+                } else {
+                    break
+                }
+            }
+            if (nameLines.length > 0) {
+                // Title case each name, then join with ", "
+                const titleNames = nameLines.map(n =>
+                    n.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+                ).filter(n => !/^\s*NI\s*$/i.test(n))
+                const name = titleNames.join(', ')
+                if (name.length >= 3) { meta.holder = name; found = true }
+            }
+        }
+    }
+
     // Banca Generali holder: "Intestato a: NOME1,NOME2" (CC/LIQ) or "Intestato a CDG\n850/NNN NAME" (DT)
     if (!meta.holder) {
         const intestIdx = text.search(/Intestato\s+a[\s:]/i)
@@ -901,10 +928,12 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
                     }
                 }
                 name = name.replace(/,+/g, ',').replace(/\s+NI\s*$/i, '').trim()
-                name = name.split(/([,\s]+)/).map(part => {
-                    if (/^[,\s]+$/.test(part)) return part
-                    return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-                }).join('')
+                // Title case each person, split by comma, sort alphabetically
+                const persons = name.split(',').map(p => p.trim()).filter(p => p.length > 0)
+                const titled = persons.map(p =>
+                    p.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+                ).sort()
+                name = titled.join(', ')
                 if (name.length >= 3) { meta.holder = name; found = true }
             }
         }
@@ -1559,11 +1588,22 @@ function parseGeneraliCompetenze(fullText: string): TextCCCompetenze | null {
         }
 
         // TOTALE SBILANCIO COMPETENZE ... <amount> [-]
+        // New format: "TOTALE SBILANCIO COMPETENZE REGISTRATE CON VALUTA 31.12.2024" (no amount on line!)
+        // Old format: "18,75 -\tTOTALE SBILANCIO COMPETENZE REGISTRATE CON VALUTA 31.12.2022"
         if (lineUpper.includes('TOTALE SBILANCIO COMPETENZE')) {
-            const sbilMatch = line.match(/([\d.,]+)\s*-?\s*$/)
-            if (sbilMatch) {
-                totaleSbilancio = parseItalianNum(sbilMatch[1])
-                if (line.trim().endsWith('-')) totaleSbilancio = -totaleSbilancio
+            // Skip if line ends with a date (DD.MM.YYYY) — no amount on this line
+            if (!/\d{2}\.\d{2}\.\d{4}\s*$/.test(line.trim())) {
+                const sbilMatch = line.match(/([\d.,]+)\s*-?\s*$/)
+                if (sbilMatch) {
+                    totaleSbilancio = parseItalianNum(sbilMatch[1])
+                    if (line.trim().endsWith('-')) totaleSbilancio = -totaleSbilancio
+                }
+            }
+            // Old format: amount before text "18,75 -\tTOTALE SBILANCIO"
+            const oldSbilMatch = line.match(/^([\d.,]+)\s*-?\s*\t.*TOTALE\s+SBILANCIO/i)
+            if (oldSbilMatch) {
+                totaleSbilancio = parseItalianNum(oldSbilMatch[1])
+                if (/^[\d.,]+\s*-/.test(line)) totaleSbilancio = -totaleSbilancio
             }
         }
 
@@ -1735,11 +1775,12 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
                 }
             }
             name = name.replace(/,+/g, ',').replace(/\s+NI\s*$/i, '').trim()
-            // Title case
-            holder = name.split(/([,\s]+)/).map(part => {
-                if (/^[,\s]+$/.test(part)) return part
-                return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-            }).join('')
+            // Title case each person, split by comma, sort alphabetically
+            const persons = name.split(',').map(p => p.trim()).filter(p => p.length > 0)
+            const titled = persons.map(p =>
+                p.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+            ).sort()
+            holder = titled.join(', ')
         }
     }
 

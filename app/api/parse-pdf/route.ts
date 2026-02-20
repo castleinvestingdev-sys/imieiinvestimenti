@@ -2176,7 +2176,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     if (comp.tassoPassivo) parsed.scalar_data.tasso_passivo = comp.tassoPassivo
 
                     // Store additional competenze fields in summary
-                    parsed.summary.total_commissions = Math.abs(comp.speseTotali)
+                    parsed.summary.total_commissions = { value: Math.abs(comp.speseTotali), source: 'text_parser' }
                     parsed.summary.ritenuta_fiscale = Math.abs(comp.ritenutaFiscale)
                     parsed.summary.interessi_creditori_netti = comp.interessiCreditoriNetti
                     parsed.summary.totale_sbilancio_competenze = comp.totaleSbilancio
@@ -2528,8 +2528,10 @@ Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
         if (!parsed.summary.total_movements_amount) {
             parsed.summary.total_movements_amount = { value: calculatedTotal, source: 'calculated' }
         }
-        // ALWAYS override with calculated commissions (hybrid formula is more reliable than Gemini's value)
-        parsed.summary.total_commissions = { value: calculatedCommissions, source: 'calculated' }
+        // Override with calculated commissions UNLESS text parser already set it (text parser is more accurate for CC/LIQ)
+        if (!parsed.summary.total_commissions || parsed.summary.total_commissions?.source !== 'text_parser') {
+            parsed.summary.total_commissions = { value: calculatedCommissions, source: 'calculated' }
+        }
         if (!parsed.summary.total_proventi) {
             parsed.summary.total_proventi = { value: calculatedProventi, source: 'calculated' }
         }
