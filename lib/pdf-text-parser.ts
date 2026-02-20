@@ -872,6 +872,44 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
         }
     }
 
+    // Banca Generali holder: "Intestato a: NOME1,NOME2" (CC/LIQ) or "Intestato a CDG\n850/NNN NAME" (DT)
+    if (!meta.holder) {
+        const intestIdx = text.search(/Intestato\s+a[\s:]/i)
+        if (intestIdx !== -1) {
+            const afterIntest = text.substring(intestIdx).replace(/^Intestato\s+a[:\s]+(?:CDG\s*\n)?/i, '')
+            const nameLines: string[] = []
+            for (const line of afterIntest.split('\n')) {
+                const trimmed = line.trim()
+                // DT format: "850/005/0947918 CONDORELLI ALESSANDRA,ZANACCA GIANLUCA,... 1362943"
+                let namePart = trimmed.replace(/^\d{3}\/\d{3}\/\d{5,10}\s+/, '').replace(/\s+\d{4,}$/, '')
+                // Name line: ALL CAPS, letters/commas/spaces only, max ~70 chars
+                if (namePart && namePart.length >= 3 && namePart.length <= 70
+                    && /^[A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s,]+$/.test(namePart)) {
+                    nameLines.push(namePart)
+                } else {
+                    break
+                }
+            }
+            if (nameLines.length > 0) {
+                // Smart multi-line join: space for name continuations, preserve existing commas
+                let name = nameLines[0]
+                for (let i = 1; i < nameLines.length; i++) {
+                    if (name.endsWith(',') || nameLines[i].startsWith(',')) {
+                        name += nameLines[i]
+                    } else {
+                        name += ' ' + nameLines[i]
+                    }
+                }
+                name = name.replace(/,+/g, ',').replace(/\s+NI\s*$/i, '').trim()
+                name = name.split(/([,\s]+)/).map(part => {
+                    if (/^[,\s]+$/.test(part)) return part
+                    return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+                }).join('')
+                if (name.length >= 3) { meta.holder = name; found = true }
+            }
+        }
+    }
+
     // Crédit Agricole holder: "Intestatario: NOME COGNOME" or similar
     if (!meta.holder) {
         const holderRe = /(?:Intestatari?o|INTESTATARI?O|Titolare|TITOLARE)[:\s]+([A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s]{3,40})/
@@ -1422,6 +1460,7 @@ export interface TextCCResult {
     movementsSum: number      // sum of all movements
     bankDetected: string | null
     accountNumber?: string    // CC account number (e.g. "CC8500852708")
+    holder?: string           // Intestatario name from "Intestato a:" field
     isCC: true
     competenze?: TextCCCompetenze       // COMPETENZE section data
 }
@@ -1664,6 +1703,44 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
         // Fallback: look for standalone CC+digits pattern
         const ccMatch = fullText.match(/\bCC\s*(\d{8,12})\b/)
         if (ccMatch) accountNumber = 'CC' + ccMatch[1]
+    }
+
+    // --- Extract holder name from "Intestato a:" field ---
+    let holder: string | undefined
+    // Find "Intestato a:" and capture name(s) - may span 1-2 lines
+    const intestatoIdx = fullText.search(/Intestato\s+a:/i)
+    if (intestatoIdx !== -1) {
+        const afterIntest = fullText.substring(intestatoIdx).replace(/^Intestato\s+a:\s*/i, '')
+        const nameLines: string[] = []
+        for (const line of afterIntest.split('\n')) {
+            const trimmed = line.trim()
+            // Name continuation line: ALL CAPS, only letters/commas/spaces, max ~60 chars
+            // Stops at lines with lowercase words > 3 chars (like "Imposta", "Gentile", etc.)
+            if (trimmed && trimmed.length >= 2 && trimmed.length <= 70
+                && /^[A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s,]+$/.test(trimmed)) {
+                nameLines.push(trimmed)
+            } else {
+                break
+            }
+        }
+        if (nameLines.length > 0) {
+            // Smart join: if prev line ends mid-name (no comma), join with space
+            let name = nameLines[0]
+            for (let i = 1; i < nameLines.length; i++) {
+                if (name.endsWith(',') || nameLines[i].startsWith(',')) {
+                    name += nameLines[i]
+                } else {
+                    // Line continuation (e.g. "UGHETTI\nMASSIMILIANO" → "UGHETTI MASSIMILIANO")
+                    name += ' ' + nameLines[i]
+                }
+            }
+            name = name.replace(/,+/g, ',').replace(/\s+NI\s*$/i, '').trim()
+            // Title case
+            holder = name.split(/([,\s]+)/).map(part => {
+                if (/^[,\s]+$/.test(part)) return part
+                return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+            }).join('')
+        }
     }
 
     let saldoIniziale = 0
@@ -1959,6 +2036,7 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
         movements, movementsSum,
         bankDetected,
         accountNumber,
+        holder,
         isCC: true as const,
         competenze,
     }

@@ -1941,6 +1941,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                             period_start: textCCFastPath.periodStart,
                             period_end: textCCFastPath.periodEnd,
                             accountNumber: textCCFastPath.accountNumber || 'N/D',
+                            holder: textCCFastPath.holder || undefined,
                         },
                         summary: {
                             initial_balance: { value: textCCFastPath.saldoIniziale, source: 'text_parser' },
@@ -2158,6 +2159,9 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                 }
                 if (textCCResult.accountNumber) {
                     parsed.info.accountNumber = textCCResult.accountNumber
+                }
+                if (textCCResult.holder) {
+                    parsed.info.holder = textCCResult.holder
                 }
 
                 // Override scalar_data with COMPETENZE section data from text parser
