@@ -7,7 +7,10 @@ import {
     extractPortfolioFromText,
     mergeTextAndGeminiHoldings,
     parseMovimentiFromText,
+    isGeneraliCC,
+    extractGeneraliCCData,
     type TextPortfolioResult,
+    type TextCCResult,
 } from '@/lib/pdf-text-parser'
 
 // Allow up to 10 minutes for Gemini PDF processing (CC/Liquidità PDFs can be large)
@@ -884,7 +887,7 @@ function callGemini(
     model: string,
     systemPrompt: string,
     pdfBase64: string,
-    options?: { thinkingLevel?: string; jsonSchema?: any; cachedContent?: string; supplementaryText?: string; timeoutMs?: number }
+    options?: { thinkingLevel?: string; jsonSchema?: any; cachedContent?: string; supplementaryText?: string; timeoutMs?: number; textOnly?: string }
 ): Promise<string> {
     return new Promise((resolve, reject) => {
         const thinkingLevel = options?.thinkingLevel || 'low'
@@ -910,16 +913,20 @@ function callGemini(
             generationConfig.responseJsonSchema = jsonSchema
         }
 
-        const pdfPart: any = { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
-        // mediaResolution is only supported by Gemini 3.x models
-        if (isGemini3) {
-            pdfPart.mediaResolution = { level: 'media_resolution_high' }
+        const contentParts: any[] = []
+        if (options?.textOnly) {
+            // Text-only mode: send extracted text instead of PDF image (faster for CC/Liquidità)
+            contentParts.push({ text: 'Analizza questo testo estratto da un documento PDF ed estrai i dati in formato JSON.' })
+            contentParts.push({ text: options.textOnly })
+        } else {
+            contentParts.push({ text: 'Analizza questo documento PDF ed estrai i dati in formato JSON.' })
+            const pdfPart: any = { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
+            // mediaResolution is only supported by Gemini 3.x models
+            if (isGemini3) {
+                pdfPart.mediaResolution = { level: 'media_resolution_high' }
+            }
+            contentParts.push(pdfPart)
         }
-
-        const contentParts: any[] = [
-            { text: 'Analizza questo documento PDF ed estrai i dati in formato JSON.' },
-            pdfPart
-        ]
         // Add supplementary text (e.g. extracted MOVIMENTI section) as cross-reference for the model
         if (options?.supplementaryText) {
             contentParts.push({ text: options.supplementaryText })
@@ -1905,15 +1912,68 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         )
         let currentThinkingLevel = isLikelyLiquidity ? 'low' : (isDossierFromText ? (textParserHasGoodResults ? 'low' : 'medium') : 'low')
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            // Skip retry if time budget exhausted (keep 60s for post-processing)
+        // === FAST PATH: Generali CC/LIQ with deterministic text parser ===
+        // When the text parser can extract everything deterministically, skip Gemini entirely.
+        // This saves 60-300s per CC/LIQ PDF and produces more accurate results.
+        let textCCFastPath: TextCCResult | null = null
+        if (isGeneraliCC(originalPdfText)) {
+            textCCFastPath = extractGeneraliCCData(originalPdfText)
+            if (textCCFastPath && textCCFastPath.movements.length > 0) {
+                const textDelta = textCCFastPath.saldoFinale - textCCFastPath.saldoIniziale
+                const textErr = Math.abs(textDelta - textCCFastPath.movementsSum)
+                logProgress('TEXT CC/LIQ FAST PATH', [
+                    `Saldo: ${textCCFastPath.saldoIniziale.toFixed(2)} → ${textCCFastPath.saldoFinale.toFixed(2)}`,
+                    `Delta: ${textDelta.toFixed(2)}€`,
+                    `MovSum: ${textCCFastPath.movementsSum.toFixed(2)}€ (${textCCFastPath.movements.length} mov)`,
+                    `Err: ${textErr.toFixed(2)}€`,
+                    `Bank: ${textCCFastPath.bankDetected}`,
+                ].join(' | '))
+
+                if (textErr < 1) {
+                    // Perfect extraction — skip Gemini entirely
+                    logProgress('SKIP GEMINI', 'Text parser CC/LIQ extraction perfetta, salto Gemini AI')
+
+                    // Construct a complete parsed object — replaces Gemini output
+                    const ccParsed = {
+                        type: 'LIQUIDITY',
+                        info: {
+                            bankName: textCCFastPath.bankDetected || 'Banca Generali',
+                            period_start: textCCFastPath.periodStart,
+                            period_end: textCCFastPath.periodEnd,
+                            accountNumber: textCCFastPath.accountNumber || 'N/D',
+                        },
+                        summary: {
+                            initial_balance: { value: textCCFastPath.saldoIniziale, source: 'text_parser' },
+                            final_balance: { value: textCCFastPath.saldoFinale, source: 'text_parser' },
+                        },
+                        movements: textCCFastPath.movements.map(m => ({
+                            date: m.date,
+                            value_date: m.valueDate || m.date,
+                            amount: m.amount,
+                            description: m.description,
+                            movement_type: m.category || 'Altro',
+                            sign_source: 'text_parser',
+                        })),
+                        finalPortfolio: [],
+                        securityMovements: [],
+                        movementsStartQuantities: {},
+                    }
+                    resText = JSON.stringify(ccParsed)
+                    parseSuccess = true
+                    // Jump past the Gemini loop; text CC override will recognize this and skip
+                }
+            }
+        }
+
+        if (!parseSuccess) for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            // Skip retry if time budget exhausted (keep 120s for post-processing)
             const retryElapsed = (Date.now() - startTime) / 1000
-            if (attempt > 1 && retryElapsed >= 200) {
+            if (attempt > 1 && retryElapsed >= 360) {
                 logProgress('RETRY SKIP', `Budget tempo esaurito (${retryElapsed.toFixed(0)}s), salto tentativo ${attempt}`)
                 break
             }
             try {
-                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName} (thinking: ${currentThinkingLevel}, dossier: ${isDossierFromText})`)
+                logProgress('CHIAMATA GEMINI AI', `Tentativo ${attempt}/${maxRetries} con ${modelName} (thinking: ${currentThinkingLevel}, dossier: ${isDossierFromText}, liquidity: ${isLikelyLiquidity})`)
 
                 // Build supplementary text with all available cross-references
                 const supplementaryParts: string[] = []
@@ -1946,10 +2006,17 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     ? '\n\n' + supplementaryParts.join('\n\n')
                     : undefined
 
-                // Dynamic timeout: cap per-call at 180s, but respect overall 280s budget
+                // For CC/Liquidità PDFs with good text, send text instead of PDF image (much faster)
+                const useTextOnly = isLikelyLiquidity && pdfExtractedText.length > 1000
+
+                // Dynamic timeout: 300s for text-only CC/Liquidità (large output with JSON schema), 180s for PDF vision
                 const elapsedSoFar = (Date.now() - startTime) / 1000
-                const remainingBudget = Math.max(30000, (280 - elapsedSoFar) * 1000)
-                const callTimeout = Math.min(180000, remainingBudget)
+                const remainingBudget = Math.max(30000, (480 - elapsedSoFar) * 1000)
+                const maxPerCall = useTextOnly ? 300000 : 180000
+                const callTimeout = Math.min(maxPerCall, remainingBudget)
+                if (useTextOnly) {
+                    logProgress('TEXT-ONLY MODE', `Invio testo (${pdfExtractedText.length} car) invece di PDF immagine per CC/Liquidità`)
+                }
 
                 resText = await callGemini(GEMINI_API_KEY!, modelName, systemPrompt, base64Data, {
                     thinkingLevel: currentThinkingLevel,
@@ -1957,6 +2024,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     cachedContent: cachedContent || undefined,
                     supplementaryText,
                     timeoutMs: callTimeout,
+                    textOnly: useTextOnly ? pdfExtractedText : undefined,
                 })
                 logProgress('RISPOSTA RICEVUTA', `${resText.length} caratteri da Gemini`)
 
@@ -2053,6 +2121,86 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             return NextResponse.json({ success: false, error: 'Parsing JSON fallito: ' + jsonError }, { status: 500 })
         }
 
+        // === TEXT PARSER OVERRIDE FOR BANCA GENERALI CC/LIQ ===
+        // The deterministic text parser extracts saldi and movements with 100% accuracy.
+        // Override Gemini's values when the text parser succeeds.
+        let textCCResult: TextCCResult | null = null
+        if (isGeneraliCC(originalPdfText)) {
+            textCCResult = extractGeneraliCCData(originalPdfText)
+            if (textCCResult) {
+                // Override saldi
+                if (!parsed.summary) parsed.summary = {}
+                parsed.summary.initial_balance = { value: textCCResult.saldoIniziale, source: 'text_parser' }
+                parsed.summary.final_balance = { value: textCCResult.saldoFinale, source: 'text_parser' }
+
+                // Override movements with text-extracted ones
+                if (textCCResult.movements.length > 0) {
+                    parsed.movements = textCCResult.movements.map(m => ({
+                        date: m.date,
+                        value_date: m.valueDate || m.date,
+                        amount: m.amount,
+                        description: m.description,
+                        movement_type: m.category || 'Altro',
+                        sign_source: 'text_parser',
+                    }))
+                }
+
+                // Override period dates and bank name
+                if (!parsed.info) parsed.info = {}
+                if (textCCResult.periodStart) {
+                    parsed.info.period_start = textCCResult.periodStart
+                }
+                if (textCCResult.periodEnd) {
+                    parsed.info.period_end = textCCResult.periodEnd
+                }
+                if (textCCResult.bankDetected) {
+                    parsed.info.bankName = textCCResult.bankDetected
+                }
+                if (textCCResult.accountNumber) {
+                    parsed.info.accountNumber = textCCResult.accountNumber
+                }
+
+                // Override scalar_data with COMPETENZE section data from text parser
+                if (textCCResult.competenze) {
+                    if (!parsed.scalar_data) parsed.scalar_data = {}
+                    const comp = textCCResult.competenze
+                    parsed.scalar_data.numeri_creditori = comp.numeriCreditori
+                    parsed.scalar_data.numeri_debitori = comp.numeriDebitori
+                    parsed.scalar_data.interessi_attivi_lordi = comp.interessiCreditoriLordi
+                    parsed.scalar_data.interessi_passivi_lordi = Math.abs(comp.interessiDebitoriLordi)
+                    if (comp.tassoAttivo) parsed.scalar_data.tasso_attivo = comp.tassoAttivo
+                    if (comp.tassoPassivo) parsed.scalar_data.tasso_passivo = comp.tassoPassivo
+
+                    // Store additional competenze fields in summary
+                    parsed.summary.total_commissions = Math.abs(comp.speseTotali)
+                    parsed.summary.ritenuta_fiscale = Math.abs(comp.ritenutaFiscale)
+                    parsed.summary.interessi_creditori_netti = comp.interessiCreditoriNetti
+                    parsed.summary.totale_sbilancio_competenze = comp.totaleSbilancio
+
+                    logProgress('TEXT COMPETENZE', [
+                        `NumCred: ${comp.numeriCreditori.toFixed(2)}`,
+                        `NumDeb: ${comp.numeriDebitori.toFixed(2)}`,
+                        `IntCred: ${comp.interessiCreditoriLordi.toFixed(2)}`,
+                        `IntDeb: ${comp.interessiDebitoriLordi.toFixed(2)}`,
+                        `Spese: ${comp.speseTotali.toFixed(2)}`,
+                        `Ritenuta: ${comp.ritenutaFiscale.toFixed(2)}`,
+                        `Tasso: ${comp.tassoAttivo || 'n/a'}/${comp.tassoPassivo || 'n/a'}`,
+                    ].join(' | '))
+                }
+
+                const textDelta = textCCResult.saldoFinale - textCCResult.saldoIniziale
+                const textErr = Math.abs(textDelta - textCCResult.movementsSum)
+                logProgress('TEXT CC/LIQ', [
+                    `Saldo: ${textCCResult.saldoIniziale.toFixed(2)} → ${textCCResult.saldoFinale.toFixed(2)}`,
+                    `Delta: ${textDelta.toFixed(2)}€`,
+                    `MovSum: ${textCCResult.movementsSum.toFixed(2)}€ (${textCCResult.movements.length} mov)`,
+                    `Err: ${textErr.toFixed(2)}€`,
+                    `Period: ${textCCResult.periodStart} → ${textCCResult.periodEnd}`,
+                    `Bank: ${textCCResult.bankDetected}`,
+                ].join(' | '))
+            }
+        }
+
         // === VALIDATION-RETRY: Check math, retry with high thinking if needed ===
         const validationMovements = parsed.movements || []
         const validationInitial = parsed.summary?.initial_balance?.value || 0
@@ -2072,14 +2220,14 @@ Restituisci SOLO il JSON, nessun altro testo.`;
               (validationInitial !== 0 && validationFinal !== 0 && validationError > 5) ||
               (validationInitial === 0 && validationFinal === 0 && validationMovements.length > 0)
 
-        // Time budget check: skip validation retry if we've already used > 160s
-        // (validation retry needs up to 120s, total must stay under 280s)
+        // Time budget check: skip validation retry if we've already used > 360s
+        // (validation retry needs up to 120s, total must stay under 480s)
         const elapsedBeforeValidation = (Date.now() - startTime) / 1000
-        if (needsValidationRetry && elapsedBeforeValidation >= 160) {
+        if (needsValidationRetry && elapsedBeforeValidation >= 360) {
             logProgress('VALIDATION RETRY SKIP', `Budget tempo esaurito (${elapsedBeforeValidation.toFixed(0)}s), salto validation retry`)
         }
 
-        if (needsValidationRetry && currentThinkingLevel === 'low' && elapsedBeforeValidation < 160) {
+        if (needsValidationRetry && currentThinkingLevel === 'low' && elapsedBeforeValidation < 360) {
             logProgress('VALIDATION RETRY',
                 `Errore matematico: ${validationError.toFixed(2)}€ (atteso: ${validationExpected.toFixed(2)}, ottenuto: ${validationSum.toFixed(2)}). ` +
                 `Retry con thinking: medium (${elapsedBeforeValidation.toFixed(0)}s trascorsi)`
@@ -2091,8 +2239,8 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     `La somma dei movimenti (${validationSum.toFixed(2)}) non corrisponde a Saldo Finale (${validationFinal.toFixed(2)}) - Saldo Iniziale (${validationInitial.toFixed(2)}) = ${validationExpected.toFixed(2)}. ` +
                     `Verifica attentamente i segni di ogni movimento e assicurati di estrarre TUTTI i movimenti.` : '')
 
-                // Dynamic timeout: cap at remaining budget (max 280s total)
-                const retryTimeoutMs = Math.max(30000, (280 - elapsedBeforeValidation) * 1000)
+                // Dynamic timeout: cap at remaining budget (max 480s total)
+                const retryTimeoutMs = Math.max(30000, (480 - elapsedBeforeValidation) * 1000)
                 const retryText = await callGemini(GEMINI_API_KEY!, modelName, retryPrompt, base64Data, {
                     thinkingLevel: 'medium',
                     jsonSchema: PARSE_PDF_JSON_SCHEMA,
@@ -2203,7 +2351,7 @@ ISTRUZIONI:
 Restituisci il JSON COMPLETO corretto con le stesse identiche chiavi.`
 
                 try {
-                    const svTimeoutMs = Math.max(30000, (280 - elapsedBeforeSV) * 1000)
+                    const svTimeoutMs = Math.max(30000, (480 - elapsedBeforeSV) * 1000)
                     const verifyText = await callGemini(GEMINI_API_KEY!, modelName, verifyPrompt, base64Data, {
                         thinkingLevel: 'medium',
                         jsonSchema: PARSE_PDF_JSON_SCHEMA,

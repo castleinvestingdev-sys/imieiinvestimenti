@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
+    proxyTimeout: 600000, // 10 minutes for long-running Gemini API calls
   },
 };
 

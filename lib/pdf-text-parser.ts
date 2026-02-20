@@ -1389,6 +1389,19 @@ export interface TextCCMovement {
     category?: string         // BONIFICO, SOTTOSCRIZ. FONDI/SICAV, etc.
 }
 
+export interface TextCCCompetenze {
+    interessiCreditoriLordi: number     // INTERESSI A CREDITO LIQUIDATI
+    interessiDebitoriLordi: number      // INTERESSI A DEBITO LIQUIDATI
+    ritenutaFiscale: number             // RITENUTA FISCALE SU INTERESSI CREDITORI
+    interessiCreditoriNetti: number     // INTERESSI CREDITORI NETTI LIQUIDATI
+    speseTotali: number                 // Totale spese di periodo
+    totaleSbilancio: number             // TOTALE SBILANCIO COMPETENZE
+    numeriCreditori: number             // TOTALE NUMERI ... creditori
+    numeriDebitori: number              // TOTALE NUMERI ... debitori
+    tassoAttivo?: string                // Tasso annuo creditori (e.g. "0,0000%")
+    tassoPassivo?: string               // Tasso annuo debitori
+}
+
 export interface TextCCResult {
     saldoIniziale: number
     saldoFinale: number
@@ -1397,7 +1410,209 @@ export interface TextCCResult {
     movements: TextCCMovement[]
     movementsSum: number      // sum of all movements
     bankDetected: string | null
+    accountNumber?: string    // CC account number (e.g. "CC8500852708")
     isCC: true
+    competenze?: TextCCCompetenze       // COMPETENZE section data
+}
+
+/**
+ * Parse the COMPETENZE section of a Banca Generali CC/LIQ PDF.
+ * Extracts: interessi creditori/debitori, ritenuta fiscale, spese, numeri creditori/debitori.
+ *
+ * Section structure:
+ *   COMPETENZE
+ *   1. INTERESSI A CREDITO LIQUIDATI <amount>
+ *   2. INTERESSI A DEBITO LIQUIDATI <amount> -
+ *   3. SPESE <amount> -
+ *   TOTALE SBILANCIO COMPETENZE ... <amount> [-]
+ *   1. INTERESSI A CREDITO
+ *     Decorrenza Tasso annuo Tasso di periodo Numeri creditori Interessi creditori
+ *     <date> <tasso%> <tasso%> <numeri> <interessi>
+ *     TOTALE INTERESSI CREDITORI <amount>
+ *     RITENUTA FISCALE SU INTERESSI CREDITORI POSITIVI (*) <amount> -
+ *     TOTALE INTERESSI CREDITORI NETTI LIQUIDATI <amount>
+ *   2. INTERESSI A DEBITO
+ *     TOTALE INTERESSI A DEBITO LIQUIDATI <amount>
+ *   RIASSUNTO SCALARE
+ *     ...
+ *     TOTALE NUMERI <debitori> <creditori>
+ *   3. SPESE
+ *     Totale spese di periodo <amount> -
+ */
+function parseGeneraliCompetenze(fullText: string): TextCCCompetenze | null {
+    const upper = fullText.toUpperCase()
+    const compIdx = upper.indexOf('COMPETENZE')
+    if (compIdx === -1) return null
+
+    // Extract from COMPETENZE to the end (or next major section)
+    const compSection = fullText.substring(compIdx)
+
+    // Helper: parse Italian number (1.234,56 → 1234.56)
+    function parseItalianNum(s: string): number {
+        if (!s) return 0
+        s = s.trim().replace(/\./g, '').replace(',', '.')
+        const n = parseFloat(s)
+        return isNaN(n) ? 0 : n
+    }
+
+    let interessiCreditoriLordi = 0
+    let interessiDebitoriLordi = 0
+    let ritenutaFiscale = 0
+    let interessiCreditoriNetti = 0
+    let speseTotali = 0
+    let totaleSbilancio = 0
+    let numeriCreditori = 0
+    let numeriDebitori = 0
+    let tassoAttivo: string | undefined
+    let tassoPassivo: string | undefined
+
+    const lines = compSection.split('\n')
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        const lineUpper = line.toUpperCase().trim()
+
+        // 1. INTERESSI A CREDITO LIQUIDATI <amount>
+        // New format: "1. INTERESSI A CREDITO LIQUIDATI 0,00"
+        // Old format: "INTERESSI A CREDITO LIQUIDATI" (no amount) or on same line with other text
+        if (lineUpper.includes('INTERESSI A CREDITO LIQUIDATI')) {
+            const creditMatch = line.match(/INTERESSI\s+A\s+CREDITO\s+LIQUIDATI\s+([\d.,]+)/i)
+            if (creditMatch) {
+                interessiCreditoriLordi = parseItalianNum(creditMatch[1])
+            }
+        }
+
+        // TOTALE NETTO INTERESSI A CREDITO LIQUIDATI (old format)
+        if (lineUpper.includes('TOTALE NETTO INTERESSI A CREDITO LIQUIDATI')) {
+            const nettoMatch = line.match(/TOTALE\s+NETTO\s+INTERESSI\s+A\s+CREDITO\s+LIQUIDATI\s+([\d.,]+)/i)
+            if (nettoMatch) {
+                interessiCreditoriNetti = parseItalianNum(nettoMatch[1])
+            }
+        }
+
+        // 2. INTERESSI A DEBITO LIQUIDATI <amount> -
+        // New format: "2. INTERESSI A DEBITO LIQUIDATI 0,00 -"
+        // Old format: "0,00\tINTERESSI A DEBITO LIQUIDATI\t2 -" (amount prefix) or "TOTALE INTERESSI A DEBITO LIQUIDATI"
+        // Always stored as positive (absolute value)
+        if (lineUpper.includes('INTERESSI A DEBITO LIQUIDATI')) {
+            // Try new format: amount after text
+            const debitMatch = line.match(/INTERESSI\s+A\s+DEBITO\s+LIQUIDATI\s+([\d.,]+)/i)
+            if (debitMatch) {
+                interessiDebitoriLordi = Math.abs(parseItalianNum(debitMatch[1]))
+            } else {
+                // Try old format: amount before text "0,00\tINTERESSI A DEBITO LIQUIDATI"
+                const oldDebitMatch = line.match(/^([\d.,]+)\s+(?:INTERESSI\s+A\s+DEBITO\s+LIQUIDATI|TOTALE\s+INTERESSI\s+A\s+DEBITO)/i)
+                if (oldDebitMatch) {
+                    interessiDebitoriLordi = Math.abs(parseItalianNum(oldDebitMatch[1]))
+                }
+            }
+        }
+
+        // TOTALE SBILANCIO COMPETENZE ... <amount> [-]
+        if (lineUpper.includes('TOTALE SBILANCIO COMPETENZE')) {
+            const sbilMatch = line.match(/([\d.,]+)\s*-?\s*$/)
+            if (sbilMatch) {
+                totaleSbilancio = parseItalianNum(sbilMatch[1])
+                if (line.trim().endsWith('-')) totaleSbilancio = -totaleSbilancio
+            }
+        }
+
+        // RITENUTA FISCALE SU INTERESSI CREDITORI POSITIVI (*) <amount> -
+        // Also: "RITENUTA FISCALE ATTUALMENTE IN VIGORE 0,00-" (old format)
+        // Always stored as positive (absolute value)
+        if (lineUpper.includes('RITENUTA FISCALE')) {
+            const ritMatch = line.match(/([\d.,]+)\s*-?\s*$/)
+            if (ritMatch) {
+                ritenutaFiscale = Math.abs(parseItalianNum(ritMatch[1]))
+            }
+        }
+
+        // TOTALE INTERESSI CREDITORI NETTI LIQUIDATI <amount> (new format)
+        // Note: old format uses TOTALE NETTO INTERESSI A CREDITO LIQUIDATI (handled above)
+        if (lineUpper.includes('INTERESSI CREDITORI NETTI LIQUIDATI')) {
+            const nettiMatch = line.match(/([\d.,]+)\s*-?\s*$/)
+            if (nettiMatch) {
+                interessiCreditoriNetti = parseItalianNum(nettiMatch[1])
+            }
+        }
+
+        // TOTALE NUMERI — column order differs between old and new format:
+        // NEW format (space-separated): TOTALE NUMERI <debitori> <creditori>
+        // OLD format (tab-separated):   TOTALE NUMERI <creditori>\t<debitori>
+        if (lineUpper.includes('TOTALE NUMERI')) {
+            if (line.includes('\t')) {
+                // Old format: "TOTALE NUMERI 6.745.288,44\t0,00" — creditori first
+                const numMatch = line.match(/TOTALE\s+NUMERI\s+([\d.,]+)\s+([\d.,]+)/i)
+                if (numMatch) {
+                    numeriCreditori = parseItalianNum(numMatch[1])
+                    numeriDebitori = parseItalianNum(numMatch[2])
+                }
+            } else {
+                // New format: "TOTALE NUMERI 0,00 3.305.858,27" — debitori first
+                const numMatch = line.match(/TOTALE\s+NUMERI\s+([\d.,]+)\s+([\d.,]+)/i)
+                if (numMatch) {
+                    numeriDebitori = parseItalianNum(numMatch[1])
+                    numeriCreditori = parseItalianNum(numMatch[2])
+                }
+            }
+        }
+
+        // Totale spese di periodo <amount> -
+        // New format: "Totale spese di periodo 25,00 -"
+        // Old format: "Totale spese di periodo -\t0,00" (amount after tab)
+        // Always stored as positive (absolute value) — expenses are always costs
+        if (lineUpper.includes('TOTALE SPESE DI PERIODO')) {
+            if (line.includes('\t')) {
+                // Old format: "Totale spese di periodo -\t0,00"
+                const parts = line.split('\t')
+                const amtPart = parts[parts.length - 1].trim()
+                speseTotali = Math.abs(parseItalianNum(amtPart))
+            } else {
+                // New format: "Totale spese di periodo 25,00 -"
+                const speseMatch = line.match(/([\d.,]+)\s*-?\s*$/)
+                if (speseMatch) {
+                    speseTotali = Math.abs(parseItalianNum(speseMatch[1]))
+                }
+            }
+        }
+
+        // Extract tasso from INTERESSI A CREDITO rows
+        // Format: "01.01.2024 0,0000% 0,0000% 130.476,58 0,00"
+        if (!tassoAttivo && lineUpper.includes('INTERESSI A CREDITO') && !lineUpper.includes('LIQUIDATI') && !lineUpper.includes('NETTI')) {
+            // Look ahead for first data row with tasso
+            for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+                const rowMatch = lines[j].match(/^\d{2}\.\d{2}\.\d{4}\s+([\d,]+%)\s/)
+                if (rowMatch) {
+                    tassoAttivo = rowMatch[1]
+                    break
+                }
+            }
+        }
+
+        // Extract tasso from INTERESSI A DEBITO rows
+        if (!tassoPassivo && lineUpper.includes('INTERESSI A DEBITO') && !lineUpper.includes('LIQUIDATI')) {
+            for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+                const rowMatch = lines[j].match(/^\d{2}\.\d{2}\.\d{4}\s+([\d,]+%)\s/)
+                if (rowMatch) {
+                    tassoPassivo = rowMatch[1]
+                    break
+                }
+            }
+        }
+    }
+
+    return {
+        interessiCreditoriLordi,
+        interessiDebitoriLordi,
+        ritenutaFiscale,
+        interessiCreditoriNetti,
+        speseTotali,
+        totaleSbilancio,
+        numeriCreditori,
+        numeriDebitori,
+        tassoAttivo,
+        tassoPassivo,
+    }
 }
 
 /**
@@ -1428,6 +1643,18 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
 
     const bankDetected = detectBank(fullText)
 
+    // --- Extract account number from IBAN line ---
+    // Pattern: "IBAN: IT 14 G 03075 02200 CC8500852708" → "CC8500852708"
+    let accountNumber: string | undefined
+    const ibanMatch = fullText.match(/IBAN[:\s]+IT\s*\d{2}\s*[A-Z]\s*\d{5}\s*\d{5}\s*(CC?\d+)/i)
+    if (ibanMatch) {
+        accountNumber = ibanMatch[1]
+    } else {
+        // Fallback: look for standalone CC+digits pattern
+        const ccMatch = fullText.match(/\bCC\s*(\d{8,12})\b/)
+        if (ccMatch) accountNumber = 'CC' + ccMatch[1]
+    }
+
     let saldoIniziale = 0
     let saldoFinale = 0
     let periodStart: string | undefined
@@ -1454,10 +1681,13 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
     // Find end of movements section
     let movEnd = fullText.length
     const movEndMarkers = [
-        'COMPETENZE', 'DATI PER IL CALCOLO ISEE', 'AVVISI E NOVITA',
+        'DATI PER IL CALCOLO ISEE', 'AVVISI E NOVITA',
         'La sicurezza dei Clienti', 'RIASSUNTO SCALARE',
         'Ai sensi del D.Lgs',
     ]
+    // Note: 'COMPETENZE' is NOT a valid end marker — it appears inside movement
+    // descriptions (e.g., "Competenze complessive al 31/12/2022") and would truncate
+    // the section before SALDO FINALE.
     for (const marker of movEndMarkers) {
         const idx = upper.indexOf(marker.toUpperCase(), movStart + 20)
         if (idx !== -1 && idx < movEnd) movEnd = idx
@@ -1564,8 +1794,11 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
                     if (/SALDO\s+FINALE/i.test(nextLine)) break
 
                     // Amount-only line: "40.000,00" or "8,59 -"
+                    // Guard: must contain a comma (Italian decimal separator) to be a real amount.
+                    // This rejects dates (31.12.2023, 20240215) and ref numbers (0088015775)
+                    // that appear on their own line in SDD/bonifico descriptions.
                     const amtMatch = nextLine.match(/^([\d.,]+)\s*(-)?$/)
-                    if (amtMatch && amount === 0) {
+                    if (amtMatch && amount === 0 && amtMatch[1].includes(',')) {
                         amount = parseItalianNumber(amtMatch[1])
                         isNeg = !!amtMatch[2]
                         continue
@@ -1706,11 +1939,16 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
 
     const movementsSum = movements.reduce((s, m) => s + m.amount, 0)
 
+    // Parse COMPETENZE section (interessi, numeri, spese)
+    const competenze = parseGeneraliCompetenze(fullText) || undefined
+
     return {
         saldoIniziale, saldoFinale,
         periodStart, periodEnd,
         movements, movementsSum,
         bankDetected,
+        accountNumber,
         isCC: true as const,
+        competenze,
     }
 }

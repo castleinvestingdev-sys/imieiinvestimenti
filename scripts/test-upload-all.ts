@@ -6,6 +6,7 @@
  */
 import { readFileSync, readdirSync } from 'fs'
 import path from 'path'
+import http from 'http'
 import { createClient } from '@supabase/supabase-js'
 
 const BASE_URL = 'http://localhost:3000'
@@ -97,20 +98,41 @@ async function uploadPdf(filePath: string): Promise<any> {
     const fileBuffer = readFileSync(filePath)
     const fileName = path.basename(filePath)
 
-    const formData = new FormData()
-    formData.append('file', new Blob([fileBuffer], { type: 'application/pdf' }), fileName)
-    formData.append('userId', userId)
+    // Use http.request instead of fetch to bypass Node.js undici 300s bodyTimeout
+    const boundary = '----FormBoundary' + Math.random().toString(36).substr(2)
+    const parts: Buffer[] = []
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/pdf\r\n\r\n`))
+    parts.push(fileBuffer)
+    parts.push(Buffer.from('\r\n'))
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="userId"\r\n\r\n${userId}\r\n`))
+    parts.push(Buffer.from(`--${boundary}--\r\n`))
+    const body = Buffer.concat(parts)
 
-    const resp = await fetch(`${BASE_URL}/api/parse-pdf`, {
-        method: 'POST',
-        body: formData,
-        headers: {
-            'Cookie': getAuthCookies(),
-        },
-        signal: AbortSignal.timeout(600000),
+    return new Promise((resolve, reject) => {
+        const req = http.request({
+            hostname: 'localhost',
+            port: 3000,
+            path: '/api/parse-pdf',
+            method: 'POST',
+            headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': body.length,
+                'Cookie': getAuthCookies(),
+            },
+            timeout: 600000,
+        }, (res) => {
+            let data = ''
+            res.on('data', (chunk) => { data += chunk })
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)) }
+                catch { reject(new Error(data.substring(0, 500))) }
+            })
+        })
+        req.on('error', reject)
+        req.on('timeout', () => { req.destroy(new Error('Request timeout after 600s')); })
+        req.write(body)
+        req.end()
     })
-
-    return await resp.json()
 }
 
 async function fetchAnalyses(): Promise<any[]> {

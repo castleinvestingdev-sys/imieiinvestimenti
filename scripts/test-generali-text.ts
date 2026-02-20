@@ -15,7 +15,7 @@ const DIRS = [
 async function run() {
   let totalPdfs = 0;
   let dtOk = 0, dtFail = 0, dtEmpty = 0;
-  let ccOk = 0, ccFail = 0;
+  let ccOk = 0, ccFail = 0, ccCompMissing = 0;
   let totalWithMov = 0;
 
   for (const { label, dir, type } of DIRS) {
@@ -60,7 +60,15 @@ async function run() {
         if (error < 1) ccOk++;
         else ccFail++;
 
+        const comp = ccResult.competenze;
+        const compStatus = comp ? '✅' : '❌';
         console.log(`${status} ${shortName}: saldoIniz=${ccResult.saldoIniziale.toFixed(2)}, saldoFin=${ccResult.saldoFinale.toFixed(2)}, delta=${expectedDelta.toFixed(2)}, movSum=${movSum.toFixed(2)}, err=${error.toFixed(2)}€ (${errorPct}%), mov=${ccResult.movements.length}, period=${ccResult.periodStart || '?'}→${ccResult.periodEnd || '?'}, bank=${ccResult.bankDetected || '?'}`);
+        if (comp) {
+          console.log(`   ${compStatus} COMPETENZE: numCred=${comp.numeriCreditori.toFixed(2)}, numDeb=${comp.numeriDebitori.toFixed(2)}, intCred=${comp.interessiCreditoriLordi.toFixed(2)}, intDeb=${comp.interessiDebitoriLordi.toFixed(2)}, spese=${comp.speseTotali.toFixed(2)}, ritenuta=${comp.ritenutaFiscale.toFixed(2)}, tasso=${comp.tassoAttivo || 'n/a'}/${comp.tassoPassivo || 'n/a'}`);
+        } else {
+          console.log(`   ${compStatus} COMPETENZE: not found`);
+          ccCompMissing++;
+        }
 
         if (error >= 1) {
           console.log(`   ⚠️  Expected delta: ${expectedDelta.toFixed(2)}, Got movSum: ${movSum.toFixed(2)}, Diff: ${(movSum - expectedDelta).toFixed(2)}€`);
@@ -105,7 +113,7 @@ async function run() {
   console.log(`\n${'='.repeat(70)}`);
   console.log(`📊 RIEPILOGO: ${totalPdfs} PDF totali`);
   console.log(`   DT: ✅ ${dtOk} OK | ⬜ ${dtEmpty} vuoti | ❌ ${dtFail} con gap`);
-  console.log(`   CC/LIQ: ✅ ${ccOk} OK (err < 1€) | ❌ ${ccFail} con errore`);
+  console.log(`   CC/LIQ: ✅ ${ccOk} OK (err < 1€) | ❌ ${ccFail} con errore | COMPETENZE mancanti: ${ccCompMissing}`);
   console.log(`   📋 ${totalWithMov} DT con movimenti estratti`);
   console.log('='.repeat(70));
 }
