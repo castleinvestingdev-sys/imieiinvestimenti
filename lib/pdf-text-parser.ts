@@ -86,6 +86,15 @@ const BANK_PATTERNS: { name: string; patterns: RegExp[] }[] = [
 
 export function detectBank(text: string): string | null {
     const upper = text.toUpperCase()
+    // First: check only the header (first 1500 chars) to avoid false positives
+    // from other bank names mentioned in transaction descriptions (CC/conto corrente PDFs)
+    const header = upper.substring(0, 1500)
+    for (const bank of BANK_PATTERNS) {
+        for (const pat of bank.patterns) {
+            if (pat.test(header)) return bank.name
+        }
+    }
+    // Fallback: check full text
     for (const bank of BANK_PATTERNS) {
         for (const pat of bank.patterns) {
             if (pat.test(upper)) return bank.name
@@ -878,10 +887,15 @@ export function extractPortfolioFromText(fullText: string): TextPortfolioResult 
 
     const holdingsSum = holdings.reduce((s, h) => s + h.marketValue, 0)
 
+    // If no explicit total found but we have holdings, use holdingsSum as total
+    // (Banca Generali PDFs don't have a "CONTROVALORE TOTALE" line)
+    const effectiveTotal = total > 0 ? total : holdingsSum
+    const effectiveTotalSource = total > 0 ? totalSource : (holdingsSum > 0 ? 'keyword' as const : 'none' as const)
+
     return {
         holdings,
-        total,
-        totalSource,
+        total: effectiveTotal,
+        totalSource: effectiveTotalSource,
         holdingsSum,
         bankDetected,
         sectionFound: consistenzaSection.length > 50,
@@ -1275,7 +1289,12 @@ function parseGeneraliMovimenti(movSection: string): TextMovimentiResult {
     const ISIN_HEADER_RE = /^([A-Z]{2}[A-Z0-9]{9}\d)\s*-\s*/
     const SALDO_INIZIALE_RE = /^(\d{2}\.\d{2}\.\d{4})\s+Saldo\s+Iniziale\s+(\d+)/i
     const SALDO_FINALE_RE = /^(\d{2}\.\d{2}\.\d{4})\s+Saldo\s+Finale\s+(\d+)/i
-    const GENERALI_MOV_RE = /^(\d{2}\.\d{2}\.\d{4})\s+(Acquisto|Vendita)\s+titoli/i
+    // Match buy/sell operations (quantity-changing):
+    // - "Acquisto titoli", "Acquisto in collocamento-opv"
+    // - "Vendita titoli"
+    // - "scarico con liquidazione"
+    // Does NOT match income operations (no quantity change): "Incasso dividendi", "Incasso proventi certificates"
+    const GENERALI_MOV_RE = /^(\d{2}\.\d{2}\.\d{4})\s+(Acquisto\b|Vendita\b|scarico\s+con\s+liquidazione)/i
 
     let currentIsin = ''
 
@@ -1303,31 +1322,46 @@ function parseGeneraliMovimenti(movSection: string): TextMovimentiResult {
         }
 
         // Movement line: "DD.MM.YYYY Acquisto/Vendita titoli - Op. N° ... del"
+        // Also: "DD.MM.YYYY Acquisto in collocamento-opv - Op. N° ..."
+        // Also: "DD.MM.YYYY scarico con liquidazione - scarico - Op. N° ..."
         // Data on continuation lines: "DD.MM.YYYY" (ref date), then "QTY PRICE RATE FEES CURRENCY AMOUNT"
         const movMatch = trimmed.match(GENERALI_MOV_RE)
         if (movMatch) {
             const dateRaw = movMatch[1]
             const date = dateRaw.replace(/\./g, '/')
-            const opType = movMatch[2].toLowerCase() === 'acquisto' ? 'Acquisto' as const : 'Vendita' as const
+            const opRaw = movMatch[2].toLowerCase()
+            const opType = opRaw.startsWith('acquisto') ? 'Acquisto' as const : 'Vendita' as const
 
-            // Look ahead for the data line with quantity (up to 3 lines after the operation line)
-            // The data line starts with a number (quantity) followed by price and other numbers
+            // Look ahead for the data line with quantity (up to 5 lines after the operation line)
+            // Format varies: "Operaz. N° ... del" / "DD.MM.YYYY" / "QTY (EUR) PRICE RATE AMOUNT"
             let qty = 0
-            for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+            for (let j = i + 1; j < lines.length && j <= i + 5; j++) {
                 const dataLine = lines[j].trim()
                 if (!dataLine) continue
                 // Skip reference date line (just a date)
                 if (/^\d{2}\.\d{2}\.\d{4}\s*$/.test(dataLine)) continue
                 // Skip "del DD.MM.YYYY" continuation
                 if (/^del\s+\d{2}\.\d{2}\.\d{4}/i.test(dataLine)) continue
-                // Data line starts with quantity: "100 44,30000 1,00000 ..."
+                // Skip "Operaz. N°" continuation lines
+                if (/^Operaz/i.test(dataLine)) continue
+                // Skip "scarico -" continuation line
+                if (/^scarico\s*-/i.test(dataLine)) continue
+                // Stop if we hit the next Saldo or ISIN header
+                if (/^(\d{2}\.\d{2}\.\d{4})\s+Saldo/i.test(dataLine)) break
+                if (ISIN_HEADER_RE.test(dataLine)) break
+                // Data line starts with quantity: "15" or "100 44,30000 1,00000 ..."
                 // or "-60 120,00000 ..." (negative for sells)
                 const qtyMatch = dataLine.match(/^-?(\d+(?:,\d+)?)\s/)
                 if (qtyMatch) {
                     qty = parseItalianNumber(qtyMatch[1])
                     break
                 }
-                break
+                // Also match standalone integer (just "15" on its own line)
+                const standaloneQty = dataLine.match(/^(\d+)$/)
+                if (standaloneQty) {
+                    qty = parseInt(standaloneQty[1])
+                    break
+                }
             }
 
             if (qty > 0) {
@@ -1336,11 +1370,347 @@ function parseGeneraliMovimenti(movSection: string): TextMovimentiResult {
                     date,
                     quantity: qty,
                     operationType: opType,
-                    description: movMatch[2] + ' titoli',
+                    description: trimmed.substring(11).trim(),
                 })
             }
         }
     }
 
     return { startQuantities, endQuantities, movements }
+}
+
+// ── Banca Generali CC/LIQ (Estratto Conto Corrente / Liquidità) Parser ──────
+
+export interface TextCCMovement {
+    date: string              // DD/MM/YYYY
+    valueDate?: string        // DD/MM/YYYY (data valuta)
+    amount: number            // positive = entrata, negative = uscita
+    description: string
+    category?: string         // BONIFICO, SOTTOSCRIZ. FONDI/SICAV, etc.
+}
+
+export interface TextCCResult {
+    saldoIniziale: number
+    saldoFinale: number
+    periodStart?: string      // DD/MM/YYYY
+    periodEnd?: string        // DD/MM/YYYY
+    movements: TextCCMovement[]
+    movementsSum: number      // sum of all movements
+    bankDetected: string | null
+    isCC: true
+}
+
+/**
+ * Detect if the PDF text is a Banca Generali CC/LIQ (Estratto Conto Corrente / Liquidità).
+ */
+export function isGeneraliCC(fullText: string): boolean {
+    const upper = fullText.toUpperCase()
+    return /BANCA\s*GENERALI/i.test(fullText) &&
+        (upper.includes('ESTRATTO CONTO CORRENTE') || upper.includes('EC LIQUIDIT'))
+}
+
+/**
+ * Extract CC/LIQ data from Banca Generali Estratto Conto Corrente / Liquidità PDFs.
+ * Extracts: saldo iniziale/finale, period dates, individual cash movements.
+ *
+ * Two format variants:
+ * OLD (pre-2024): dates DD/MM/YYYY
+ *   - Uscita: "DD/MM/YYYY DD/MM/YYYY AMOUNT-"  (amount with trailing "-" on date line)
+ *   - Entrata: "DD/MM/YYYY DD/MM/YYYY Description...\n...\nAMOUNT\tCATEGORY"
+ *     (amount on separate tab-separated line, always positive)
+ *
+ * NEW (2024+): dates DD.MM.YYYY
+ *   - "DD.MM.YYYY DD.MM.YYYY DESCRIPTION\n...\nAMOUNT" or "AMOUNT -"
+ *     (amount on separate line, with " -" suffix for negatives)
+ */
+export function extractGeneraliCCData(fullText: string): TextCCResult | null {
+    fullText = normalizeInvisibleChars(fullText)
+
+    const bankDetected = detectBank(fullText)
+
+    let saldoIniziale = 0
+    let saldoFinale = 0
+    let periodStart: string | undefined
+    let periodEnd: string | undefined
+
+    // --- Extract from RIEPILOGO section (amounts on same line as label) ---
+    const saldoInizNuovo = fullText.match(/Saldo\s+iniziale\s+al\s+(\d{2})[./](\d{2})[./](\d{4})\s+([\d.,]+)/i)
+    if (saldoInizNuovo) {
+        periodStart = `${saldoInizNuovo[1]}/${saldoInizNuovo[2]}/${saldoInizNuovo[3]}`
+        saldoIniziale = parseItalianNumber(saldoInizNuovo[4])
+    }
+
+    const saldoFinNuovo = fullText.match(/Saldo\s+finale\s+al\s+(\d{2})[./](\d{2})[./](\d{4})\s+([\d.,]+)/i)
+    if (saldoFinNuovo) {
+        periodEnd = `${saldoFinNuovo[1]}/${saldoFinNuovo[2]}/${saldoFinNuovo[3]}`
+        saldoFinale = parseItalianNumber(saldoFinNuovo[4])
+    }
+
+    // --- Extract ELENCO MOVIMENTI section ---
+    const upper = fullText.toUpperCase()
+    const movStart = upper.indexOf('ELENCO MOVIMENTI')
+    if (movStart === -1) return null
+
+    // Find end of movements section
+    let movEnd = fullText.length
+    const movEndMarkers = [
+        'COMPETENZE', 'DATI PER IL CALCOLO ISEE', 'AVVISI E NOVITA',
+        'La sicurezza dei Clienti', 'RIASSUNTO SCALARE',
+        'Ai sensi del D.Lgs',
+    ]
+    for (const marker of movEndMarkers) {
+        const idx = upper.indexOf(marker.toUpperCase(), movStart + 20)
+        if (idx !== -1 && idx < movEnd) movEnd = idx
+    }
+
+    const movSection = fullText.substring(movStart, movEnd)
+
+    // Split preserving original lines (tabs are significant for old format)
+    const rawLines = movSection.split('\n')
+
+    // Clean page breaks: remove page footer/header boilerplate between pages
+    const cleanedLines: string[] = []
+    let inPageBreak = false
+    for (const line of rawLines) {
+        const t = line.trim()
+        if (!t) continue
+        if (/^Pagina\s+\d+/i.test(t) || /^--\s*\d+\s*of\s*\d+\s*--$/i.test(t)) { inPageBreak = true; continue }
+        if (/^F:\d+\/\d+/i.test(t)) continue
+        if (/^Banca Generali S\.p\.A/i.test(t)) continue
+        if (/^soggetta alla direzione/i.test(t)) continue
+        if (/^Fondo Interbancario/i.test(t)) continue
+        if (/^Uffici Operativi/i.test(t)) continue
+        if (/^Iscrizione al Reg/i.test(t)) continue
+        if (inPageBreak && /^Conto\s+Corrente$/i.test(t)) continue
+        if (inPageBreak && /^IBAN\s+/i.test(t)) { inPageBreak = false; continue }
+        inPageBreak = false
+        cleanedLines.push(line.trimEnd())  // keep leading whitespace for tab detection
+    }
+
+    const movements: TextCCMovement[] = []
+    let foundSaldoIniziale = false
+    let foundSaldoFinale = false
+
+    // Detect format: new format uses DD.MM.YYYY (dots) in movement section
+    const isNewFormat = /^\d{2}\.\d{2}\.\d{4}\s+\d{2}\.\d{2}\.\d{4}\s+\S/m.test(movSection)
+
+    for (let i = 0; i < cleanedLines.length; i++) {
+        const trimmed = cleanedLines[i].trim()
+        if (!trimmed) continue
+
+        // --- SALDO INIZIALE ---
+        const siMatch = trimmed.match(/^(\d{2})[./](\d{2})[./](\d{4})\s+SALDO\s+INIZIALE\s+([\d.,]+)/i)
+        if (siMatch) {
+            const siAmount = parseItalianNumber(siMatch[4])
+            // ELENCO MOVIMENTI saldo ALWAYS overrides RIEPILOGO (ground truth)
+            saldoIniziale = siAmount
+            periodStart = `${siMatch[1]}/${siMatch[2]}/${siMatch[3]}`
+            foundSaldoIniziale = true
+            continue
+        }
+
+        // --- SALDO FINALE ---
+        // Old format: "AMOUNT\tDD/MM/YYYY SALDO FINALE"
+        const sfMatchTab = trimmed.match(/([\d.,]+)\t(\d{2})[./](\d{2})[./](\d{4})\s+SALDO\s+FINALE/i)
+        if (sfMatchTab) {
+            saldoFinale = parseItalianNumber(sfMatchTab[1])
+            periodEnd = `${sfMatchTab[2]}/${sfMatchTab[3]}/${sfMatchTab[4]}`
+            foundSaldoFinale = true
+            continue
+        }
+        // Old format variant: "AMOUNT DD/MM/YYYY SALDO FINALE" (space instead of tab)
+        const sfMatch1 = trimmed.match(/^([\d.,]+)\s+(\d{2})[./](\d{2})[./](\d{4})\s+SALDO\s+FINALE/i)
+        if (sfMatch1) {
+            saldoFinale = parseItalianNumber(sfMatch1[1])
+            periodEnd = `${sfMatch1[2]}/${sfMatch1[3]}/${sfMatch1[4]}`
+            foundSaldoFinale = true
+            continue
+        }
+        // New format: "DD.MM.YYYY SALDO FINALE AMOUNT"
+        const sfMatch2 = trimmed.match(/^(\d{2})[./](\d{2})[./](\d{4})\s+SALDO\s+FINALE\s+([\d.,]+)/i)
+        if (sfMatch2) {
+            saldoFinale = parseItalianNumber(sfMatch2[4])
+            periodEnd = `${sfMatch2[1]}/${sfMatch2[2]}/${sfMatch2[3]}`
+            foundSaldoFinale = true
+            continue
+        }
+
+        // Skip lines before SALDO INIZIALE or after SALDO FINALE
+        if (!foundSaldoIniziale) continue
+        if (foundSaldoFinale) continue
+
+        // Skip header/meta lines
+        if (/^Data\s+operazione/i.test(trimmed)) continue
+        if (/^Elenco,\s+in\s+ordine/i.test(trimmed)) continue
+
+        if (isNewFormat) {
+            // === NEW FORMAT (2024+) ===
+            // Date line: "DD.MM.YYYY DD.MM.YYYY DESCRIPTION"
+            // Amount on separate line: "AMOUNT" (positive) or "AMOUNT -" (negative)
+            const dateMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2})\.(\d{2})\.(\d{4})\s+(.+)/)
+            if (dateMatch) {
+                const date = `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`
+                const valueDate = `${dateMatch[4]}/${dateMatch[5]}/${dateMatch[6]}`
+                let desc = dateMatch[7].trim()
+                let amount = 0
+                let isNeg = false
+
+                // Look ahead for amount on subsequent lines
+                for (let j = i + 1; j < cleanedLines.length && j <= i + 8; j++) {
+                    const nextLine = cleanedLines[j].trim()
+                    if (!nextLine) continue
+                    // Stop at next movement line or SALDO FINALE
+                    if (/^\d{2}\.\d{2}\.\d{4}\s+/.test(nextLine)) break
+                    if (/SALDO\s+FINALE/i.test(nextLine)) break
+
+                    // Amount-only line: "40.000,00" or "8,59 -"
+                    const amtMatch = nextLine.match(/^([\d.,]+)\s*(-)?$/)
+                    if (amtMatch && amount === 0) {
+                        amount = parseItalianNumber(amtMatch[1])
+                        isNeg = !!amtMatch[2]
+                        continue
+                    }
+
+                    // Description continuation
+                    desc += ' ' + nextLine
+                }
+
+                if (amount > 0) {
+                    movements.push({
+                        date, valueDate,
+                        amount: isNeg ? -amount : amount,
+                        description: desc,
+                    })
+                }
+                continue
+            }
+        } else {
+            // === OLD FORMAT (pre-2024) ===
+            // Three patterns:
+            // 1. Uscita: "DD/MM/YYYY DD/MM/YYYY AMOUNT-" (amount with trailing minus)
+            // 2. Entrata inline: "DD/MM/YYYY DD/MM/YYYY Description AMOUNT\tCATEGORY" (tab on same line)
+            // 3. Entrata multiline: "DD/MM/YYYY DD/MM/YYYY Description\n...\nAMOUNT\tCATEGORY"
+
+            // Check if this is a date-starting line
+            const dateLineMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2})\/(\d{2})\/(\d{4})\s+(.+)/)
+            if (dateLineMatch) {
+                const date = `${dateLineMatch[1]}/${dateLineMatch[2]}/${dateLineMatch[3]}`
+                const valueDate = `${dateLineMatch[4]}/${dateLineMatch[5]}/${dateLineMatch[6]}`
+                const rest = dateLineMatch[7]
+
+                // Pattern 1: Uscita — rest is just "AMOUNT-"
+                const uscitaInline = rest.match(/^([\d.,]+)-\s*$/)
+                if (uscitaInline) {
+                    const amount = parseItalianNumber(uscitaInline[1])
+                    let desc = ''
+                    let category = ''
+                    for (let j = i + 1; j < cleanedLines.length && j <= i + 6; j++) {
+                        const nextLine = cleanedLines[j].trim()
+                        if (!nextLine) continue
+                        if (/^\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}/.test(nextLine)) break
+                        if (/^\d{2}\/\d{2}\/\d{4}\s+SALDO/i.test(nextLine)) break
+                        if (/SALDO\s+FINALE/i.test(nextLine)) break
+                        // Category line (ALL CAPS, short, no tab)
+                        if (/^[A-Z][A-Z./ ']+$/.test(nextLine) && nextLine.length < 40 && !category) {
+                            category = nextLine
+                        } else {
+                            desc += (desc ? ' ' : '') + nextLine
+                        }
+                    }
+                    movements.push({
+                        date, valueDate, amount: -amount,
+                        description: desc, category: category || undefined,
+                    })
+                    continue
+                }
+
+                // Pattern 2: Entrata inline — rest contains "Description AMOUNT\tCATEGORY"
+                // Check if the original (un-trimmed) line has a tab
+                const rawLine = cleanedLines[i]
+                if (rawLine.includes('\t')) {
+                    const tabParts = rawLine.split('\t')
+                    const lastPart = tabParts[tabParts.length - 1].trim()
+                    // Find amount: look for Italian number just before the tab
+                    const beforeTab = tabParts.slice(0, -1).join('\t')
+                    const amtInLine = beforeTab.match(/([\d.,]+)\s*(-)?$/)
+                    if (amtInLine) {
+                        const amount = parseItalianNumber(amtInLine[1])
+                        const isNeg = !!amtInLine[2]
+                        // Description is everything between dates and the amount
+                        const descEnd = beforeTab.lastIndexOf(amtInLine[1])
+                        const afterDates = beforeTab.replace(/^\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+/, '')
+                        const desc = afterDates.substring(0, afterDates.lastIndexOf(amtInLine[1])).trim()
+                        const category = /^[A-Z]/.test(lastPart) ? lastPart : ''
+                        movements.push({
+                            date, valueDate,
+                            amount: isNeg ? -amount : amount,
+                            description: desc, category: category || undefined,
+                        })
+                        continue
+                    }
+                }
+
+                // Pattern 3: Entrata multiline — description starts after dates,
+                // amount on a later "AMOUNT\tCATEGORY" line
+                let desc = rest.trim()
+                let amount = 0
+                let isNeg = false
+                let category = ''
+
+                for (let j = i + 1; j < cleanedLines.length && j <= i + 8; j++) {
+                    const nextLine = cleanedLines[j].trim()
+                    const nextRaw = cleanedLines[j]
+                    if (!nextLine) continue
+                    // Stop at next movement date line or SALDO
+                    if (/^\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}/.test(nextLine)) break
+                    if (/^\d{2}\/\d{2}\/\d{4}\s+SALDO/i.test(nextLine)) break
+                    if (/SALDO\s+FINALE/i.test(nextLine)) break
+
+                    // Tab-separated amount + category: "40.000,00\tBONIFICO"
+                    if (nextRaw.includes('\t') && amount === 0) {
+                        const tabParts = nextRaw.split('\t')
+                        const amountPart = tabParts[0].trim()
+                        const catPart = tabParts[tabParts.length - 1].trim()
+                        const amtMatch = amountPart.match(/^([\d.,]+)\s*(-)?$/)
+                        if (amtMatch) {
+                            amount = parseItalianNumber(amtMatch[1])
+                            isNeg = !!amtMatch[2]
+                            if (/^[A-Z]/.test(catPart) && catPart.length < 50) category = catPart
+                            continue
+                        }
+                    }
+
+                    // Category line (ALL CAPS, short, standalone)
+                    if (/^[A-Z][A-Z./ ']+$/.test(nextLine) && nextLine.length < 40 && !category) {
+                        category = nextLine
+                        continue
+                    }
+
+                    // Description continuation
+                    desc += ' ' + nextLine
+                }
+
+                if (amount > 0) {
+                    movements.push({
+                        date, valueDate,
+                        amount: isNeg ? -amount : amount,
+                        description: desc, category: category || undefined,
+                    })
+                }
+                continue
+            }
+        }
+    }
+
+    if (!foundSaldoIniziale && !foundSaldoFinale) return null
+
+    const movementsSum = movements.reduce((s, m) => s + m.amount, 0)
+
+    return {
+        saldoIniziale, saldoFinale,
+        periodStart, periodEnd,
+        movements, movementsSum,
+        bankDetected,
+        isCC: true as const,
+    }
 }

@@ -176,7 +176,7 @@ function DashboardContent() {
     // es. "3100/1000811", "19812/3100/1000811", "19812/3100/01000811" → "31001000811"
     const normalizeAccKey = (acc: string) => {
       if (!acc) return 'ND';
-      const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
+      const segments = acc.split(/[\/\-\s]+/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
       if (segments.length === 0) return 'ND';
       // Use only last segment — the account identifier is unique per bank
       // (filiale code prefix causes mismatches when some PDFs omit it)
@@ -860,7 +860,7 @@ function DashboardContent() {
   // prendi gli ultimi 2 segmenti. Gestisce prefissi filiale (es. "19812/3100/1000811" → "31001000811")
   const normalizeAcc = (acc: string) => {
     if (!acc) return 'ND';
-    const segments = acc.split(/[\/\-]/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
+    const segments = acc.split(/[\/\-\s]+/).map(s => s.replace(/\D/g, '')).filter(s => s.length > 0).map(s => s.replace(/^0+/, '') || '0');
     if (segments.length === 0) return 'ND';
     // Use only last segment — the account identifier is unique per bank
     const core = segments.slice(-1);

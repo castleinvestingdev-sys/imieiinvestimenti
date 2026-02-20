@@ -382,11 +382,22 @@ async function main() {
 
     await init()
 
-    const bankKeys = bankArg === 'ALL' || !bankArg ? Object.keys(BANKS) : [bankArg]
+    // Support comma-separated bank keys: --bank=GEN_CONDORELLI_DT,GEN_ZANACCA_DT,GEN_UGHETTI_DT
+    const bankKeys = bankArg === 'ALL' || !bankArg ? Object.keys(BANKS) : bankArg.split(',')
 
-    // Bank-specific cleanup when testing a single bank; full cleanup for ALL
+    // Bank-specific cleanup when testing specific banks; full cleanup for ALL
+    // Deduplicate cleanup by DB bank name to avoid re-cleaning the same bank multiple times
     if (bankArg && bankArg !== 'ALL') {
-        for (const key of bankKeys) await cleanupBank(key)
+        const cleanedDbNames = new Set<string>()
+        for (const key of bankKeys) {
+            const dbNames = BANK_DB_NAMES[key]
+            if (!dbNames) continue
+            const dbKey = dbNames.sort().join('|')
+            if (!cleanedDbNames.has(dbKey)) {
+                cleanedDbNames.add(dbKey)
+                await cleanupBank(key)
+            }
+        }
     } else {
         await cleanupAll()
     }

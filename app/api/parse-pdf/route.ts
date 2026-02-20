@@ -4512,7 +4512,7 @@ function doesMatchFrequency(days: number, freq: string): boolean {
 
 function normalizeAccountNumber(acc: string): string {
     if (!acc) return '';
-    const segments = acc.split(/[\/\-]/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
+    const segments = acc.split(/[\/\-\s]+/).map(s => s.replace(/^0+/, '') || '0').filter(s => s.length > 0);
     if (segments.length === 0) return '';
     // Use only last segment — the account identifier is unique per bank
     // (filiale code prefix causes mismatches when some PDFs omit it)
