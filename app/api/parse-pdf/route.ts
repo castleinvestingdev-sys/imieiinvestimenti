@@ -13,6 +13,71 @@ import {
     type TextCCResult,
 } from '@/lib/pdf-text-parser'
 
+// ── Classify CC/LIQ movements into 5 standard categories ────────────────────
+// Maps raw PDF categories + descriptions to: Commissioni, Acquisto, Vendita, Proventi, Altro
+function classifyCCMovementType(description: string, amount: number, rawCategory?: string): string {
+    const desc = (description || '').toUpperCase()
+    const cat = (rawCategory || '').toUpperCase()
+    const combined = desc + ' ' + cat
+
+    // ── Proventi (cedole, dividendi, distribuzioni) ──
+    if (/CEDOL[AE]|DIVIDENDO|DISTRIBUZIONE|STACCO\s+CEDOLA|CEDOLE\/DIVIDENDI/.test(combined)) {
+        return 'Proventi'
+    }
+
+    // ── Acquisto (sottoscrizioni fondi, acquisti titoli) ──
+    // IMPORTANT: "pagoBANCOMAT acquisto" is a card payment → Altro, NOT Acquisto
+    if (/PAGOBANCO?MAT/i.test(desc)) {
+        return 'Altro'
+    }
+    if (/SOTTOSCRIZ|SDD\s+LUX\s+IM|SOTTOSCR\.\s*POLIZZE/i.test(combined)) {
+        return 'Acquisto'
+    }
+    if (/ACQUISTO\s+TITOLI/i.test(combined)) {
+        return 'Acquisto'
+    }
+    if (/COMPRAVENDITA\s+TITOLI/i.test(combined) && amount < 0) {
+        return 'Acquisto'
+    }
+
+    // ── Vendita (rimborsi, vendite, liquidazioni) ──
+    if (/RIMB\.?\s*TITOLI|RIMBORSO\s+TITOLI|RIMBORSO\s+FONDI/i.test(combined)) {
+        return 'Vendita'
+    }
+    if (/VENDITA\s+TITOLI/i.test(combined)) {
+        return 'Vendita'
+    }
+    if (/COMPRAVENDITA\s+TITOLI/i.test(combined) && amount >= 0) {
+        return 'Vendita'
+    }
+    if (/LIQUIDAZIONE\s+TITOLI|SCARICO\s+CON\s+LIQUIDAZIONE/i.test(combined)) {
+        return 'Vendita'
+    }
+
+    // ── Commissioni (bolli, imposte, spese bancarie, canoni, commissioni) ──
+    // Match by RAW CATEGORY first (banking classification, always reliable)
+    if (/^BOLLO\b|^RECUPERO\s+BOLLI|^RIACCREDITO\s+BOLLO|^CAPITAL\s+GAIN|^ADDEBITO\s+IMPOSTA/i.test(cat)) {
+        return 'Commissioni'
+    }
+    if (/^COMMISSIONI?\b|^SPESE\b/i.test(cat)) {
+        return 'Commissioni'
+    }
+    // Match by DESCRIPTION — only specific banking fee patterns
+    // (avoid matching "canone locazione", "bollo 1,00 euro" in utility payments, "commissioni 1,50" in bollettini)
+    if (/^BOLLO\s+SU\s+STRUM|^RECUPERO\s+BOLLI|^RIACCREDITO\s+BOLLO|^IMPOSTA\s+DI\s+BOLLO|^ADDEBITO\s+IMPOSTA/i.test(desc)) {
+        return 'Commissioni'
+    }
+    if (/IMPOSTA\s+D\.?\s*LGS|IMPOSTA\s+DI\s+BOLLO/i.test(desc)) {
+        return 'Commissioni'
+    }
+    if (/SPESE\s+(MENSIL|TRIMESTRAL|ANNUAL|BANCAR|TENUT)/i.test(desc)) {
+        return 'Commissioni'
+    }
+
+    // ── Altro (everything else: bonifici, stipendi, pagamenti, utenze, etc.) ──
+    return 'Altro'
+}
+
 // Allow up to 10 minutes for Gemini PDF processing (CC/Liquidità PDFs can be large)
 export const maxDuration = 600
 
@@ -785,7 +850,8 @@ const PARSE_PDF_JSON_SCHEMA = {
                 vendita_titoli_count: { type: 'number' },
                 movimenti_titoli_count: { type: 'number' },
                 acquisto_titoli_amount: { type: 'number' },
-                vendita_titoli_amount: { type: 'number' }
+                vendita_titoli_amount: { type: 'number' },
+                giacenza_media: { type: 'number' }
             }
         },
         movements: {
@@ -1591,6 +1657,7 @@ Cerca il valore percentuale (es. 0,0100 o 0,01%).
 Estrai:
 - **tasso_attivo**: Tasso applicato agli interessi creditori (es. "0.01%" o 0.0100)
 - **tasso_passivo**: Tasso applicato agli interessi debitori
+- **giacenza_media**: Giacenza media annuale (importo in euro, se presente nella sezione ISEE/DATI PER IL CALCOLO ISEE)
 
 #### 5.4 MOVIMENTI TITOLI (Acquisti e Vendite)
 Analizza la lista movimenti e identifica operazioni su titoli:
@@ -1829,6 +1896,7 @@ PATTERN CRITICO: Quando per un ISIN c'è un RIMBORSO totale seguito da un SOTT P
     "interessi_creditori_periodi": [{"data": "GG/MM/AAAA", "interessi": 0}],
     "tasso_attivo": "0%",
     "tasso_passivo": "0%",
+    "giacenza_media": 0,
     "acquisto_titoli_count": 0,
     "vendita_titoli_count": 0,
     "movimenti_titoli_count": 0,
@@ -1918,7 +1986,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         let textCCFastPath: TextCCResult | null = null
         if (isGeneraliCC(originalPdfText)) {
             textCCFastPath = extractGeneraliCCData(originalPdfText)
-            if (textCCFastPath && textCCFastPath.movements.length > 0) {
+            if (textCCFastPath && (textCCFastPath.movements.length > 0 || (textCCFastPath.saldoIniziale !== 0 && textCCFastPath.saldoFinale !== 0))) {
                 const textDelta = textCCFastPath.saldoFinale - textCCFastPath.saldoIniziale
                 const textErr = Math.abs(textDelta - textCCFastPath.movementsSum)
                 logProgress('TEXT CC/LIQ FAST PATH', [
@@ -1952,7 +2020,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                             value_date: m.valueDate || m.date,
                             amount: m.amount,
                             description: m.description,
-                            movement_type: m.category || 'Altro',
+                            movement_type: classifyCCMovementType(m.description, m.amount, m.category),
                             sign_source: 'text_parser',
                         })),
                         finalPortfolio: [],
@@ -2141,7 +2209,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                         value_date: m.valueDate || m.date,
                         amount: m.amount,
                         description: m.description,
-                        movement_type: m.category || 'Altro',
+                        movement_type: classifyCCMovementType(m.description, m.amount, m.category),
                         sign_source: 'text_parser',
                     }))
                 }
@@ -2190,6 +2258,12 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                         `Ritenuta: ${comp.ritenutaFiscale.toFixed(2)}`,
                         `Tasso: ${comp.tassoAttivo || 'n/a'}/${comp.tassoPassivo || 'n/a'}`,
                     ].join(' | '))
+                }
+
+                // Giacenza media (from ISEE section, outside COMPETENZE)
+                if (textCCResult.giacenzaMedia != null) {
+                    if (!parsed.scalar_data) parsed.scalar_data = {}
+                    parsed.scalar_data.giacenza_media = textCCResult.giacenzaMedia
                 }
 
                 const textDelta = textCCResult.saldoFinale - textCCResult.saldoIniziale
