@@ -824,6 +824,17 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
     const accMatch = text.match(accRe)
     if (accMatch) { meta.accountNumber = accMatch[1].trim(); found = true }
 
+    // Banca Generali DT: "Numero Dossier ... 850/005/0947918" or IBAN "T58500947918"
+    if (!meta.accountNumber) {
+        const genDossierMatch = text.match(/Numero\s+Dossier[\s\S]{0,200}?(\d{3}\/\d{3}\/\d{5,10})/i)
+        if (genDossierMatch) { meta.accountNumber = genDossierMatch[1].trim(); found = true }
+        else {
+            // Fallback: DT IBAN with T-prefix like "T58500947918"
+            const genIbanMatch = text.match(/IBAN[:\s]+IT\s*\d{2}\s*[A-Z]\s*\d{5}\s*\d{5}\s*(T\d{8,12})/i)
+            if (genIbanMatch) { meta.accountNumber = genIbanMatch[1].trim(); found = true }
+        }
+    }
+
     // Doc type: RENDICONTO TITOLI = DOSSIER, CONTO CORRENTE = CC
     if (/RENDICONTO\s+TITOLI/i.test(text) || /DEPOSITO\s+AMMINISTRATO/i.test(text) || /DOSSIER\s+TITOLI/i.test(text)) {
         meta.accountType = 'DOSSIER'; found = true
