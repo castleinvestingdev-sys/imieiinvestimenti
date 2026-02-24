@@ -2020,6 +2020,7 @@ function DashboardContent() {
                       { label: 'Interessi Passivi Lordi:', key: 'scalar_data.interessi_passivi_lordi', type: 'currency', isScalar: true, negativeColor: true },
                       { label: 'Tasso Attivo:', key: 'scalar_data.tasso_attivo', type: 'text', isScalar: true },
                       { label: 'Tasso Passivo:', key: 'scalar_data.tasso_passivo', type: 'text', isScalar: true },
+                      { label: 'Giacenza Media:', key: 'scalar_data.giacenza_media', type: 'currency', isScalar: true },
                     ].map((item) => {
                       // Calculate "Totale movimenti liquidità" (Final - Initial)
                       let balanceDelta = null;
@@ -2088,8 +2089,8 @@ function DashboardContent() {
 
                       const isModified = editingValues[`${item.key}_is_modified`]
                       const isScalar = (item as any).isScalar || false
-                      const isNotFound = (val === 'non trovato' || val === undefined || val === null || val === 'assenti' || val === 0) && !isVerification && !isScalar
-                      const scalarNotFound = isScalar && (val === undefined || val === null || val === 'assenti' || val === 0 || val === '0%')
+                      const isNotFound = (val === 'non trovato' || val === undefined || val === null || val === 'assenti') && !isVerification && !isScalar
+                      const scalarNotFound = isScalar && (val === undefined || val === null || val === 'assenti')
 
                       const formulaMap: Record<string, string> = {
                         'total_movements_amount': 'Saldo finale - Saldo iniziale',

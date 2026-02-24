@@ -9,6 +9,9 @@ import {
     parseMovimentiFromText,
     isGeneraliCC,
     extractGeneraliCCData,
+    extractPeriodFromText,
+    extractHolderFromText,
+    detectBank,
     type TextPortfolioResult,
     type TextCCResult,
 } from '@/lib/pdf-text-parser'
@@ -2031,6 +2034,97 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     parseSuccess = true
                     // Jump past the Gemini loop; text CC override will recognize this and skip
                 }
+            }
+        }
+
+        // === FAST PATH: DT (Dossier Titoli) with deterministic text parser ===
+        // When the text parser extracted verified holdings + period + bank, skip Gemini entirely.
+        // This saves 20-60s per DT PDF and produces more accurate numerical results.
+        if (!parseSuccess && isDossierFromText && textParserResult && textParserResult.holdings.length > 0) {
+            const verifiedCount = textParserResult.holdings.filter(h => h.verified).length
+            const verifiedRatio = verifiedCount / textParserResult.holdings.length
+
+            // Get period from metadata (already extracted by extractMetadataFromText inside extractPortfolioFromText)
+            // Fallback to extractPeriodFromText for broader coverage
+            const metaPeriod = textParserResult.metadata
+            let dtPeriodEnd = metaPeriod?.periodEnd
+            let dtPeriodStart = metaPeriod?.periodStart
+            if (!dtPeriodEnd) {
+                const fallbackPeriod = extractPeriodFromText(originalPdfText)
+                dtPeriodEnd = fallbackPeriod.periodEnd
+                if (!dtPeriodStart) dtPeriodStart = fallbackPeriod.periodStart
+            }
+
+            // Get holder from metadata, fallback to extractHolderFromText
+            let dtHolder = metaPeriod?.holder
+            if (!dtHolder || !dtHolder.includes(' ')) {
+                dtHolder = extractHolderFromText(originalPdfText) || dtHolder
+            }
+
+            const dtBank = textParserResult.bankDetected || metaPeriod?.bankName
+            const dtAccount = metaPeriod?.accountNumber
+
+            // Convert DD/MM/YYYY to YYYY-MM-DD
+            const toISO = (ddmmyyyy: string | undefined) => {
+                if (!ddmmyyyy) return undefined
+                const [d, m, y] = ddmmyyyy.split('/')
+                return d && m && y ? `${y}-${m}-${d}` : undefined
+            }
+
+            const dtPeriodEndISO = toISO(dtPeriodEnd)
+            const dtPeriodStartISO = toISO(dtPeriodStart)
+
+            // Activate fast path when: >80% verified holdings AND period_end available AND bank detected
+            if (verifiedRatio >= 0.8 && dtPeriodEndISO && dtBank) {
+                logProgress('DT FAST PATH', [
+                    `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati, ${(verifiedRatio * 100).toFixed(0)}%)`,
+                    `Totale: ${textParserResult.total.toFixed(2)}€`,
+                    `Periodo: ${dtPeriodStartISO || '?'} → ${dtPeriodEndISO}`,
+                    `Banca: ${dtBank}`,
+                    `Titolare: ${dtHolder || 'non rilevato'}`,
+                    `Conto: ${dtAccount || 'N/D'}`,
+                ].join(' | '))
+                logProgress('SKIP GEMINI', 'Text parser DT estrazione completa, salto Gemini AI')
+
+                // Build finalPortfolio from text parser holdings
+                const dtPortfolio = textParserResult.holdings.map(h => ({
+                    isin: h.isin,
+                    name: h.name || '',
+                    assetType: '',  // will be enriched by downstream processing if needed
+                    currency: h.currency,
+                    quantity: h.quantity,
+                    price: h.price,
+                    exchangeRate: h.exchangeRate || 1,
+                    marketValue: h.marketValue,
+                }))
+
+                const dtParsed = {
+                    type: 'DOSSIER',
+                    info: {
+                        bankName: dtBank,
+                        period_start: dtPeriodStartISO,
+                        period_end: dtPeriodEndISO,
+                        accountNumber: dtAccount || 'N/D',
+                        holder: dtHolder || undefined,
+                    },
+                    summary: {
+                        portfolio_total_extracted: { value: textParserResult.total, source: 'text_parser' },
+                    },
+                    finalPortfolio: dtPortfolio,
+                    securityMovements: [],
+                    movementsStartQuantities: {},
+                    movements: [],
+                    dividends: [],
+                }
+                resText = JSON.stringify(dtParsed)
+                parseSuccess = true
+            } else {
+                logProgress('DT FAST PATH SKIP', [
+                    `Verificati: ${(verifiedRatio * 100).toFixed(0)}%`,
+                    `Period: ${dtPeriodEndISO || 'mancante'}`,
+                    `Bank: ${dtBank || 'mancante'}`,
+                    '→ uso Gemini',
+                ].join(' | '))
             }
         }
 

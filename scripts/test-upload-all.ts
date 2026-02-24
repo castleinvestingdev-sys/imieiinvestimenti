@@ -17,6 +17,7 @@ const BANKS: Record<string, { dir: string; label: string }> = {
     CA115: { dir: '/Users/leon/Desktop/banche EC/Credit Agricole/Dossier Titoli/115', label: 'Crédit Agricole 115' },
     CA591: { dir: '/Users/leon/Desktop/banche EC/Credit Agricole/Dossier Titoli/591', label: 'Crédit Agricole 591' },
     CA990: { dir: '/Users/leon/Desktop/banche EC/Credit Agricole/Dossier Titoli/990', label: 'Crédit Agricole 990' },
+    CA_LIQ: { dir: '/Users/leon/Desktop/banche EC/Credit Agricole/Liquidità/6. Credit Agricole 6 - Frigeri Maria Cristina', label: 'Crédit Agricole Liquidità' },
     INTESA: { dir: '/Users/leon/Desktop/banche EC/BANCA INTESA/BANCA INTESA/Dossier titoli', label: 'Banca Intesa' },
     GENERALI: { dir: '/Users/leon/Desktop/banche EC/banca generali', label: 'Banca Generali' },
     // Nuovi clienti Banca Generali
@@ -295,6 +296,7 @@ const BANK_DB_NAMES: Record<string, string[]> = {
     CA115: ['Crédit Agricole', 'Credit Agricole'],
     CA591: ['Crédit Agricole', 'Credit Agricole'],
     CA990: ['Crédit Agricole', 'Credit Agricole'],
+    CA_LIQ: ['Crédit Agricole', 'Credit Agricole'],
     GENERALI: ['Banca Generali'],
     GEN_CONDORELLI_DT: ['Banca Generali'],
     GEN_CONDORELLI_CC: ['Banca Generali'],

@@ -103,6 +103,107 @@ export function detectBank(text: string): string | null {
     return null
 }
 
+// ── Period Extraction ────────────────────────────────────────────────────────
+
+/** Extract period start/end dates from DT PDF text. Returns DD/MM/YYYY format. */
+export function extractPeriodFromText(text: string): { periodStart?: string; periodEnd?: string } {
+    // Intesa: "PERIODO RENDICONTATO: 1.07.2015 - 31.12.2015"
+    const intesaMatch = text.match(/PERIODO\s+RENDICONTATO:\s*(\d{1,2})[./](\d{2})[./](\d{4})\s*[-–]\s*(\d{1,2})[./](\d{2})[./](\d{4})/i)
+    if (intesaMatch) {
+        return {
+            periodStart: `${intesaMatch[1].padStart(2, '0')}/${intesaMatch[2]}/${intesaMatch[3]}`,
+            periodEnd: `${intesaMatch[4].padStart(2, '0')}/${intesaMatch[5]}/${intesaMatch[6]}`,
+        }
+    }
+
+    // Generali: "periodo intercorso dal 31.03.2023 al 30.06.2023"
+    const generaliMatch = text.match(/periodo\s+intercorso\s+dal\s+(\d{2})[./](\d{2})[./](\d{4})\s+al\s+(\d{2})[./](\d{2})[./](\d{4})/i)
+    if (generaliMatch) {
+        return {
+            periodStart: `${generaliMatch[1]}/${generaliMatch[2]}/${generaliMatch[3]}`,
+            periodEnd: `${generaliMatch[4]}/${generaliMatch[5]}/${generaliMatch[6]}`,
+        }
+    }
+
+    // CA: "ESTRATTO CONTO TITOLI AL 31/12/2018" (only end date)
+    const caMatch = text.match(/ESTRATTO\s+CONTO\s+(?:DEPOSITO\s+)?TITOLI\s+(?:E\s+OBBLIGAZ[A-Z.]*\s+)?AL\s+(\d{2})[./](\d{2})[./](\d{4})/i)
+    if (caMatch) {
+        // CA DT typically covers 1 year, try to find start date from "Rendiconto dal DD/MM/YYYY al DD/MM/YYYY"
+        const caRangeMatch = text.match(/(?:Rendiconto|Periodo)\s+dal\s+(\d{2})[./](\d{2})[./](\d{4})\s+al\s+(\d{2})[./](\d{2})[./](\d{4})/i)
+        if (caRangeMatch) {
+            return {
+                periodStart: `${caRangeMatch[1]}/${caRangeMatch[2]}/${caRangeMatch[3]}`,
+                periodEnd: `${caRangeMatch[4]}/${caRangeMatch[5]}/${caRangeMatch[6]}`,
+            }
+        }
+        return { periodEnd: `${caMatch[1]}/${caMatch[2]}/${caMatch[3]}` }
+    }
+
+    // Generic: "al DD/MM/YYYY" or "AL DD.MM.YYYY" near start of text
+    const header = text.substring(0, 3000)
+    const genericEnd = header.match(/\bAL\s+(\d{2})[./](\d{2})[./](\d{4})\b/i)
+    if (genericEnd) {
+        return { periodEnd: `${genericEnd[1]}/${genericEnd[2]}/${genericEnd[3]}` }
+    }
+
+    return {}
+}
+
+// ── Holder Extraction ────────────────────────────────────────────────────────
+
+/** Extract holder (client name) from DT PDF text. */
+export function extractHolderFromText(text: string): string | null {
+    const header = text.substring(0, 3000)
+
+    // Generali: "Intestato a" followed by "NAME1,NAME2,NAME3 CDG_CODE"
+    // Pattern: "Numero Dossier Intestato a CDG\n850/005/0947918 CONDORELLI ALESSANDRA,ZANACCA GIANLUCA,ZANACCA FRA 1362943"
+    const generaliMatch = header.match(/Intestato\s+a\s+CDG\s*\n[^\n]*?\d+\/\d+\/\d+\s+([A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s,]+?)(?:\s+\d{5,}|\s*$)/im)
+    if (generaliMatch) {
+        const raw = generaliMatch[1].trim()
+        // Split by comma, title-case each person, sort
+        const persons = raw.split(',').map(p => p.trim()).filter(p => p.length > 1)
+        const titled = persons.map(p =>
+            p.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+        ).sort()
+        return titled.join(', ')
+    }
+
+    // Intesa: "Int.a NOME COGNOME" appears in the holdings section
+    const intaMatch = text.match(/Int\.a\s+([A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s]+?)(?:\s*\n|\s+\d)/m)
+    if (intaMatch) {
+        const raw = intaMatch[1].trim()
+        return raw.split(/\s+/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+    }
+
+    // CA: name on its own line before "ESTRATTO CONTO TITOLI"
+    // Pattern: "FRIGERI MARIA CRISTINA\nVIALE SOLFERINO 50\n...\nESTRATTO CONTO TITOLI"
+    const caEctIdx = header.search(/ESTRATTO\s+CONTO\s+(?:DEPOSITO\s+)?TITOLI/i)
+    if (caEctIdx > 0) {
+        const beforeEct = header.substring(0, caEctIdx).split('\n').map(l => l.trim()).filter(l => l.length > 0)
+        // Look for a name line: ALL CAPS, only letters and spaces, 2-4 words, 8-50 chars
+        for (const line of beforeEct) {
+            if (/^[A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s]+$/.test(line) && line.length >= 8 && line.length <= 50) {
+                const words = line.split(/\s+/)
+                if (words.length >= 2 && words.length <= 5 && !/(VIA|VIALE|PIAZZA|CORSO|LARGO|PARMA|ROMA|MILANO|BOLOGNA)/i.test(line)) {
+                    return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+                }
+            }
+        }
+    }
+
+    // Generic: "Intestato a:" pattern (also used by Generali CC)
+    const intestatoMatch = header.match(/Intestato\s+a:\s*([A-ZÀÈÉÌÒÙÜ][A-ZÀÈÉÌÒÙÜ\s,]+)/i)
+    if (intestatoMatch) {
+        const raw = intestatoMatch[1].trim()
+        const persons = raw.split(',').map(p => p.trim()).filter(p => p.length > 1)
+        return persons.map(p =>
+            p.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+        ).sort().join(', ')
+    }
+
+    return null
+}
+
 // ── ISIN Validation ──────────────────────────────────────────────────────────
 
 // Italian words that happen to match the ISIN pattern [A-Z]{2}[A-Z0-9]{10}
@@ -1492,6 +1593,7 @@ export interface TextCCResult {
     holder?: string           // Intestatario name from "Intestato a:" field
     isCC: true
     competenze?: TextCCCompetenze       // COMPETENZE section data
+    giacenzaMedia?: number               // Giacenza media annuale (from ISEE section)
 }
 
 /**
@@ -2071,6 +2173,13 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
     // Parse COMPETENZE section (interessi, numeri, spese)
     const competenze = parseGeneraliCompetenze(fullText) || undefined
 
+    // Extract Giacenza media from ISEE section: "Giacenza media 9.032,40 Euro"
+    let giacenzaMedia: number | undefined
+    const giacenzaMatch = fullText.match(/Giacenza\s+media\s+([\d.,]+)\s*Euro/i)
+    if (giacenzaMatch) {
+        giacenzaMedia = parseItalianNumber(giacenzaMatch[1])
+    }
+
     return {
         saldoIniziale, saldoFinale,
         periodStart, periodEnd,
@@ -2080,5 +2189,6 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
         holder,
         isCC: true as const,
         competenze,
+        giacenzaMedia,
     }
 }
