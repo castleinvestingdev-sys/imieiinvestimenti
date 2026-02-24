@@ -1,16 +1,41 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useUpload } from '@/contexts/UploadContext'
 
 export default function UploadNotification() {
   const { hasActiveUploads, activeHolder, uploadQueue, completedCount, totalCount, overallProgress } = useUpload()
   const [expanded, setExpanded] = useState(false)
-
-  if (!hasActiveUploads) return null
+  const [showCompletion, setShowCompletion] = useState(false)
+  const prevActiveRef = useRef(false)
 
   const currentFile = uploadQueue.find(f => f.status === 'uploading' || f.status === 'analyzing')
   const errorCount = uploadQueue.filter(f => f.status === 'error').length
+  const doneCount = uploadQueue.filter(f => f.status === 'done').length
+  const allFinished = totalCount > 0 && doneCount + errorCount === totalCount
+
+  // Auto-dismiss: show "Completato" for 8 seconds then hide
+  // (queue cleanup is handled by UploadContext's managed timer — not here)
+  useEffect(() => {
+    if (allFinished && !hasActiveUploads) {
+      setShowCompletion(true)
+      const timer = setTimeout(() => {
+        setShowCompletion(false)
+      }, 8000)
+      return () => clearTimeout(timer)
+    }
+    if (hasActiveUploads) {
+      setShowCompletion(false)
+    }
+  }, [allFinished, hasActiveUploads])
+
+  // Track active state transitions
+  useEffect(() => {
+    prevActiveRef.current = hasActiveUploads
+  }, [hasActiveUploads])
+
+  if (!hasActiveUploads && !showCompletion) return null
+
   const holderDisplay = currentFile?.holder || activeHolder || null
 
   return (
@@ -44,14 +69,14 @@ export default function UploadNotification() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
         <span style={{
           fontSize: '1.2rem',
-          animation: 'notifPulse 1.5s ease-in-out infinite',
+          animation: allFinished ? undefined : 'notifPulse 1.5s ease-in-out infinite',
         }}>
-          {errorCount > 0 && completedCount + errorCount === totalCount ? '⚠️' : '📤'}
+          {allFinished ? (errorCount > 0 ? '⚠️' : '✅') : '📤'}
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a' }}>
-            {errorCount > 0 && completedCount + errorCount === totalCount
-              ? `Completato con ${errorCount} errori`
+            {allFinished
+              ? (errorCount > 0 ? `Completato con ${errorCount} errori` : 'Caricamento completato!')
               : 'Analisi in corso'}
           </div>
           {holderDisplay && (
@@ -61,7 +86,7 @@ export default function UploadNotification() {
           )}
         </div>
         <span style={{ fontSize: '0.75rem', fontWeight: 600, color: errorCount > 0 ? '#ef4444' : '#64748b' }}>
-          {completedCount}/{totalCount}
+          {doneCount + errorCount}/{totalCount}
           {errorCount > 0 && ` (${errorCount} err)`}
         </span>
       </div>
@@ -89,7 +114,7 @@ export default function UploadNotification() {
         overflow: 'hidden',
       }}>
         <div style={{
-          width: `${overallProgress}%`,
+          width: allFinished ? '100%' : `${overallProgress}%`,
           height: '100%',
           background: errorCount > 0
             ? 'linear-gradient(90deg, #f59e0b, #fbbf24)'
@@ -99,15 +124,17 @@ export default function UploadNotification() {
           position: 'relative',
           overflow: 'hidden',
         }}>
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-            animation: 'notifShimmer 1.5s infinite',
-          }} />
+          {!allFinished && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
+              animation: 'notifShimmer 1.5s infinite',
+            }} />
+          )}
         </div>
       </div>
 
@@ -179,7 +206,7 @@ export default function UploadNotification() {
 
       {/* Hint */}
       <div style={{ fontSize: '0.65rem', color: '#94a3b8', marginTop: '6px', textAlign: 'center' }}>
-        {expanded ? 'Clicca per ridurre' : 'Clicca per dettagli'}
+        {allFinished ? 'Si chiuderà automaticamente' : (expanded ? 'Clicca per ridurre' : 'Clicca per dettagli')}
       </div>
 
       <style>{`

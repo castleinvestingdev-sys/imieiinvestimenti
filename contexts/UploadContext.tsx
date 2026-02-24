@@ -65,6 +65,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const currentFileIndexRef = useRef<number>(0)
   const onSuccessCallbacks = useRef<Set<OnSuccessCallback>>(new Set())
   const activeHolderRef = useRef<string | null>(null)
+  // Ref-based guard to prevent concurrent processQueue invocations
+  // (useState closures can be stale in async callbacks, causing double-invocation)
+  const isProcessingRef = useRef(false)
+  const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
@@ -91,16 +95,22 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   // ── Process queue ─────────────────────────────────────────────────────────
 
   const processQueue = useCallback(async () => {
-    if (isProcessing || fileQueueRef.current.length === 0) return
+    // Use ref for the guard — state closures can be stale in async code
+    if (isProcessingRef.current || fileQueueRef.current.length === 0) return
 
+    isProcessingRef.current = true
     setIsProcessing(true)
+    currentFileIndexRef.current = 0
 
-    if (!isProcessing && uploadQueue.length === 0) {
-      currentFileIndexRef.current = 0
+    // Cancel any pending cleanup from a previous batch
+    if (cleanupTimerRef.current) {
+      clearTimeout(cleanupTimerRef.current)
+      cleanupTimerRef.current = null
     }
 
-    let lastHolder: string | null = null
     let successCount = 0
+
+    try {
 
     const processOneFile = async (fileId: string, file: File, userId: string) => {
       setUploadQueue(prev => prev.map(f => {
@@ -140,7 +150,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
         setTimeout(() => {
           setUploadQueue(prev => prev.map(f =>
-            f.id === fileId ? { ...f, status: 'analyzing' as const, stage: 'Analisi AI avviata...' } : f
+            f.id === fileId && f.status === 'uploading'
+              ? { ...f, status: 'analyzing' as const, stage: 'Analisi AI avviata...' }
+              : f
           ))
         }, 3000)
 
@@ -174,7 +186,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
         const onFileSuccess = async (analysisId?: string, holder?: string) => {
           if (holder) {
-            lastHolder = holder
             activeHolderRef.current = normalizeHolder(holder)
           }
           successCount++
@@ -270,7 +281,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       if (executing.size > 0) {
         await new Promise(resolve => setTimeout(resolve, 300))
       }
-      const p = processOneFile(item.id, item.file, item.userId).then(() => { executing.delete(p) })
+      const p = processOneFile(item.id, item.file, item.userId).catch(() => {}).finally(() => { executing.delete(p) })
       executing.add(p)
       if (executing.size >= PARALLEL_LIMIT) {
         await Promise.race(executing)
@@ -278,13 +289,17 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     }
     await Promise.all(executing)
 
-    setIsProcessing(false)
-
-    // Clear completed files after 5 seconds
-    setTimeout(() => {
-      setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
-    }, 5000)
-  }, [isProcessing, uploadQueue.length])
+    } finally {
+      isProcessingRef.current = false
+      setIsProcessing(false)
+      // Managed cleanup: clear done files after notification has time to show completion
+      cleanupTimerRef.current = setTimeout(() => {
+        setUploadQueue(prev => prev.filter(f => f.status !== 'done'))
+        cleanupTimerRef.current = null
+      }, 10000)
+    }
+  // No closure deps needed — uses refs for guards and setters are stable
+  }, [])
 
   // ── Prevent page close during active uploads ─────────────────────────────
 
@@ -298,9 +313,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   // ── Auto-trigger queue processing ─────────────────────────────────────────
 
   useEffect(() => {
-    if (!isProcessing && fileQueueRef.current.length > 0) {
+    if (!isProcessingRef.current && fileQueueRef.current.length > 0) {
       const timer = setTimeout(() => {
-        if (!isProcessing && fileQueueRef.current.length > 0) {
+        if (!isProcessingRef.current && fileQueueRef.current.length > 0) {
           processQueue()
         }
       }, 500)
@@ -336,6 +351,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
     if (holder) {
       activeHolderRef.current = normalizeHolder(holder)
+    }
+
+    // Cancel any pending cleanup from a previous batch
+    if (cleanupTimerRef.current) {
+      clearTimeout(cleanupTimerRef.current)
+      cleanupTimerRef.current = null
     }
 
     setUploadQueue(prev => {
