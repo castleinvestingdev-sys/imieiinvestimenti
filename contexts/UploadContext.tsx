@@ -259,16 +259,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Parallel with concurrency limit of 3 with stagger delay to spread Gemini API calls
+    // Parallel with concurrency limit of 3
     const PARALLEL_LIMIT = 3
     const executing = new Set<Promise<void>>()
     while (fileQueueRef.current.length > 0) {
       const item = fileQueueRef.current.shift()
       if (!item) break
       currentFileIndexRef.current++
-      // Stagger starts by 2s to spread Gemini API calls and reduce rate limit pressure
+      // Small stagger (300ms) to let React batch renders between file starts
       if (executing.size > 0) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await new Promise(resolve => setTimeout(resolve, 300))
       }
       const p = processOneFile(item.id, item.file, item.userId).then(() => { executing.delete(p) })
       executing.add(p)

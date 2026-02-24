@@ -1155,11 +1155,14 @@ function DashboardContent() {
 
     const currH: Record<string, number> = {}
     ;(doc.holdings || []).forEach((h: any) => { if (h.isin) currH[h.isin] = h.quantity || 0 })
+    // Only compare ISINs from the previous portfolio (skip new acquisitions not in prevH)
     const allIsins = new Set([...Object.keys(prevH), ...Object.keys(calcInit)])
     let matchCount = 0
     let totalCount = 0
     const mismatchIsinsB: string[] = []
     allIsins.forEach(isin => {
+      // Skip ISINs not in previous portfolio — new acquisitions don't need coherence checking
+      if (!(isin in prevH) && (prevH[isin] || 0) === 0) return
       totalCount++
       if (Math.abs((calcInit[isin] || 0) - (prevH[isin] || 0)) >= 0.0001) {
         // Skip holdings that fully disappeared or appeared without any movements
@@ -2503,6 +2506,9 @@ function DashboardContent() {
                     }
                   }
                 })
+                // Only compare ISINs that exist in the previous portfolio OR in calcInitial
+                // (but filter out ISINs that are ONLY in calcInitial with prevQty=0 — these are new
+                // acquisitions that don't need to be "confronted" with the previous portfolio)
                 const allIsins = [...new Set([...Object.keys(prevHoldings), ...Object.keys(calcInitial)])]
                 rows = allIsins.map(isin => {
                   const prev = prevHoldings[isin] || { name: '', qty: 0, value: 0 }
@@ -2517,6 +2523,11 @@ function DashboardContent() {
                     qtyDiff,
                     match: Math.abs(qtyDiff) < 0.0001
                   }
+                }).filter(r => {
+                  // Exclude ISINs not in previous portfolio with zero previous qty
+                  // These are new acquisitions — their appearance doesn't need coherence checking
+                  if (r.prevQty === 0 && !prevHoldings[r.isin]) return false
+                  return true
                 })
 
                 // Separate corporate action ISINs and full disappearance/appearance from real mismatches

@@ -1370,63 +1370,15 @@ export async function POST(request: NextRequest) {
             ].filter(Boolean).join(' | '))
         }
 
-        // === OCR TRANSCRIPTION FOR SCANNED PDFs ===
-        // Trigger OCR when:
-        // 1. Text too short to determine document type (< 200 chars), OR
-        // 2. Text parser identified a dossier but found 0 holdings AND no ISINs in text (scanned financial pages)
-        //    If ISINs are present, it's a text-based PDF that simply has no holdings (e.g. all positions sold) — OCR won't help
+        // === HANDLE PDFs WITHOUT EXTRACTABLE TEXT ===
+        // Some bank PDFs (e.g., newer Intesa 2024+) have embedded fonts that pdf-parse can't extract.
+        // These are NOT scanned images — they're real bank PDFs in a different format.
+        // Skip the separate OCR transcription step (saves 60-120s) and let the main Gemini call
+        // handle them directly via PDF vision with a shorter timeout.
         const hasIsinsInText = /[A-Z]{2}[A-Z0-9]{9}\d/.test(pdfExtractedText)
-        const dossierWithNoHoldings = isDossierFromText && textParserResult && textParserResult.holdings.length === 0 && !hasIsinsInText
         const textTooShort = pdfExtractedText.length < 200
-        if (textTooShort || dossierWithNoHoldings) {
-            logProgress('OCR TRASCRIZIONE', `Testo estratto troppo corto (${pdfExtractedText.length} car) — tentativo trascrizione OCR con Gemini`)
-            try {
-                const ocrModelName = process.env.GEMINI_MODEL || 'gemini-3-pro-preview'
-                const ocrText = await callGeminiTranscriber(GEMINI_API_KEY, ocrModelName, base64Data)
-                if (ocrText && ocrText.length > 200) {
-                    logProgress('OCR COMPLETATA', `${ocrText.length} car trascritti`)
-
-                    // Update pdfExtractedText with transcription for downstream use
-                    pdfExtractedText = ocrText
-                    // Do NOT update hasMovementsSection for scanned PDFs — OCR movements are unreliable for coherence
-
-                    // Re-extract MOVIMENTI section from transcribed text
-                    if (hasMovementsSection) {
-                        const movStart = pdfExtractedText.toUpperCase().indexOf('MOVIMENTI')
-                        let movEnd = pdfExtractedText.toUpperCase().indexOf('DIVIDENDI', movStart > 0 ? movStart : 0)
-                        if (movEnd === -1) movEnd = pdfExtractedText.length
-                        movimentiSectionText = pdfExtractedText.substring(Math.max(0, movStart - 20), movEnd).trim()
-                    }
-
-                    // Re-evaluate isDossier from transcribed text
-                    const upperOcr = pdfExtractedText.toUpperCase()
-                    const isDossierFromOcr = upperOcr.includes('DOSSIER TITOLI') || upperOcr.includes('ESTRATTO CONTO TITOLI')
-                        || upperOcr.includes('RENDICONTO') || upperOcr.includes('PORTAFOGLIO TITOLI')
-                        || upperOcr.includes('CONSISTENZA') || upperOcr.includes('SITUAZIONE DEPOSITO')
-
-                    if (isDossierFromOcr) {
-                        textParserResult = extractPortfolioFromText(pdfExtractedText)
-                        textPortfolioTotal = textParserResult.total
-
-                        const verifiedCount = textParserResult.holdings.filter(h => h.verified).length
-                        logProgress('OCR TEXT PARSER', [
-                            `Banca: ${textParserResult.bankDetected || 'non rilevata'}`,
-                            `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati)`,
-                            `Totale: ${textParserResult.total > 0 ? textParserResult.total.toFixed(2) + '€' : 'non trovato'}`,
-                            `Somma: ${textParserResult.holdingsSum.toFixed(2)}€`,
-                            textParserResult.total > 0
-                                ? `Gap: ${Math.abs(textParserResult.holdingsSum - textParserResult.total).toFixed(2)}€ (${((Math.abs(textParserResult.holdingsSum - textParserResult.total) / textParserResult.total) * 100).toFixed(1)}%)`
-                                : '',
-                        ].filter(Boolean).join(' | '))
-                    } else {
-                        logProgress('OCR TIPO', 'Testo trascritto non sembra un dossier titoli')
-                    }
-                } else {
-                    logProgress('OCR SKIP', `Trascrizione troppo corta (${ocrText?.length || 0} car)`)
-                }
-            } catch (ocrErr: any) {
-                logProgress('OCR ERRORE', `Trascrizione fallita: ${ocrErr.message?.substring(0, 100)}`)
-            }
+        if (textTooShort) {
+            logProgress('PDF SENZA TESTO', `Testo estratto: ${pdfExtractedText.length} car — il PDF verrà analizzato direttamente da Gemini (senza OCR intermedio)`)
         }
 
         const systemPrompt = `Sei un esperto analista finanziario italiano specializzato in estratti conto bancari.
