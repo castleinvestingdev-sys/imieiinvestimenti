@@ -4,15 +4,36 @@ import { useState, useEffect, useRef } from 'react'
 import { useUpload } from '@/contexts/UploadContext'
 
 export default function UploadNotification() {
-  const { hasActiveUploads, activeHolder, uploadQueue, completedCount, totalCount, overallProgress } = useUpload()
+  const { hasActiveUploads, activeHolder, uploadQueue, overallProgress } = useUpload()
   const [expanded, setExpanded] = useState(false)
   const [showCompletion, setShowCompletion] = useState(false)
   const prevActiveRef = useRef(false)
 
+  // Refs for direct DOM updates (bypasses React reconciliation issues)
+  const counterRef = useRef<HTMLDivElement>(null)
+  const activeInfoRef = useRef<HTMLDivElement>(null)
+
   const currentFile = uploadQueue.find(f => f.status === 'uploading' || f.status === 'analyzing')
-  const errorCount = uploadQueue.filter(f => f.status === 'error').length
+  const activeCount = uploadQueue.filter(f => f.status === 'uploading' || f.status === 'analyzing').length
+  // Compute counts directly from the array — same source as the ✅ icons in expanded list
   const doneCount = uploadQueue.filter(f => f.status === 'done').length
+  const errorCount = uploadQueue.filter(f => f.status === 'error').length
+  const totalCount = uploadQueue.length
   const allFinished = totalCount > 0 && doneCount + errorCount === totalCount
+
+  // Direct DOM update after every render — guaranteed to reflect latest values
+  // regardless of React reconciliation behavior
+  useEffect(() => {
+    if (counterRef.current) {
+      const text = `${doneCount + errorCount}/${totalCount}`
+      counterRef.current.textContent = text + (errorCount > 0 ? ` (${errorCount} err)` : '')
+      counterRef.current.style.color = errorCount > 0 ? '#ef4444' : doneCount > 0 ? '#10b981' : '#64748b'
+    }
+    if (activeInfoRef.current) {
+      activeInfoRef.current.textContent = activeCount > 0 && !allFinished ? `${activeCount} in corso` : ''
+      activeInfoRef.current.style.display = activeCount > 0 && !allFinished ? 'block' : 'none'
+    }
+  })
 
   // Auto-dismiss: show "Completato" for 8 seconds then hide
   // (queue cleanup is handled by UploadContext's managed timer — not here)
@@ -77,7 +98,7 @@ export default function UploadNotification() {
           <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a' }}>
             {allFinished
               ? (errorCount > 0 ? `Completato con ${errorCount} errori` : 'Caricamento completato!')
-              : 'Analisi in corso'}
+              : activeCount > 0 ? `${activeCount} ${activeCount === 1 ? 'analisi' : 'analisi'} in corso` : 'In attesa...'}
           </div>
           {holderDisplay && (
             <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
@@ -85,10 +106,15 @@ export default function UploadNotification() {
             </div>
           )}
         </div>
-        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: errorCount > 0 ? '#ef4444' : '#64748b' }}>
-          {doneCount + errorCount}/{totalCount}
-          {errorCount > 0 && ` (${errorCount} err)`}
-        </span>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          {/* Counter: updated via ref to bypass React reconciliation issues */}
+          <div ref={counterRef} style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+            {doneCount + errorCount}/{totalCount}
+          </div>
+          <div ref={activeInfoRef} style={{ fontSize: '0.65rem', color: '#10b981', marginTop: '1px' }}>
+            {activeCount > 0 && !allFinished ? `${activeCount} in corso` : ''}
+          </div>
+        </div>
       </div>
 
       {/* Current file with stage */}

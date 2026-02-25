@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import * as https from 'https'
+import * as fs from 'fs'
 import crypto from 'crypto'
+
+// Persistent logging to file (readable from CLI: tail -f /tmp/parse-pdf-errors.log)
+const ERROR_LOG = '/tmp/parse-pdf-errors.log'
+function logError500(fileName: string, error: string) {
+    const line = `[${new Date().toISOString()}] ❌ ${fileName}: ${error}\n`
+    try { fs.appendFileSync(ERROR_LOG, line) } catch (e) { console.error('[LOG WRITE FAIL]', line.trim(), e) }
+}
+function logWarning(fileName: string, warning: string) {
+    const line = `[${new Date().toISOString()}] ⚠️ ${fileName}: ${warning}\n`
+    try { fs.appendFileSync(ERROR_LOG, line) } catch (e) { console.error('[LOG WRITE FAIL]', line.trim(), e) }
+}
 import { PDFParse } from 'pdf-parse'
 import {
     extractPortfolioFromText,
@@ -9,6 +21,8 @@ import {
     parseMovimentiFromText,
     isGeneraliCC,
     extractGeneraliCCData,
+    isCreditAgricoleEC,
+    extractCreditAgricoleECData,
     extractPeriodFromText,
     extractHolderFromText,
     detectBank,
@@ -1247,9 +1261,16 @@ export async function POST(request: NextRequest) {
         console.log('\n========== NUOVA RICHIESTA PARSE PDF ==========')
         console.log('⏰ Timestamp:', new Date().toISOString())
 
+        // Auth check: verify user is authenticated before consuming Gemini credits
+        const authSupabase = await createClient()
+        const { data: { user: authUser }, error: authError } = await authSupabase.auth.getUser()
+        if (authError || !authUser) {
+            return NextResponse.json({ success: false, error: 'Non autenticato' }, { status: 401 })
+        }
+
         const formData = await request.formData()
         const file = formData.get('file') as File
-        const userId = formData.get('userId') as string
+        const userId = authUser.id // Use authenticated user ID, not form data
         const guestEmail = formData.get('guestEmail') as string
         const forceRecalculate = formData.get('force') === 'true'
         const dryRun = formData.get('dryRun') === 'true'  // Test mode: skip DB save, return normalized data
@@ -1292,8 +1313,17 @@ export async function POST(request: NextRequest) {
             }
         } else if (file && (userId || guestEmail)) {
             // === NORMAL MODE: File from upload ===
+            // Server-side file validation
+            const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+            if (file.size > MAX_FILE_SIZE) {
+                return NextResponse.json({ success: false, error: `File troppo grande (${(file.size / 1024 / 1024).toFixed(1)}MB). Massimo 50MB.` }, { status: 400 })
+            }
             const fileBuffer = await file.arrayBuffer()
             pdfBuffer = Buffer.from(fileBuffer)
+            // Validate it's actually a PDF (check magic bytes)
+            if (pdfBuffer.length < 5 || pdfBuffer.subarray(0, 5).toString() !== '%PDF-') {
+                return NextResponse.json({ success: false, error: 'Il file non è un PDF valido' }, { status: 400 })
+            }
         } else {
             console.error('[SERVER] ERRORE: File, UserId o Email mancante')
             return NextResponse.json({ success: false, error: 'File, UserId o Email mancante' }, { status: 400 })
@@ -1347,7 +1377,8 @@ export async function POST(request: NextRequest) {
         // Run the text-first parser on extracted PDF text — this is the primary source for numbers
         const upperText = pdfExtractedText.toUpperCase()
         const isDossierFromText = upperText.includes('DOSSIER TITOLI') || upperText.includes('ESTRATTO CONTO TITOLI')
-            || upperText.includes('RENDICONTO') || upperText.includes('PORTAFOGLIO TITOLI')
+            || upperText.includes('RENDICONTO TITOLI') || upperText.includes('RENDICONTO DEI TITOLI')
+            || upperText.includes('PORTAFOGLIO TITOLI')
         // Save original pdf-parse text before OCR might overwrite pdfExtractedText
         const originalPdfText = pdfExtractedText
 
@@ -1358,16 +1389,47 @@ export async function POST(request: NextRequest) {
             textPortfolioTotal = textParserResult.total
 
             const verifiedCount = textParserResult.holdings.filter(h => h.verified).length
+            const unverifiedHoldings = textParserResult.holdings.filter(h => !h.verified)
+            const meta = textParserResult.metadata
+
             logProgress('TEXT PARSER', [
-                `Banca: ${textParserResult.bankDetected || 'non rilevata'}`,
-                `Sezione: ${textParserResult.sectionFound ? 'trovata' : 'NON trovata'}`,
+                `Banca: ${textParserResult.bankDetected || '⚠️ NON RILEVATA'}`,
+                `Sezione: ${textParserResult.sectionFound ? 'trovata' : '⚠️ NON trovata'}`,
                 `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati)`,
-                `Totale: ${textParserResult.total > 0 ? textParserResult.total.toFixed(2) + '€' : 'non trovato'}`,
+                `Totale: ${textParserResult.total > 0 ? textParserResult.total.toFixed(2) + '€' : '⚠️ non trovato'}`,
                 `Somma: ${textParserResult.holdingsSum.toFixed(2)}€`,
                 textParserResult.total > 0
                     ? `Gap: ${Math.abs(textParserResult.holdingsSum - textParserResult.total).toFixed(2)}€ (${((Math.abs(textParserResult.holdingsSum - textParserResult.total) / textParserResult.total) * 100).toFixed(1)}%)`
                     : '',
+                `Periodo: ${meta?.periodEnd || '⚠️ mancante'}`,
+                `Titolare: ${meta?.holder || '⚠️ mancante'}`,
+                `Conto: ${meta?.accountNumber || '⚠️ mancante'}`,
             ].filter(Boolean).join(' | '))
+
+            // Log each unverified holding with details for debugging
+            if (unverifiedHoldings.length > 0) {
+                logWarning(fileName, `${unverifiedHoldings.length}/${textParserResult.holdings.length} holdings non verificati`)
+                for (const h of unverifiedHoldings) {
+                    const expected = h.quantity * h.price * (h.exchangeRate || 1)
+                    logProgress('⚠️ HOLDING NON VERIFICATO', `${h.isin} | qty: ${h.quantity} × price: ${h.price} × rate: ${h.exchangeRate || 1} = ${expected.toFixed(2)}€ vs marketValue: ${h.marketValue.toFixed(2)}€ (diff: ${Math.abs(expected - h.marketValue).toFixed(2)}€)`)
+                }
+            }
+
+            // Log missing metadata fields
+            if (!meta?.periodEnd) logWarning(fileName, 'period_end mancante nel testo')
+            if (!meta?.holder) logWarning(fileName, 'holder mancante nel testo')
+            if (!meta?.accountNumber) logWarning(fileName, 'accountNumber mancante nel testo')
+            if (!textParserResult.bankDetected) logWarning(fileName, 'banca non rilevata nel testo')
+
+            // Detect ISINs in raw text that weren't captured as holdings
+            const allIsinsInText = originalPdfText.match(/[A-Z]{2}[A-Z0-9]{9}\d/g) || []
+            const uniqueIsinsInText = [...new Set(allIsinsInText)]
+            const capturedIsins = new Set(textParserResult.holdings.map(h => h.isin))
+            const missedIsins = uniqueIsinsInText.filter(isin => !capturedIsins.has(isin))
+            if (missedIsins.length > 0) {
+                logProgress('⚠️ ISIN NEL TESTO NON CATTURATI', missedIsins.join(', '))
+                logWarning(fileName, `ISIN nel testo non catturati: ${missedIsins.join(', ')}`)
+            }
         }
 
         // === HANDLE PDFs WITHOUT EXTRACTABLE TEXT ===
@@ -1926,6 +1988,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         const maxRetries = 2
         let resText = ''
         let parseSuccess = false
+        let skipValidationRetry = false  // Set by text parser fast paths to prevent Gemini validation retry
         let lastParseError = ''
         const textParserHasGoodResults = textParserResult && textParserResult.holdings.length > 0
         // LIQUIDITY PDFs (Estratto Conto, Liquidità) have no holdings — use 'low' thinking
@@ -1984,14 +2047,74 @@ Restituisci SOLO il JSON, nessun altro testo.`;
                     }
                     resText = JSON.stringify(ccParsed)
                     parseSuccess = true
+                    skipValidationRetry = true  // Text parser saldi are ground truth, don't retry with Gemini
                     // Jump past the Gemini loop; text CC override will recognize this and skip
                 }
             }
         }
 
-        // === FAST PATH: DT (Dossier Titoli) with deterministic text parser ===
-        // When the text parser extracted verified holdings + period + bank, skip Gemini entirely.
-        // This saves 20-60s per DT PDF and produces more accurate numerical results.
+        // === FAST PATH: Crédit Agricole EC (Estratto Conto / Liquidità) ===
+        // Parse saldi, period, account, holder, and movements from text.
+        // Skip Gemini when movements sum ≈ balance delta (high confidence).
+        if (!parseSuccess && isCreditAgricoleEC(originalPdfText)) {
+            const caEC = extractCreditAgricoleECData(originalPdfText)
+            if (caEC && (caEC.saldoIniziale !== 0 || caEC.saldoFinale !== 0)) {
+                const delta = caEC.saldoFinale - caEC.saldoIniziale
+                const movErr = Math.abs(delta - caEC.movementsSum)
+                logProgress('CA EC TEXT PARSER', [
+                    `Saldo: ${caEC.saldoIniziale.toFixed(2)} → ${caEC.saldoFinale.toFixed(2)}`,
+                    `Delta: ${delta.toFixed(2)}€`,
+                    `MovSum: ${caEC.movementsSum.toFixed(2)}€ (${caEC.movements.length} mov)`,
+                    `Err: ${movErr.toFixed(2)}€`,
+                    `Holder: ${caEC.holder || 'N/D'}`,
+                ].join(' | '))
+
+                // Use fast path when movements balance well:
+                // - Perfect match (< 1€), or
+                // - Small relative error (< 10% of delta AND < 5000€) — covers ambiguous forex/transfer signs
+                // - No movements but saldi OK
+                const movErrRatio = Math.abs(delta) > 0 ? movErr / Math.abs(delta) : 0
+                if (movErr < 1 || (movErrRatio < 0.10 && movErr < 5000) || caEC.movements.length === 0) {
+                    logProgress('SKIP GEMINI', 'CA EC text parser extraction OK, salto Gemini AI')
+                    const ccParsed = {
+                        type: 'LIQUIDITY',
+                        info: {
+                            bankName: caEC.bankDetected || 'Crédit Agricole Italia',
+                            period_start: caEC.periodStart,
+                            period_end: caEC.periodEnd,
+                            accountNumber: caEC.accountNumber || 'N/D',
+                            holder: caEC.holder || undefined,
+                        },
+                        summary: {
+                            initial_balance: { value: caEC.saldoIniziale, source: 'text_parser' },
+                            final_balance: { value: caEC.saldoFinale, source: 'text_parser' },
+                        },
+                        movements: caEC.movements.map(m => ({
+                            date: m.date,
+                            value_date: m.valueDate || m.date,
+                            amount: m.amount,
+                            description: m.description,
+                            movement_type: classifyCCMovementType(m.description, m.amount),
+                            sign_source: 'text_parser',
+                        })),
+                        finalPortfolio: [],
+                        securityMovements: [],
+                        movementsStartQuantities: {},
+                    }
+                    resText = JSON.stringify(ccParsed)
+                    parseSuccess = true
+                    skipValidationRetry = true  // Text parser saldi are ground truth, don't retry with Gemini
+                } else {
+                    // Movement classification imprecise — let Gemini handle movements,
+                    // but we still have saldi + metadata as ground truth
+                    logProgress('CA EC FALLBACK', `Errore movimenti ${movErr.toFixed(2)}€ > 1€, uso Gemini per classificazione`)
+                }
+            }
+        }
+
+        // === DETERMINISTIC PATH: DT (Dossier Titoli) with text parser ===
+        // The text parser is the ONLY source for DT PDFs with extractable text.
+        // Gemini is NEVER used as fallback — if the parser fails, return an error.
         if (!parseSuccess && isDossierFromText && textParserResult && textParserResult.holdings.length > 0) {
             const verifiedCount = textParserResult.holdings.filter(h => h.verified).length
             const verifiedRatio = verifiedCount / textParserResult.holdings.length
@@ -2015,6 +2138,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
 
             const dtBank = textParserResult.bankDetected || metaPeriod?.bankName
             const dtAccount = metaPeriod?.accountNumber
+            const dtSettlementAccount = metaPeriod?.settlementAccount
 
             // Convert DD/MM/YYYY to YYYY-MM-DD
             const toISO = (ddmmyyyy: string | undefined) => {
@@ -2026,58 +2150,144 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             const dtPeriodEndISO = toISO(dtPeriodEnd)
             const dtPeriodStartISO = toISO(dtPeriodStart)
 
-            // Activate fast path when: >80% verified holdings AND period_end available AND bank detected
-            if (verifiedRatio >= 0.8 && dtPeriodEndISO && dtBank) {
-                logProgress('DT FAST PATH', [
-                    `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati, ${(verifiedRatio * 100).toFixed(0)}%)`,
-                    `Totale: ${textParserResult.total.toFixed(2)}€`,
-                    `Periodo: ${dtPeriodStartISO || '?'} → ${dtPeriodEndISO}`,
-                    `Banca: ${dtBank}`,
-                    `Titolare: ${dtHolder || 'non rilevato'}`,
-                    `Conto: ${dtAccount || 'N/D'}`,
-                ].join(' | '))
-                logProgress('SKIP GEMINI', 'Text parser DT estrazione completa, salto Gemini AI')
+            // Validate required metadata — if missing, fail with clear error
+            const missingFields: string[] = []
+            if (!dtPeriodEndISO) missingFields.push('period_end')
+            if (!dtBank) missingFields.push('bank')
 
-                // Build finalPortfolio from text parser holdings
-                const dtPortfolio = textParserResult.holdings.map(h => ({
-                    isin: h.isin,
-                    name: h.name || '',
-                    assetType: '',  // will be enriched by downstream processing if needed
-                    currency: h.currency,
-                    quantity: h.quantity,
-                    price: h.price,
-                    exchangeRate: h.exchangeRate || 1,
-                    marketValue: h.marketValue,
-                }))
-
-                const dtParsed = {
-                    type: 'DOSSIER',
-                    info: {
-                        bankName: dtBank,
-                        period_start: dtPeriodStartISO,
-                        period_end: dtPeriodEndISO,
-                        accountNumber: dtAccount || 'N/D',
-                        holder: dtHolder || undefined,
-                    },
-                    summary: {
-                        portfolio_total_extracted: { value: textParserResult.total, source: 'text_parser' },
-                    },
-                    finalPortfolio: dtPortfolio,
-                    securityMovements: [],
-                    movementsStartQuantities: {},
-                    movements: [],
-                    dividends: [],
-                }
-                resText = JSON.stringify(dtParsed)
-                parseSuccess = true
-            } else {
-                logProgress('DT FAST PATH SKIP', [
-                    `Verificati: ${(verifiedRatio * 100).toFixed(0)}%`,
-                    `Period: ${dtPeriodEndISO || 'mancante'}`,
-                    `Bank: ${dtBank || 'mancante'}`,
-                    '→ uso Gemini',
-                ].join(' | '))
+            if (missingFields.length > 0) {
+                const errorMsg = `Text parser: metadati mancanti (${missingFields.join(', ')}). Holdings: ${textParserResult.holdings.length}, verificati: ${verifiedCount}/${textParserResult.holdings.length}`
+                logProgress('DT PARSER ERROR', errorMsg)
+                logError500(fileName, errorMsg)
+                return NextResponse.json({ success: false, error: errorMsg }, { status: 500 })
             }
+
+            logProgress('DT TEXT PARSER', [
+                `Holdings: ${textParserResult.holdings.length} (${verifiedCount} verificati, ${(verifiedRatio * 100).toFixed(0)}%)`,
+                `Totale: ${textParserResult.total.toFixed(2)}€`,
+                `Periodo: ${dtPeriodStartISO || '?'} → ${dtPeriodEndISO}`,
+                `Banca: ${dtBank}`,
+                `Titolare: ${dtHolder || 'non rilevato'}`,
+                `Conto: ${dtAccount || 'N/D'}`,
+                `Regolamento: ${dtSettlementAccount || 'non rilevato'}`,
+            ].join(' | '))
+
+            // Build finalPortfolio from text parser holdings
+            const dtPortfolio = textParserResult.holdings.map(h => ({
+                isin: h.isin,
+                name: h.name || '',
+                assetType: '',  // will be enriched by downstream processing if needed
+                currency: h.currency,
+                quantity: h.quantity,
+                price: h.price,
+                exchangeRate: h.exchangeRate || 1,
+                marketValue: h.marketValue,
+            }))
+
+            const dtParsed = {
+                type: 'DOSSIER',
+                info: {
+                    bankName: dtBank,
+                    period_start: dtPeriodStartISO,
+                    period_end: dtPeriodEndISO,
+                    accountNumber: dtAccount || 'N/D',
+                    holder: dtHolder || undefined,
+                    settlementAccount: dtSettlementAccount || undefined,
+                },
+                summary: {
+                    portfolio_total_extracted: { value: textParserResult.total, source: 'text_parser' },
+                },
+                finalPortfolio: dtPortfolio,
+                securityMovements: [],
+                movementsStartQuantities: {},
+                movements: [],
+                dividends: [],
+            }
+            resText = JSON.stringify(dtParsed)
+            parseSuccess = true
+        }
+
+        // === DETERMINISTIC PATH: Empty DT (0 holdings — all positions sold or empty dossier) ===
+        if (!parseSuccess && isDossierFromText && textParserResult && textParserResult.holdings.length === 0) {
+            const metaEmpty = textParserResult.metadata
+            const dtBankEmpty = textParserResult.bankDetected || metaEmpty?.bankName
+            let dtPeriodEndEmpty = metaEmpty?.periodEnd
+            let dtPeriodStartEmpty = metaEmpty?.periodStart
+            if (!dtPeriodEndEmpty) {
+                const fallbackPeriod = extractPeriodFromText(originalPdfText)
+                dtPeriodEndEmpty = fallbackPeriod.periodEnd
+                if (!dtPeriodStartEmpty) dtPeriodStartEmpty = fallbackPeriod.periodStart
+            }
+
+            const toISO2 = (ddmmyyyy: string | undefined) => {
+                if (!ddmmyyyy) return undefined
+                const [d, m, y] = ddmmyyyy.split('/')
+                return d && m && y ? `${y}-${m}-${d}` : undefined
+            }
+            const emptyPeriodEndISO = toISO2(dtPeriodEndEmpty)
+            const emptyPeriodStartISO = toISO2(dtPeriodStartEmpty)
+
+            // Validate required metadata — if missing, fail with clear error
+            const missingEmpty: string[] = []
+            if (!emptyPeriodEndISO) missingEmpty.push('period_end')
+            if (!dtBankEmpty) missingEmpty.push('bank')
+
+            if (missingEmpty.length > 0) {
+                const errorMsg = `Text parser: dossier vuoto (0 holdings) con metadati mancanti (${missingEmpty.join(', ')})`
+                logProgress('EMPTY DT ERROR', errorMsg)
+                logError500(fileName, errorMsg)
+                return NextResponse.json({ success: false, error: errorMsg }, { status: 500 })
+            }
+
+            const emptyHolder = metaEmpty?.holder || extractHolderFromText(originalPdfText)
+            const emptyAccount = metaEmpty?.accountNumber
+            const emptySettlement = metaEmpty?.settlementAccount
+
+            logProgress('EMPTY DT TEXT PARSER', [
+                `0 holdings (dossier vuoto)`,
+                `Periodo: ${emptyPeriodStartISO || '?'} → ${emptyPeriodEndISO}`,
+                `Banca: ${dtBankEmpty}`,
+                `Titolare: ${emptyHolder || 'non rilevato'}`,
+                `Conto: ${emptyAccount || 'N/D'}`,
+            ].join(' | '))
+
+            // Parse movements from text (convert TextMovimentiResult to securityMovements array)
+            const movResult = parseMovimentiFromText(originalPdfText)
+            const emptySecMov = (movResult?.movements || []).map(m => ({
+                isin: m.isin, name: m.description || '', operationType: m.operationType,
+                quantity: m.quantity, price: m.price || 0, grossAmount: m.grossAmount || 0, date: m.date || '',
+            }))
+
+            const emptyParsed = {
+                type: 'DOSSIER',
+                info: {
+                    bankName: dtBankEmpty,
+                    period_start: emptyPeriodStartISO,
+                    period_end: emptyPeriodEndISO,
+                    accountNumber: emptyAccount || 'N/D',
+                    holder: emptyHolder || undefined,
+                    settlementAccount: emptySettlement || undefined,
+                },
+                summary: {
+                    portfolio_total_extracted: { value: 0, source: 'text_parser_empty' },
+                },
+                finalPortfolio: [],
+                securityMovements: emptySecMov,
+                movementsStartQuantities: movResult?.startQuantities || {},
+                movements: [],
+                dividends: [],
+            }
+            resText = JSON.stringify(emptyParsed)
+            parseSuccess = true
+        }
+
+        // === GUARD: Block Gemini fallback for DT PDFs with extractable text ===
+        // If we reach here with a DT that has text but wasn't parsed, it's a parser bug — fail loudly.
+        if (!parseSuccess && isDossierFromText && originalPdfText.length >= 200) {
+            const errorMsg = `Text parser non ha estratto dati da questo DT. Testo: ${originalPdfText.length} car, Holdings: ${textParserResult?.holdings.length ?? 'null'}, Sezione: ${textParserResult?.sectionFound ?? 'null'}. Correggere il parser.`
+            logProgress('DT PARSER GUARD', errorMsg)
+            logError500(fileName, errorMsg)
+            return NextResponse.json({ success: false, error: errorMsg }, { status: 500 })
         }
 
         if (!parseSuccess) for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -2194,6 +2404,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         }
 
         if (!parseSuccess) {
+            logError500(fileName, 'Gemini AI parsing fallito: ' + lastParseError)
             return NextResponse.json({ success: false, error: 'Gemini AI parsing fallito: ' + lastParseError }, { status: 500 })
         }
 
@@ -2233,6 +2444,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         }
 
         if (!parsed) {
+            logError500(fileName, 'Parsing JSON fallito: ' + jsonError)
             return NextResponse.json({ success: false, error: 'Parsing JSON fallito: ' + jsonError }, { status: 500 })
         }
 
@@ -2325,6 +2537,24 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             }
         }
 
+        // === TEXT PARSER OVERRIDE FOR CRÉDIT AGRICOLE EC ===
+        // Override Gemini's saldi with text-extracted values (always more accurate).
+        if (!isGeneraliCC(originalPdfText) && isCreditAgricoleEC(originalPdfText)) {
+            const caEC = extractCreditAgricoleECData(originalPdfText)
+            if (caEC && (caEC.saldoIniziale !== 0 || caEC.saldoFinale !== 0)) {
+                if (!parsed.summary) parsed.summary = {}
+                parsed.summary.initial_balance = { value: caEC.saldoIniziale, source: 'text_parser' }
+                parsed.summary.final_balance = { value: caEC.saldoFinale, source: 'text_parser' }
+                if (!parsed.info) parsed.info = {}
+                if (caEC.periodStart) parsed.info.period_start = caEC.periodStart
+                if (caEC.periodEnd) parsed.info.period_end = caEC.periodEnd
+                if (caEC.bankDetected) parsed.info.bankName = caEC.bankDetected
+                if (caEC.accountNumber) parsed.info.accountNumber = caEC.accountNumber
+                if (caEC.holder) parsed.info.holder = caEC.holder
+                logProgress('CA EC TEXT OVERRIDE', `Saldo: ${caEC.saldoIniziale.toFixed(2)} → ${caEC.saldoFinale.toFixed(2)} | Period: ${caEC.periodStart} → ${caEC.periodEnd}`)
+            }
+        }
+
         // === VALIDATION-RETRY: Check math, retry with high thinking if needed ===
         const validationMovements = parsed.movements || []
         const validationInitial = parsed.summary?.initial_balance?.value || 0
@@ -2336,7 +2566,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
         const dossierHoldingsSum = parsed.type === 'DOSSIER'
             ? (parsed.finalPortfolio || []).reduce((s: number, h: any) => s + (h.marketValue || 0), 0)
             : 0
-        const needsValidationRetry = parsed.type === 'DOSSIER'
+        const needsValidationRetry = skipValidationRetry ? false : parsed.type === 'DOSSIER'
             ? // DOSSIER: retry se nessun holding estratto O se tutti gli holdings hanno marketValue = 0
               (!parsed.finalPortfolio || parsed.finalPortfolio.length === 0 ||
                (parsed.finalPortfolio.length > 0 && dossierHoldingsSum === 0))
@@ -2447,7 +2677,7 @@ Restituisci SOLO il JSON, nessun altro testo.`;
             ).length + cfv.holdingIssues.filter(h => h.issue.includes('≠ marketValue')).length
 
             const elapsedBeforeSV = (Date.now() - startTime) / 1000
-            if (significantIssues > 0 && elapsedBeforeSV < 160) {
+            if (significantIssues > 0 && !skipValidationRetry && elapsedBeforeSV < 160) {
                 logProgress('SELF-VERIFICATION',
                     `${significantIssues} problemi significativi, invio JSON + PDF a Gemini per verifica (${elapsedBeforeSV.toFixed(0)}s trascorsi)`
                 )
@@ -3278,7 +3508,7 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
             // Fetch all docs for this account to check for ANY overlap (not just exact match)
             const { data: existingAnalyses } = await supabase
                 .from('analyses')
-                .select('id, period_start, period_end, benchmark_comparison')
+                .select('id, period_start, period_end, benchmark_comparison, costs_breakdown')
                 .eq('user_id', userId)
                 .is('deleted_at', null)
 
@@ -3322,6 +3552,33 @@ NON inventare titoli. Estrai SOLO quelli effettivamente presenti nel PDF.`
                         )
                         parsed.info.period_start = correctedStart
                         periodStart = correctedStart
+                    }
+                }
+            }
+
+            // === LAYER 1b: Inherit frequency from previous doc (sticky frequency) ===
+            // If Layer 1 didn't detect frequency from internal signals, inherit from the most recent
+            // previous doc of the same account. Frequency is "sticky" — once monthly, stays monthly
+            // unless internal signals (movements, Gemini) say otherwise.
+            if (!parsed.info?.periodFrequency) {
+                const prevDoc = sameAccountDocs
+                    .filter(a => a.period_end && a.period_end < periodEnd)
+                    .sort((a, b) => b.period_end!.localeCompare(a.period_end!))
+                    [0]
+                const prevFreq = prevDoc?.costs_breakdown?.periodFrequency
+                if (prevFreq && ['monthly', 'quarterly', 'semiannual', 'annual'].includes(prevFreq)) {
+                    parsed.info.periodFrequency = prevFreq
+                    const freqMonths: Record<string, number> = { monthly: 1, quarterly: 3, semiannual: 6, annual: 12 }
+                    const months = freqMonths[prevFreq]
+                    if (months && !textParserPeriodStartReliable) {
+                        const computedStart = computeStandardPeriodStart(periodEnd, months)
+                        if (computedStart !== parsed.info.period_start) {
+                            logProgress('📅 LAYER 1b: FREQ EREDITATA',
+                                `freq=${prevFreq} (da doc precedente) → period_start: ${parsed.info.period_start} → ${computedStart}`
+                            )
+                            parsed.info.period_start = computedStart
+                            periodStart = computedStart
+                        }
                     }
                 }
             }
@@ -4445,6 +4702,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                 holder: parsed.info?.holder || null,
                 hasMovementsSection,
                 incompleteMovements,
+                periodFrequency: parsed.info?.periodFrequency || null,
                 original_ai_data: { ...(parsed.summary || {}) } // Backup for restore
             },
             benchmark_comparison: parsed.info?.accountNumber || 'N/D',
@@ -4512,6 +4770,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             || (textPortfolioTotal === 0 && originalPdfText.length < 2000 && textParserResult?.holdings.length === 0 && textParserResult?.totalSource === 'none')
         if (isDossier && analysisFields.portfolio_value === 0 && normalizedHoldings.length === 0 && !isConfirmedEmptyDossier) {
             logProgress('❌ ESTRAZIONE FALLITA', 'DOSSIER senza holdings estratti — rifiutato')
+            logError500(fileName, `Estrazione fallita: 0 holdings, pdfTextLen=${originalPdfText.length}`)
             return NextResponse.json({
                 success: false,
                 error: 'Estrazione portafoglio fallita: nessun titolo estratto dal PDF. Riprova o verifica il documento.'
@@ -4531,6 +4790,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
                 analysisFields.portfolio_value = holdingsSum
             } else {
                 logProgress('❌ ESTRAZIONE FALLITA', `DOSSIER con ${normalizedHoldings.length} holdings ma controvalore totale = 0 — rifiutato`)
+                logError500(fileName, `Holdings ${normalizedHoldings.length} con marketValue 0, pdfTextLen=${originalPdfText.length}`)
                 return NextResponse.json({
                     success: false,
                     error: `Estrazione portafoglio incompleta: ${normalizedHoldings.length} titoli trovati ma tutti con controvalore 0€. Riprova.`
@@ -4546,6 +4806,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
             const guardRatio = analysisFields.portfolio_value / textPortfolioTotal
             if (guardRatio < 0.3 || guardRatio > 3.0) {
                 logProgress('❌ PORTFOLIO MISMATCH', `Portfolio ${analysisFields.portfolio_value.toFixed(0)}€ vs PDF totale ${textPortfolioTotal.toFixed(0)}€ (ratio ${guardRatio.toFixed(2)})`)
+                logError500(fileName, `Portfolio mismatch: extracted=${analysisFields.portfolio_value.toFixed(0)}€ vs textTotal=${textPortfolioTotal.toFixed(0)}€ (ratio ${guardRatio.toFixed(2)})`)
                 return NextResponse.json({
                     success: false,
                     error: `Estrazione incoerente: controvalore estratto (${Math.round(analysisFields.portfolio_value)}€) troppo diverso dal totale PDF (${Math.round(textPortfolioTotal)}€). Riprova.`
@@ -4642,6 +4903,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
 
         if (error) {
             logProgress('❌ ERRORE DATABASE', `${error.message} (code: ${error.code}, details: ${error.details})`)
+            logError500(fileName, `DB error: ${error.message} (code: ${error.code})`)
             return NextResponse.json({ success: false, error: `Errore salvataggio database: ${error.message}` }, { status: 500 })
         }
 
@@ -4690,6 +4952,7 @@ Rispondi con JSON: { "securityMovements": [{ "isin": "...", "date": "DD/MM/YYYY"
         console.error('\n!!!!! ERRORE CRITICO PARSE PDF !!!!!')
         console.error('Messaggio:', error.message)
         console.error('Stack:', error.stack)
+        logError500('unknown', `CRASH: ${error.message}`)
         return NextResponse.json({ success: false, error: error.message || 'Errore interno del server' }, { status: 500 })
     }
 }
@@ -4730,17 +4993,48 @@ function determineDossierFrequency(parsed: any): string | null {
             const earliestMov = Math.min(...movDates)
             const movRangeDays = Math.round((endDate.getTime() - earliestMov) / 86400000)
 
-            if (movRangeDays <= 36) return 'monthly'
-            if (movRangeDays <= 100) return 'quarterly'
-            if (movRangeDays <= 195) return 'semiannual'
-            if (movRangeDays <= 375) return 'annual'
+            let movFreq: string | null = null
+            if (movRangeDays <= 36) movFreq = 'monthly'
+            else if (movRangeDays <= 100) movFreq = 'quarterly'
+            else if (movRangeDays <= 195) movFreq = 'semiannual'
+            else if (movRangeDays <= 375) movFreq = 'annual'
+
+            // Sanity check: if movements suggest "monthly" but period_start→period_end is clearly longer,
+            // trust the period length (movements may be concentrated in the last month of a quarterly report)
+            if (movFreq === 'monthly' && periodStartHint && periodEnd) {
+                const periodDays = Math.round(
+                    (new Date(periodEnd).getTime() - new Date(periodStartHint).getTime()) / 86400000
+                )
+                if (periodDays >= 85) {
+                    // Period is clearly not monthly — use period-based classification
+                    if (doesMatchFrequency(periodDays, 'quarterly')) movFreq = 'quarterly'
+                    else if (doesMatchFrequency(periodDays, 'semiannual')) movFreq = 'semiannual'
+                    else if (doesMatchFrequency(periodDays, 'annual')) movFreq = 'annual'
+                    else if (periodDays >= 85 && periodDays <= 100) movFreq = 'quarterly'
+                }
+            }
+
+            if (movFreq) return movFreq
         }
     }
 
     // --- Signal 2: Gemini's periodFrequency label (simple classification — more reliable than exact dates) ---
     // period_start extraction is unreliable (reads wrong dates from PDF). But frequency CLASSIFICATION
     // is a simpler question — Gemini answers "quarterly" much more reliably than it computes exact dates.
+    // Sanity check: validate against period length if available
     if (geminiFreq && ['monthly', 'quarterly', 'semiannual', 'annual'].includes(geminiFreq)) {
+        if (periodStartHint && periodEnd) {
+            const periodDays = Math.round(
+                (new Date(periodEnd).getTime() - new Date(periodStartHint).getTime()) / 86400000
+            )
+            // If Gemini says "monthly" but period is clearly quarterly+, override
+            if (geminiFreq === 'monthly' && periodDays >= 85) {
+                if (doesMatchFrequency(periodDays, 'quarterly')) return 'quarterly'
+                if (doesMatchFrequency(periodDays, 'semiannual')) return 'semiannual'
+                if (doesMatchFrequency(periodDays, 'annual')) return 'annual'
+                if (periodDays >= 85 && periodDays <= 100) return 'quarterly'
+            }
+        }
         return geminiFreq
     }
 

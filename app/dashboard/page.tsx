@@ -185,7 +185,6 @@ function DashboardContent() {
 
     // Infer missing period_start from previous documents or period_end
     const inferPeriodStart = (analyses: Analysis[]): Analysis[] => {
-      // Group by account (bank + identifier)
       const byAccount = new Map<string, Analysis[]>()
       analyses.forEach(a => {
         const key = `${a.bank_name}|${normalizeAccKey(a.benchmark_comparison || '')}|${a.account_type}`
@@ -194,33 +193,21 @@ function DashboardContent() {
         byAccount.set(key, list)
       })
 
-      // Process each account group
       byAccount.forEach((accountAnalyses) => {
-        // Sort by period_end ascending
         accountAnalyses.sort((a, b) =>
           new Date(a.period_end).getTime() - new Date(b.period_end).getTime()
         )
 
-        // Infer period_start for each document
         for (let i = 0; i < accountAnalyses.length; i++) {
           const current = accountAnalyses[i]
           if (!current.period_start && current.period_end) {
-            // Try to use previous document's period_end
             if (i > 0 && accountAnalyses[i - 1].period_end) {
               current.period_start = accountAnalyses[i - 1].period_end
             } else {
-              // Infer from period_end - assume it's the last day of previous period
+              // First doc without predecessor: assume quarterly (go back 3 months)
               const endDate = new Date(current.period_end)
-              const endDay = endDate.getDate()
-              const endMonth = endDate.getMonth()
-              const endYear = endDate.getFullYear()
-
-              // If end is near end of month, assume monthly/quarterly period
-              if (endDay >= 28) {
-                // Get last day of previous month
-                const startDate = new Date(endYear, endMonth, 0) // Last day of previous month
-                current.period_start = startDate.toISOString().split('T')[0]
-              }
+              const startDate = new Date(endDate.getFullYear(), endDate.getMonth() - 3 + 1, 0)
+              current.period_start = startDate.toISOString().split('T')[0]
             }
           }
         }
@@ -739,6 +726,56 @@ function DashboardContent() {
   const [dragCounter, setDragCounter] = useState(0)
   const [fullPageDragCounter, setFullPageDragCounter] = useState(0)
 
+  // Recursively extract files from dropped folders (webkitGetAsEntry API)
+  const extractFilesFromDrop = async (dataTransfer: DataTransfer): Promise<File[]> => {
+    const items = dataTransfer.items
+    if (!items || items.length === 0) return Array.from(dataTransfer.files)
+
+    const readEntry = (entry: FileSystemEntry): Promise<File[]> => {
+      return new Promise((resolve) => {
+        if (entry.isFile) {
+          (entry as FileSystemFileEntry).file(
+            (file) => resolve([file]),
+            () => resolve([])
+          )
+        } else if (entry.isDirectory) {
+          const reader = (entry as FileSystemDirectoryEntry).createReader()
+          const allEntries: FileSystemEntry[] = []
+          const readBatch = () => {
+            reader.readEntries((entries) => {
+              if (entries.length === 0) {
+                // All entries read — recursively process
+                Promise.all(allEntries.map(readEntry)).then((results) =>
+                  resolve(results.flat())
+                )
+              } else {
+                allEntries.push(...entries)
+                readBatch() // readEntries returns max 100 entries per call
+              }
+            }, () => resolve([]))
+          }
+          readBatch()
+        } else {
+          resolve([])
+        }
+      })
+    }
+
+    const filePromises: Promise<File[]>[] = []
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry?.()
+      if (entry) {
+        filePromises.push(readEntry(entry))
+      } else if (items[i].kind === 'file') {
+        const file = items[i].getAsFile()
+        if (file) filePromises.push(Promise.resolve([file]))
+      }
+    }
+
+    const results = await Promise.all(filePromises)
+    return results.flat()
+  }
+
   const handleFullPageDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -751,13 +788,14 @@ function DashboardContent() {
     setFullPageDragCounter(prev => Math.max(0, prev - 1))
   }
 
-  const handleFullPageDrop = (e: React.DragEvent) => {
+  const handleFullPageDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setFullPageDragCounter(0)
 
-    const files = e.dataTransfer.files
-    if (files && files.length > 0 && user) {
+    if (!user) return
+    const files = await extractFilesFromDrop(e.dataTransfer)
+    if (files.length > 0) {
       contextAddFilesToQueue(files, user.id)
     }
   }
@@ -780,15 +818,16 @@ function DashboardContent() {
     e.dataTransfer.dropEffect = 'copy'
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setDragCounter(0)
 
-    const files = e.dataTransfer.files
-    if (files && files.length > 0 && user) {
+    if (!user) return
+    const files = await extractFilesFromDrop(e.dataTransfer)
+    if (files.length > 0) {
       // Accumulate to handle fragmented drops
-      batchAccumulatorRef.current.push(...Array.from(files))
+      batchAccumulatorRef.current.push(...files)
 
       if (batchTimeoutRef.current) clearTimeout(batchTimeoutRef.current)
 
@@ -1025,27 +1064,47 @@ function DashboardContent() {
   Object.values(bankGroupsMap).forEach(group => {
     const holder = getGroupHolder(group);
     const canonical = canonicalizeBankName(group.bankName);
-    // Find existing merge key with fuzzy holder match + same bank
+    const canonicalUpper = canonical.toUpperCase()
+    // Find existing merge key with same canonical bank (+ fuzzy holder match if both have holders)
     let matchKey: string | null = null
-    if (holder) {
-      for (const key of Object.keys(mergedMap)) {
-        const [existingHolder, existingBank] = key.split('|||')
-        if (existingBank === canonical.toUpperCase() && holdersMatch(existingHolder, holder)) {
+    for (const key of Object.keys(mergedMap)) {
+      const sepIdx = key.indexOf('|||')
+      if (sepIdx < 0) {
+        // Key without separator: was stored by bankName (group had no holder)
+        const existingCanonical = canonicalizeBankName(key).toUpperCase()
+        if (existingCanonical === canonicalUpper) {
           matchKey = key
-          // Keep the longer holder name as key
-          if (holder.length > existingHolder.length) {
-            const newKey = `${holder}|||${existingBank}`
+          // Upgrade key to include holder if we now have one
+          if (holder) {
+            const newKey = `${holder}|||${canonicalUpper}`
             mergedMap[newKey] = mergedMap[key]
             delete mergedMap[key]
             matchKey = newKey
           }
           break
         }
+      } else {
+        const existingHolder = key.substring(0, sepIdx)
+        const existingBank = key.substring(sepIdx + 3)
+        if (existingBank === canonicalUpper) {
+          // Same canonical bank — merge if holders match or one side is empty
+          if (!holder || !existingHolder || holdersMatch(existingHolder, holder)) {
+            matchKey = key
+            // Keep the longer holder name as key
+            if (holder && holder.length > existingHolder.length) {
+              const newKey = `${holder}|||${existingBank}`
+              mergedMap[newKey] = mergedMap[key]
+              delete mergedMap[key]
+              matchKey = newKey
+            }
+            break
+          }
+        }
       }
     }
-    const mergeKey = matchKey || (holder ? `${holder}|||${canonical.toUpperCase()}` : group.bankName);
+    const mergeKey = matchKey || (holder ? `${holder}|||${canonicalUpper}` : group.bankName);
     if (!mergedMap[mergeKey]) {
-      mergedMap[mergeKey] = { ...group };
+      mergedMap[mergeKey] = { bankName: group.bankName, dossiers: [...group.dossiers], liquidityAccounts: [...group.liquidityAccounts] };
     } else {
       const existing = mergedMap[mergeKey];
       group.dossiers.forEach(d => {
@@ -1060,47 +1119,87 @@ function DashboardContent() {
   });
   const bankGroups = Object.values(mergedMap);
 
+  // --- Safety net: ensure ALL analyses appear in bankGroups ---
+  // Collect all analysis IDs already placed in some group
+  const placedIds = new Set<string>()
+  bankGroups.forEach(g => {
+    g.dossiers.forEach(d => d.analyses.forEach(a => placedIds.add(a.id)))
+    g.liquidityAccounts.forEach(l => l.analyses.forEach(a => placedIds.add(a.id)))
+  })
+  const orphanAnalyses = analyses.filter(a => !placedIds.has(a.id))
+  if (orphanAnalyses.length > 0) {
+    console.warn(`[GROUPING] ${orphanAnalyses.length} analyses orphaned — adding to appropriate groups`)
+    orphanAnalyses.forEach(a => {
+      const rawAccNum = a.benchmark_comparison || 'N/D'
+      const normAcc = normalizeAcc(rawAccNum)
+      const isLiquidity = a.account_type === 'LIQUIDITY'
+      const bankName = a.bank_name?.trim() || 'Banca Sconosciuta'
+      // Find the best matching bankGroup by canonical name
+      const canonical = canonicalizeBankName(bankName)
+      let targetGroup = bankGroups.find(g => canonicalizeBankName(g.bankName) === canonical)
+      if (!targetGroup) {
+        // Create new group
+        targetGroup = { bankName, dossiers: [], liquidityAccounts: [] }
+        bankGroups.push(targetGroup)
+      }
+      const targetList = isLiquidity ? targetGroup.liquidityAccounts : targetGroup.dossiers
+      let accountGroup = targetList.find(d => normalizeAcc(d.identifier) === normAcc)
+      if (!accountGroup) {
+        accountGroup = { identifier: rawAccNum, analyses: [] }
+        targetList.push(accountGroup)
+      }
+      accountGroup.analyses.push(a)
+    })
+  }
+
   // --- 6. Mappa coerenza portafoglio: id → boolean (true = quadra, false = non quadra, undefined = nessun periodo precedente) ---
   const coherenceMap: Record<string, boolean | 'missing'> = {}
   const coherenceDetails: Record<string, string> = {} // Detailed tooltip info for non-ok cases
+
+  // Pre-build sorted map by account for O(n) lookups instead of O(n²)
+  const accountDocsSorted: Record<string, Analysis[]> = {}
+  analyses.filter((a: any) => a.account_type === 'DOSSIER' && a.period_end).forEach(a => {
+    const acc = normalizeAcc(a.benchmark_comparison || '')
+    if (acc === 'ND') return
+    if (!accountDocsSorted[acc]) accountDocsSorted[acc] = []
+    accountDocsSorted[acc].push(a)
+  })
+  Object.values(accountDocsSorted).forEach(docs => docs.sort((a, b) =>
+    new Date(a.period_end).getTime() - new Date(b.period_end).getTime()
+  ))
+
   analyses.filter((a: any) => a.account_type === 'DOSSIER').forEach(doc => {
     const normAcc = normalizeAcc(doc.benchmark_comparison || '')
-    if (!doc.period_start || !doc.period_end) return
-    // Se il conto non è identificabile, non possiamo verificare la coerenza
+    if (!doc.period_end) return
     if (normAcc === 'ND') { coherenceMap[doc.id] = 'missing'; return }
-    const docStart = new Date(doc.period_start)
     const docEnd = new Date(doc.period_end)
-    const docDays = (docEnd.getTime() - docStart.getTime()) / 86400000
-    // Trova il documento immediatamente precedente (stesso conto)
-    // Usa period_end <= docStart per gestire periodi sovrapposti (es. Intesa semestrali sfasati 3 mesi)
-    const prevDoc = analyses
-      .filter((a: any) => a.id !== doc.id && a.account_type === 'DOSSIER'
-        && normalizeAcc(a.benchmark_comparison || '') === normAcc
-        && a.period_end && a.period_start
-        && new Date(a.period_end) <= docStart)
-      .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime())[0]
+    // Find previous document using pre-sorted array (O(1) per lookup)
+    const sortedDocs = accountDocsSorted[normAcc] || []
+    const docIdx = sortedDocs.findIndex(d => d.id === doc.id)
+    const prevDoc = docIdx > 0 ? sortedDocs[docIdx - 1] : undefined
     if (!prevDoc) { coherenceMap[doc.id] = 'missing'; return }
     // Verifica che il periodo precedente non sia troppo lontano (max 200gg tra period_end)
     const prevEnd = new Date(prevDoc.period_end!)
     const endGapDays = (docEnd.getTime() - prevEnd.getTime()) / 86400000
     if (endGapDays > 200 || endGapDays <= 0) { coherenceMap[doc.id] = 'missing'; return }
-    // Verifica basata sui trimestri: prevDoc deve essere dal trimestre immediatamente precedente
-    // (es. Q4 deve avere predecessore Q3, non Q2 — anche se le date sembrano contigue)
+    // Usa endGapDays (gap tra period_end consecutivi) per classificare il tipo di periodo
+    // Più affidabile di (period_end - period_start) perché period_start può essere sbagliato
+    // per periodi rolling (es. CA 31/01→30/04 dove period_start precede il predecessore)
     const getQuarter = (d: Date) => ({ q: Math.floor(d.getMonth() / 3), y: d.getFullYear() })
     const docQ = getQuarter(docEnd)
     const prevQ = getQuarter(prevEnd)
     const expPrevQ = docQ.q === 0 ? 3 : docQ.q - 1
     const expPrevY = docQ.q === 0 ? docQ.y - 1 : docQ.y
-    // Per documenti mensili (< 45gg) verifica il mese precedente
-    if (docDays < 45) {
+    // Per documenti mensili (gap < 45gg) verifica il mese precedente
+    if (endGapDays < 45) {
       const expPrevM = docEnd.getMonth() === 0 ? 11 : docEnd.getMonth() - 1
       const expPrevMY = docEnd.getMonth() === 0 ? docEnd.getFullYear() - 1 : docEnd.getFullYear()
       if (prevEnd.getMonth() !== expPrevM || prevEnd.getFullYear() !== expPrevMY) {
         coherenceMap[doc.id] = 'missing'; return
       }
-    } else if (docDays > 330) {
+    } else if (endGapDays > 330) {
       // Per annuali (> 330gg): il gap check già fatto è sufficiente
-    } else if (docDays > 150) {
+    } else if (endGapDays > 150) {
       // Per semestrali (> 150gg): il predecessore deve finire nel semestre precedente
       const getHalf = (d: Date) => ({ h: d.getMonth() < 6 ? 0 : 1, y: d.getFullYear() })
       const dH = getHalf(docEnd), pH = getHalf(prevEnd)
@@ -1206,19 +1305,33 @@ function DashboardContent() {
 
   const quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
-  // Determine document frequency: monthly (< 45 days), quarterly (45-150), semiannual (150-330), annual (> 330)
+  // Document frequency: stored in DB (from server-side detection), with gap-based fallback
   type DocFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+  const validFreqs: DocFrequency[] = ['monthly', 'quarterly', 'semiannual', 'annual']
+  const classifyGapDays = (days: number): DocFrequency => {
+    if (days < 45) return 'monthly'
+    if (days > 330) return 'annual'
+    if (days > 150) return 'semiannual'
+    return 'quarterly'
+  }
+
   const getDocFrequency = (a: Analysis): DocFrequency => {
-    if (!a.period_start || !a.period_end) return 'quarterly';
-    const start = new Date(a.period_start);
-    const end = new Date(a.period_end);
-    const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-    if (diffDays < 45) return 'monthly';
-    if (diffDays > 330) return 'annual';
-    if (diffDays > 150) return 'semiannual';
-    return 'quarterly';
+    // Compute frequency from actual period length (ground truth)
+    let computed: DocFrequency = 'quarterly'
+    if (a.period_start && a.period_end) {
+      const diffDays = (new Date(a.period_end).getTime() - new Date(a.period_start).getTime()) / (1000 * 60 * 60 * 24)
+      computed = classifyGapDays(diffDays)
+    }
+    // Stored frequency from server-side detection
+    const stored = (a as any).costs_breakdown?.periodFrequency
+    if (stored && validFreqs.includes(stored)) {
+      // Sanity check: if stored contradicts actual period length, trust the computed value
+      // (e.g., "monthly" stored for a 90-day period is clearly wrong)
+      if (a.period_start && a.period_end && stored !== computed) return computed
+      return stored
+    }
+    return computed
   };
-  const isDocMonthly = (a: Analysis) => getDocFrequency(a) === 'monthly';
 
   // Build a frequency map for the year: for each month, determine expected frequency
   const buildYearFrequencyMap = (accountAnalyses: Analysis[], year: number): DocFrequency[] => {

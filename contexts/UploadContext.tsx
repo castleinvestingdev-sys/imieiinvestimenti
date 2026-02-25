@@ -38,6 +38,7 @@ interface UploadContextValue {
   hasActiveUploads: boolean
   activeHolder: string | null
   completedCount: number
+  errorFileCount: number
   totalCount: number
   overallProgress: number
   addFilesToQueue: (files: FileList | File[], userId: string, holder?: string) => void
@@ -77,8 +78,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   ) || isProcessing
 
   const activeHolder = activeHolderRef.current
-  const completedCount = uploadQueue.filter(f => f.status === 'done').length
   const totalCount = uploadQueue.length
+  // Derive counts directly from the array — this is the single source of truth
+  // (the ✅ icons in the expanded list prove the array status IS correct)
+  const completedCount = uploadQueue.filter(f => f.status === 'done').length
+  const errorFileCount = uploadQueue.filter(f => f.status === 'error').length
 
   const overallProgress = totalCount > 0
     ? Math.round(uploadQueue.reduce((sum, f) => sum + f.progress, 0) / totalCount)
@@ -127,11 +131,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               const elapsed = (Date.now() - uploadStartTime) / 1000
               const stages = [
                 [0, 'Caricamento PDF'],
-                [5, 'Conversione documento'],
-                [10, 'Invio a Gemini AI'],
-                [15, 'Analisi AI in corso'],
+                [3, 'Estrazione testo'],
+                [8, 'Analisi documento'],
+                [15, 'Estrazione dati'],
                 [30, 'Estrazione movimenti'],
-                [45, 'Lettura portafoglio titoli'],
+                [45, 'Lettura portafoglio'],
                 [55, 'Validazione dati'],
                 [65, 'Calcolo commissioni'],
                 [75, 'Controllo coerenza'],
@@ -151,7 +155,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         setTimeout(() => {
           setUploadQueue(prev => prev.map(f =>
             f.id === fileId && f.status === 'uploading'
-              ? { ...f, status: 'analyzing' as const, stage: 'Analisi AI avviata...' }
+              ? { ...f, status: 'analyzing' as const, stage: 'Analisi in corso...' }
               : f
           ))
         }, 3000)
@@ -360,12 +364,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     }
 
     setUploadQueue(prev => {
-      const combined = [...prev, ...newFiles]
-      return combined.map((f, i) => ({
-        ...f,
-        index: i + 1,
-        total: combined.length
-      }))
+      if (isProcessingRef.current) {
+        // Mid-processing: append new files, keep existing ones (including done) for consistent counter
+        const combined = [...prev, ...newFiles]
+        return combined
+      }
+      // Not processing: start fresh with only the new batch
+      return newFiles
     })
     // Sort chronologically so earlier periods are processed first
     // This ensures predecessors exist when Phase C checks coherence
@@ -381,6 +386,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     hasActiveUploads,
     activeHolder,
     completedCount,
+    errorFileCount,
     totalCount,
     overallProgress,
     addFilesToQueue,

@@ -182,7 +182,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
         .from('analyses')
-        .select('id, account_type, period_start, period_end, portfolio_value, benchmark_comparison, costs_breakdown, holdings')
+        .select('id, bank_name, account_type, period_start, period_end, portfolio_value, benchmark_comparison, costs_breakdown, holdings')
         .eq('user_id', user.id).is('deleted_at', null).order('period_start', { ascending: true })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -492,9 +492,28 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ action: 'DETAILS', details })
     }
 
+    // --- Grouping pipeline diagnostic ---
+    const typeBreakdown: Record<string, number> = {}
+    const bankBreakdown: Record<string, number> = {}
+    const accBreakdown: Record<string, { count: number; types: Set<string>; banks: Set<string> }> = {}
+    allAnalyses.forEach((a: any) => {
+        typeBreakdown[a.account_type || 'NULL'] = (typeBreakdown[a.account_type || 'NULL'] || 0) + 1
+        bankBreakdown[a.bank_name || 'NULL'] = (bankBreakdown[a.bank_name || 'NULL'] || 0) + 1
+        const normAcc = normalizeAccountNumber(a.benchmark_comparison || 'N/D')
+        if (!accBreakdown[normAcc]) accBreakdown[normAcc] = { count: 0, types: new Set(), banks: new Set() }
+        accBreakdown[normAcc].count++
+        accBreakdown[normAcc].types.add(a.account_type || 'NULL')
+        accBreakdown[normAcc].banks.add(a.bank_name || 'NULL')
+    })
+
     return NextResponse.json({
         action: 'DIAGNOSTIC',
         totalDocs: allAnalyses.length,
+        byAccountType: typeBreakdown,
+        byBankName: bankBreakdown,
+        byNormalizedAccount: Object.fromEntries(
+            Object.entries(accBreakdown).map(([k, v]) => [k, { count: v.count, types: [...v.types], banks: [...v.banks] }])
+        ),
         overlapsFound: overlaps.length,
         overlaps,
         coherenceErrors: coherenceErrors.length,

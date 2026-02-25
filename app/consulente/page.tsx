@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -22,9 +22,12 @@ export default function ConsulentePage() {
   const [loading, setLoading] = useState(true)
   const [clients, setClients] = useState<ClientData[]>([])
   const [isDragging, setIsDragging] = useState(false)
+  const [clientsVersion, setClientsVersion] = useState(0) // increment to force grid re-creation
   const router = useRouter()
   const { addFilesToQueue, hasActiveUploads, registerOnSuccess } = useUpload()
   const supabase = createClient()
+  const fetchVersionRef = useRef(0)
+  const clientsHeaderRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
     const getUser = async () => {
@@ -41,11 +44,15 @@ export default function ConsulentePage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchClients = useCallback(async (userId: string) => {
+    const version = ++fetchVersionRef.current
     const { data, error } = await supabase
       .from('analyses')
       .select('*')
       .eq('user_id', userId)
       .is('deleted_at', null)
+
+    // Ignore stale responses from concurrent fetchClients calls
+    if (fetchVersionRef.current !== version) return
 
     if (error) {
       console.error('Error fetching analyses:', error)
@@ -90,9 +97,11 @@ export default function ConsulentePage() {
       }
     })
 
-    setClients(Array.from(clientsMap.values()).sort((a, b) =>
+    const sorted = Array.from(clientsMap.values()).sort((a, b) =>
       a.holder.localeCompare(b.holder)
-    ))
+    )
+    setClients(sorted)
+    setClientsVersion(v => v + 1) // force grid re-creation
   }, [supabase])
 
   // Register onSuccess: refresh client list when an upload completes
@@ -103,6 +112,13 @@ export default function ConsulentePage() {
     })
     return unregister
   }, [user, fetchClients, registerOnSuccess])
+
+  // Direct DOM update for header — bypasses React reconciliation issues
+  useEffect(() => {
+    if (clientsHeaderRef.current) {
+      clientsHeaderRef.current.textContent = `Intestatari (${clients.length})`
+    }
+  })
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -198,7 +214,7 @@ export default function ConsulentePage() {
 
         {/* Clients Grid */}
         <div className={styles.clientsSection}>
-          <h2>Intestatari ({clients.length})</h2>
+          <h2 ref={clientsHeaderRef}>Intestatari ({clients.length})</h2>
 
           {clients.length === 0 ? (
             <div className={styles.emptyState}>
@@ -206,10 +222,10 @@ export default function ConsulentePage() {
               <span>Carica un PDF per creare automaticamente la sezione dell'intestatario</span>
             </div>
           ) : (
-            <div className={styles.clientsGrid}>
+            <div className={styles.clientsGrid} key={`grid-v${clientsVersion}`}>
               {clients.map((client, index) => (
                 <Link
-                  key={index}
+                  key={`${client.holder}-${client.documentCount}`}
                   href={`/dashboard?cliente=${encodeURIComponent(client.holder)}`}
                   className={styles.clientCard}
                 >

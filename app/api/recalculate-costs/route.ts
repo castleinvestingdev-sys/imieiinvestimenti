@@ -3,13 +3,19 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function POST(request: NextRequest) {
     try {
+        const supabase = await createClient()
+
+        // Auth check
+        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        if (authError || !user) {
+            return NextResponse.json({ success: false, error: 'Non autenticato' }, { status: 401 })
+        }
+
         const { analysisId } = await request.json()
 
         if (!analysisId) {
             return NextResponse.json({ success: false, error: 'analysisId mancante' }, { status: 400 })
         }
-
-        const supabase = await createClient()
 
         // Fetch the analysis
         const { data: analysis, error: fetchError } = await supabase

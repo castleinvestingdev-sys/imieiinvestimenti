@@ -229,7 +229,9 @@ function normalizeInvisibleChars(text: string): string {
 
 /** Parse Italian-format number: "1.234,56" → 1234.56, "283,836" → 283.836 */
 export function parseItalianNumber(s: string): number {
-    return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'))
+    if (!Number.isFinite(n)) return 0
+    return n
 }
 
 /** Extract all Italian-format numbers from a string.
@@ -911,9 +913,9 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
         meta.periodEnd = `${pm1[4].padStart(2, '0')}/${pm1[5]}/${pm1[6]}`
         found = true
     }
-    // Fallback: "AL DD.MM.YYYY" for period_end
+    // Fallback: "AL DD.MM.YYYY" or "AL DD/MM/YYYY" for period_end
     if (!meta.periodEnd) {
-        const alMatch = text.match(/\bAL\s+(\d{1,2})\.(\d{2})\.(\d{4})\b/)
+        const alMatch = text.match(/\bAL\s+(\d{1,2})[.\/](\d{2})[.\/](\d{4})\b/)
         if (alMatch) {
             meta.periodEnd = `${alMatch[1].padStart(2, '0')}/${alMatch[2]}/${alMatch[3]}`
             found = true
@@ -924,6 +926,12 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
     const accRe = /DEPOSITO\s+AMMINISTRATO\s+N\.\s*([\d/]+)/i
     const accMatch = text.match(accRe)
     if (accMatch) { meta.accountNumber = accMatch[1].trim(); found = true }
+
+    // Crédit Agricole DT: "Dossier Titoli\n445/0000008597115"
+    if (!meta.accountNumber) {
+        const caDossierMatch = text.match(/Dossier\s+Titoli\s*\n\s*(\d{1,5}\/\d{5,15})/i)
+        if (caDossierMatch) { meta.accountNumber = caDossierMatch[1].trim(); found = true }
+    }
 
     // Banca Generali DT: "Numero Dossier ... 850/005/0947918" or IBAN "T58500947918"
     if (!meta.accountNumber) {
@@ -948,6 +956,12 @@ function extractMetadataFromText(text: string, bankDetected: string | null): Tex
     // IBAN
     const ibanMatch = text.match(/IBAN\s+(IT\d{2}\s*[A-Z0-9\s]{20,30})/i)
     if (ibanMatch) { meta.settlementAccount = ibanMatch[1].replace(/\s+/g, ''); found = true }
+
+    // Crédit Agricole: "Conto di Regolamento\n...\nC/EURO 00445/00035652638"
+    if (!meta.settlementAccount) {
+        const caSettlMatch = text.match(/Conto\s+di\s+Regolamento[\s\S]{0,100}?C\/EURO\s*([\d/]+)/i)
+        if (caSettlMatch) { meta.settlementAccount = 'C/EURO ' + caSettlMatch[1].trim(); found = true }
+    }
 
     // Holder: for Intesa, appears after "01 NNNNN" line, may have spaced characters
     if (meta.bankName === 'Intesa Sanpaolo') {
@@ -2191,4 +2205,276 @@ export function extractGeneraliCCData(fullText: string): TextCCResult | null {
         competenze,
         giacenzaMedia,
     }
+}
+
+
+// ── Crédit Agricole EC (Estratto Conto Corrente / Liquidità) Parser ──────────
+
+/**
+ * Detect if the PDF text is a Crédit Agricole Estratto Conto (Liquidità).
+ * Matches both old (Cariparma/Cassa di Risparmio) and new (Crédit Agricole Italia) formats.
+ */
+export function isCreditAgricoleEC(fullText: string): boolean {
+    const upper = fullText.toUpperCase()
+    // Must have "ESTRATTO CONTO AL" header AND NOT be a DT (Estratto Conto TITOLI)
+    if (!upper.includes('ESTRATTO CONTO AL')) return false
+    if (upper.includes('DOSSIER TITOLI') || upper.includes('ESTRATTO CONTO TITOLI') ||
+        upper.includes('RENDICONTO TITOLI') || upper.includes('PORTAFOGLIO TITOLI')) return false
+    // Must be from CA/Cariparma bank — check footers
+    return /CR[EÉ]DIT\s*AGRICOLE|CARIPARMA|CASSA\s*DI\s*RISPARMIO\s*DI\s*PARMA/i.test(fullText)
+}
+
+/**
+ * Extract data from Crédit Agricole Estratto Conto (CC/Liquidità) PDFs.
+ *
+ * Format (consistent from 2016 to 2025):
+ *   ESTRATTO CONTO AL DD/MM/YYYY
+ *   ...header with account info and holder...
+ *   DD.MM.YY <amount> SALDO INIZIALE
+ *   DD.MM.YY DD.MM.YY [* ]<amount> <ref>\t<description>
+ *   ...movements...
+ *   DD.MM.YY <amount> SALDO FINALE
+ *
+ * Movements have a single amount column (dare/avere collapsed) — we classify
+ * based on description keywords and verify via saldoFinale - saldoIniziale.
+ */
+export function extractCreditAgricoleECData(fullText: string): TextCCResult | null {
+    fullText = normalizeInvisibleChars(fullText)
+    const bankDetected = detectBank(fullText)
+
+    // --- Period from header: "ESTRATTO CONTO AL DD/MM/YYYY" ---
+    let periodEnd: string | undefined
+    let periodStart: string | undefined
+    const periodMatch = fullText.match(/ESTRATTO CONTO AL (\d{2})\/(\d{2})\/(\d{4})/)
+    if (periodMatch) {
+        periodEnd = `${periodMatch[1]}/${periodMatch[2]}/${periodMatch[3]}`
+    }
+
+    // --- Account number: "conto corrente di corrispondenza n. 00445/35652638" ---
+    let accountNumber: string | undefined
+    const accMatch = fullText.match(/conto corrente di corrispondenza n\.?\s*(\d{5})\/?\.?\s*0*(\d+)/i)
+    if (accMatch) {
+        accountNumber = `${accMatch[1]}/${accMatch[2]}`
+    }
+
+    // --- Holder: uppercase name followed by address ---
+    let holder: string | undefined
+    const holderMatch = fullText.match(/\n([A-Z][A-Z ]{3,}(?:;[A-Z ]+)*)\n(?:V(?:IALE|IA)\s|PIAZZ|CORSO\s|STRADA\s|LOCALIT|LARGO\s)/m)
+    if (holderMatch) {
+        holder = holderMatch[1].trim()
+    }
+
+    // --- SALDO INIZIALE ---
+    let saldoIniziale = 0
+    const saldoIniMatch = fullText.match(/^(\d{2}\.\d{2}\.\d{2})\s+([\d.,]+)\s+SALDO INIZIALE/m)
+    if (saldoIniMatch) {
+        saldoIniziale = parseItalianNumber(saldoIniMatch[2])
+        // Derive period start from saldo iniziale date (= end of previous period + 1 day)
+        const iniDate = saldoIniMatch[1] // DD.MM.YY
+        const [d, m, y] = iniDate.split('.')
+        const fullYear = parseInt(y) < 50 ? `20${y}` : `19${y}`
+        // Period start = day after SALDO INIZIALE date
+        const startDate = new Date(`${fullYear}-${m}-${d}`)
+        startDate.setDate(startDate.getDate() + 1)
+        const sd = String(startDate.getDate()).padStart(2, '0')
+        const sm = String(startDate.getMonth() + 1).padStart(2, '0')
+        const sy = startDate.getFullYear()
+        periodStart = `${sd}/${sm}/${sy}`
+    }
+
+    // --- SALDO FINALE ---
+    let saldoFinale = 0
+    const saldoFinMatch = fullText.match(/^(\d{2}\.\d{2}\.\d{2})\s+([\d.,]+)\s+SALDO FINALE/m)
+    if (saldoFinMatch) {
+        saldoFinale = parseItalianNumber(saldoFinMatch[2])
+    }
+
+    if (saldoFinale === 0 && saldoIniziale === 0) return null
+
+    // --- Parse movements ---
+    // Format: DD.MM.YY DD.MM.YY [* ]<amount> <reference>\t<description>
+    // Multi-line descriptions: continuation lines start with non-date text
+    const movements: TextCCMovement[] = []
+    const lines = fullText.split('\n')
+
+    // Page break markers to skip
+    const isPageBreak = (line: string) =>
+        /Imposta di bollo assolta/i.test(line) ||
+        /AVVERTENZA.*informiamo/i.test(line) ||
+        /Capitale Sociale/i.test(line) ||
+        /Sede Legale/i.test(line) ||
+        /Estratto conto n\./i.test(line) ||
+        /conto corrente di corrispondenza/i.test(line) ||
+        /^\s*-- \d+ (?:di|of) \d+ --\s*$/.test(line) ||
+        /^\s*Data\s+Valuta\s+Mov/i.test(line) ||
+        /^\s*\d+\s+Estratto conto/i.test(line)
+
+    // Movement line pattern: DD.MM.YY DD.MM.YY [* ]<amount> <ref>\t<description>
+    const movRe = /^(\d{2}\.\d{2}\.\d{2})\s+(\d{2}\.\d{2}\.\d{2})\s+(\*\s+)?([\d.,]+)\s+(\d{7,})\t(.*)$/
+    // SALDO INIZIALE/FINALE — not movements
+    const saldoRe = /SALDO\s+(INIZIALE|FINALE)/
+
+    let inMovements = false
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+
+        // Start scanning after SALDO INIZIALE
+        if (saldoRe.test(line) && line.includes('INIZIALE')) {
+            inMovements = true
+            continue
+        }
+        if (saldoRe.test(line) && line.includes('FINALE')) {
+            break
+        }
+        if (!inMovements) continue
+        if (isPageBreak(line)) continue
+        if (line.trim().length === 0) continue
+
+        const match = line.match(movRe)
+        if (match) {
+            const [, txDateRaw, valDateRaw, , amountRaw, , description] = match
+            const amount = parseItalianNumber(amountRaw)
+            if (amount === 0) continue
+
+            // Convert DD.MM.YY to DD/MM/YYYY
+            const toFullDate = (ddmmyy: string) => {
+                const [dd, mm, yy] = ddmmyy.split('.')
+                const fullY = parseInt(yy) < 50 ? `20${yy}` : `19${yy}`
+                return `${dd}/${mm}/${fullY}`
+            }
+
+            // Collect continuation lines (description overflow)
+            let fullDesc = description.trim()
+            while (i + 1 < lines.length) {
+                const nextLine = lines[i + 1]
+                if (!nextLine || nextLine.trim().length === 0) break
+                if (movRe.test(nextLine)) break
+                if (saldoRe.test(nextLine)) break
+                if (isPageBreak(nextLine)) { i++; continue }
+                // Continuation line: doesn't start with date pattern
+                if (/^\d{2}\.\d{2}\.\d{2}\s/.test(nextLine)) break
+                fullDesc += ' ' + nextLine.trim()
+                i++
+            }
+
+            // Classify dare (outflow, negative) vs avere (inflow, positive)
+            const sign = classifyCAMovementSign(fullDesc)
+            movements.push({
+                date: toFullDate(txDateRaw),
+                valueDate: toFullDate(valDateRaw),
+                amount: amount * sign,
+                description: fullDesc,
+            })
+        }
+    }
+
+    // COMPETENZE / SBILANCIO — often a separate movement
+    const sbilancioMatch = fullText.match(/SBILANCIO COMPETENZE\s+([\d.,]+)/i) ||
+        fullText.match(/([\d.,]+)\s+SBILANCIO COMPETENZE/i)
+    // Check if COMPETENZE movement is already captured (it usually is via the movements section)
+    const hasCompetenzeMov = movements.some(m =>
+        /COMPETENZE\s+LIQUIDAZIONE|SBILANCIO\s+COMPETENZE/i.test(m.description)
+    )
+
+    // If we found SBILANCIO but it's not in movements, add it
+    if (sbilancioMatch && !hasCompetenzeMov) {
+        const sbilancioAmt = parseItalianNumber(sbilancioMatch[1])
+        if (sbilancioAmt !== 0) {
+            // SBILANCIO COMPETENZE is typically an outflow (bank charges > interest)
+            movements.push({
+                date: periodEnd || '',
+                amount: -sbilancioAmt, // usually negative (net charge)
+                description: 'SBILANCIO COMPETENZE',
+            })
+        }
+    }
+
+    const movementsSum = movements.reduce((s, m) => s + m.amount, 0)
+
+    return {
+        saldoIniziale,
+        saldoFinale,
+        periodStart,
+        periodEnd,
+        movements,
+        movementsSum,
+        bankDetected,
+        accountNumber,
+        holder,
+        isCC: true as const,
+    }
+}
+
+/**
+ * Classify a CA EC movement as inflow (+1) or outflow (-1) based on description.
+ * Returns the sign multiplier.
+ *
+ * IMPORTANT: Outflows are checked FIRST because fund names may contain inflow keywords
+ * (e.g., "SOTTOSC PAC FONDI ORD.:... AMUNDI DIVIDENDO I TA" — subscription to a fund
+ * whose name includes "DIVIDENDO" would be misclassified as a dividend receipt).
+ */
+function classifyCAMovementSign(desc: string): number {
+    const d = desc.toUpperCase()
+
+    // ── SPECIAL CASES (must come first — override general patterns) ──
+    // "STORNO ACCREDITO" = reversal of a credit → outflow (NOT the same as "ACCREDITO")
+    if (/\bSTORNO\b/.test(d)) return -1
+    // "GP SMART prelievo" = portfolio withdrawal INTO bank account → inflow
+    if (/\bGP\s+SMART\b/.test(d)) return /\bPRELIEVO\b/.test(d) ? 1 : -1
+    // Lehman Bros / generic partial refund or distribution → inflow
+    if (/\bRIMB\.?\s*PARZI/.test(d)) return 1
+    if (/\bDISTRIBUZI/.test(d)) return 1
+    // "FUSIONE DI ETF" → usually a debit (shares removed) but no cash flow → outflow
+    if (/\bFUSIONE\b/.test(d)) return -1
+    // "RIMBORSO TIME-OUT RITIRO BANCONOTE" = ATM refund → inflow
+    if (/\bRIMBORSO\s+TIME/i.test(d)) return 1
+    // "PROVENTO SU..." = investment yield → inflow
+    if (/\bPROVENTO\b/.test(d)) return 1
+    // "VERS.ASS." abbreviation of "versamento assegni" → inflow
+    if (/\bVERS\.?\s*ASS/.test(d)) return 1
+
+    // ── Definite OUTFLOWS (checked before inflows to prevent fund-name collisions) ──
+    if (/\bSOTTOSC/.test(d)) return -1                 // fund subscription (any variant)
+    if (/\bSDD\b/.test(d)) return -1                   // direct debit
+    if (/\bBOLLO\b/.test(d)) return -1                 // stamp tax
+    if (/\bIMPOSTA\b/.test(d)) return -1               // tax
+    if (/\bPOS\s+CARTA\b|\bPAGOBANCOMAT\b/.test(d)) return -1
+    if (/\bADDEB/.test(d)) return -1                   // addebito
+    if (/\bCANONE\b/.test(d)) return -1                // monthly fee
+    if (/\bCOMMISS/.test(d)) return -1                 // commission
+    if (/\bPREL(?:EVAMENTO|\.)\b/.test(d)) return -1
+    if (/\bNOTA\s+INF\.?\s*ACQ/.test(d)) return -1     // acquisto titoli = money out
+    if (/\bCOMPETENZE\s+LIQUIDAZIONE\b/.test(d)) return -1  // bank charges
+    if (/\bF24\b|\bPAGAMENTO\s+TRIBUT/.test(d)) return -1
+    if (/\bSPESE\s/.test(d)) return -1
+    if (/\bFTT\b/.test(d)) return -1                   // financial transaction tax
+    if (/\bI24\s+WEB\b/.test(d)) return -1             // F24 online
+    if (/\bDISPOS(?:IZIONE)?\s+BONIFICO\b/.test(d)) return -1  // outgoing transfer
+    if (/\bBONIFICO\b.*\bBEN(?:EFICIARIO)?[:\s]/.test(d)) return -1
+    if (/\bCOSTO\s+DOCUMENTO\b/.test(d)) return -1     // document fee
+    if (/\bRECUPERO\s+SPESE\b/.test(d)) return -1      // expense recovery charge
+    if (/\bDESTINATARIO\b/.test(d)) return -1           // outgoing transfer
+    if (/\bGIROFONDI\b/.test(d)) return -1              // internal funds transfer out
+    if (/\bFISSATO\s+ACQUIST/.test(d)) return -1        // securities purchase on exchange
+    if (/\bCONFERIMENTO\b/.test(d)) return -1           // GP SMART conferimento = money out
+
+    // ── Definite INFLOWS (avere, positive) ──
+    if (/\bPENSIONE\b/.test(d)) return 1
+    if (/\bSTIPENDIO\b|\bEMOLUMENT[IO]\b/.test(d)) return 1
+    if (/^ORD:/.test(d)) return 1                      // "ORD:AMUNDI..." = fund distribution (must be at start)
+    if (/\bVERSAMENTO\b/.test(d)) return 1
+    if (/\bDIVIDEND[IO]\b|\bDVD\b/.test(d)) return 1   // singular + plural + abbreviation
+    if (/\bCEDOLA[:\s]/.test(d)) return 1
+    if (/\bRIMB/.test(d)) return 1                     // any rimborso = inflow (RIMB.TIT, RIMB QUOTE, RIMB PARZI, etc.)
+    if (/\bSTACCO\b/.test(d)) return 1
+    if (/\bNOTA\s+INF\.?\s*VEND/.test(d)) return 1      // vendita titoli = money in
+    if (/\bGIROCONTO\b.*\bA\s+FAVORE\b/.test(d)) return 1
+    if (/\bACCR(?:EDITO)?\b/.test(d)) return 1          // ACCREDITO + ACCR abbreviation
+    if (/\bBONIFICO\b.*\bA\s+VS\s+FAVORE\b/.test(d)) return 1
+    if (/\bBONIFICO.*ORD(?:INANTE)?[:\s]/.test(d)) return 1  // incoming transfer
+    // Foreign operations: direction depends on context (ACQUISTO = buy foreign = EUR out; VENDITA = sell foreign = EUR in)
+    if (/\bOP\.?\s*ESTERO\b/.test(d)) return /\bACQUISTO\b/.test(d) ? 1 : /\bVENDITA\b/.test(d) ? -1 : -1
+
+    // ── Ambiguous — default to outflow (safer for balance verification) ──
+    return -1
 }
